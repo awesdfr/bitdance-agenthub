@@ -5,10 +5,10 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { MessageItem } from '@/components/message-item'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { fetchMessages } from '@/lib/api'
-import { selectMessagesForConversation, useAppStore } from '@/stores/app-store'
+import { useAppStore, useMessagesForConversation } from '@/stores/app-store'
 
 export function MessageList({ conversationId }: { conversationId: string }) {
-  const messages = useAppStore(selectMessagesForConversation(conversationId))
+  const messages = useMessagesForConversation(conversationId)
   const setMessagesForConversation = useAppStore((s) => s.setMessagesForConversation)
   const messageIdsByConv = useAppStore((s) => s.messageIdsByConv[conversationId])
 

@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { createConversation } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useAppStore } from '@/stores/app-store'
+import { useAgentList, useAppStore } from '@/stores/app-store'
 
 export function NewConversationDialog({
   open,
@@ -23,7 +23,7 @@ export function NewConversationDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const agents = useAppStore((s) => Object.values(s.agents))
+  const agents = useAgentList()
   const upsertConversation = useAppStore((s) => s.upsertConversation)
   const setActive = useAppStore((s) => s.setActiveConversation)
 

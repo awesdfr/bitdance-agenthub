@@ -9,10 +9,10 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { fetchAgents, fetchConversations } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { selectConversationList, useAppStore } from '@/stores/app-store'
+import { useAppStore, useConversationList } from '@/stores/app-store'
 
 export function Sidebar() {
-  const conversations = useAppStore(selectConversationList)
+  const conversations = useConversationList()
   const activeId = useAppStore((s) => s.activeConversationId)
   const setActive = useAppStore((s) => s.setActiveConversation)
   const setConversations = useAppStore((s) => s.setConversations)

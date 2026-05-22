@@ -253,12 +253,25 @@ export const useAppStore = create<AppState>()(
   })),
 )
 
-// ─── 派生 selector（避免组件里现场 filter）────────
-export const selectMessagesForConversation = (conversationId: string) => (s: AppState) =>
-  (s.messageIdsByConv[conversationId] ?? []).map((id) => s.messages[id]).filter(Boolean)
+// ─── 派生 hooks ──────────────────────────────────────
+// 用 useShallow 防止派生数组每次新引用导致无限渲染（Zustand 5 标准做法）。
+import { useShallow } from 'zustand/react/shallow'
 
-export const selectActiveConversation = (s: AppState) =>
-  s.activeConversationId ? s.conversations[s.activeConversationId] : null
+export const useMessagesForConversation = (conversationId: string) =>
+  useAppStore(
+    useShallow((s) =>
+      (s.messageIdsByConv[conversationId] ?? []).map((id) => s.messages[id]).filter(Boolean),
+    ),
+  )
 
-export const selectConversationList = (s: AppState) =>
-  Object.values(s.conversations).sort((a, b) => b.updatedAt - a.updatedAt)
+export const useActiveConversation = () =>
+  useAppStore((s) => (s.activeConversationId ? s.conversations[s.activeConversationId] : null))
+
+export const useConversationList = () =>
+  useAppStore(
+    useShallow((s) =>
+      Object.values(s.conversations).sort((a, b) => b.updatedAt - a.updatedAt),
+    ),
+  )
+
+export const useAgentList = () => useAppStore(useShallow((s) => Object.values(s.agents)))

@@ -4,10 +4,10 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { MessageInput } from '@/components/message-input'
 import { MessageList } from '@/components/message-list'
-import { selectActiveConversation, useAppStore } from '@/stores/app-store'
+import { useActiveConversation, useAppStore } from '@/stores/app-store'
 
 export function ChatPanel() {
-  const conv = useAppStore(selectActiveConversation)
+  const conv = useActiveConversation()
   const agents = useAppStore((s) => s.agents)
   const streamConnected = useAppStore((s) => s.streamConnected)
 
