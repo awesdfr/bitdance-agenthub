@@ -42,12 +42,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
   const isGroup = conversation?.mode === 'group'
 
-  // 可被 @ 的 agent：群聊里非 Orchestrator 的成员
+  // 可被 @ 的 agent：群聊里所有成员，包含 Orchestrator
+  // (@ Orchestrator 是合法语义：用户明确请求 Orchestrator 接手)
   const candidates = useMemo<AgentRow[]>(() => {
     if (!conversation) return []
     return conversation.agentIds
       .map((id) => agents[id])
-      .filter((a): a is AgentRow => Boolean(a) && !a.isOrchestrator)
+      .filter((a): a is AgentRow => Boolean(a))
   }, [conversation, agents])
 
   // 过滤候选
@@ -167,16 +168,17 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     if (!text || sending || isRunning) return
 
     const tempId = `temp_${nanoid()}`
+    const parentId = replyTargetId ?? undefined
     addLocalUserMessage({
       tempId,
       conversationId,
       content: text,
       mentionedAgentIds: mentionedIds,
+      parentMessageId: parentId,
     })
     setContent('')
     setMentionedIds([])
     setTrigger(null)
-    const parentId = replyTargetId ?? undefined
     if (replyTargetId) setReplyTarget(conversationId, null)
     setSending(true)
 

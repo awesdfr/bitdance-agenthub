@@ -16,6 +16,8 @@ export function MessageItem({ message }: { message: MessageRow }) {
   const agent = message.agentId ? agentsMap[message.agentId] : null
   const dispatch = useDispatchForMessage(message.id)
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
+  const highlightMessage = useAppStore((s) => s.highlightMessage)
+  const isHighlighted = useAppStore((s) => s.highlightedMessageId === message.id)
   const parentMessage = useAppStore((s) =>
     message.parentMessageId ? s.messages[message.parentMessageId] : null,
   )
@@ -27,8 +29,24 @@ export function MessageItem({ message }: { message: MessageRow }) {
     .map((id) => agentsMap[id])
     .filter(Boolean)
 
+  const jumpToParent = () => {
+    if (!parentMessage) return
+    const el = document.getElementById(`message-${parentMessage.id}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    highlightMessage(parentMessage.id)
+  }
+
   return (
-    <div className={cn('group flex gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200', isUser && 'flex-row-reverse')}>
+    <div
+      id={`message-${message.id}`}
+      className={cn(
+        'group flex gap-3 rounded-lg transition-shadow duration-300 animate-in fade-in slide-in-from-bottom-1',
+        isUser && 'flex-row-reverse',
+        isHighlighted && 'ring-2 ring-primary ring-offset-2',
+      )}
+    >
       {isUser ? (
         <Avatar className="size-8 shrink-0 bg-primary text-primary-foreground">
           <AvatarFallback className="bg-primary text-sm text-primary-foreground">
@@ -74,10 +92,14 @@ export function MessageItem({ message }: { message: MessageRow }) {
             isUser && 'bg-primary/5 border-primary/20',
           )}
         >
-          {/* 被引用消息预览 */}
+          {/* 被引用消息预览，点击跳转到原消息 */}
           {parentMessage && (
             <div className="mb-2">
-              <QuotedMessage message={parentMessage} variant="preview" />
+              <QuotedMessage
+                message={parentMessage}
+                variant="preview"
+                onClick={jumpToParent}
+              />
             </div>
           )}
 

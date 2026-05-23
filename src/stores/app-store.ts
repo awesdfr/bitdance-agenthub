@@ -64,11 +64,16 @@ interface AppState {
 
   setReplyTarget(conversationId: string, messageId: string | null): void
 
+  /** 高亮指定消息 1.5 秒（点击「引用」预览时的跳转反馈） */
+  highlightedMessageId: string | null
+  highlightMessage(messageId: string): void
+
   addLocalUserMessage(args: {
     tempId: string
     conversationId: string
     content: string
     mentionedAgentIds: string[]
+    parentMessageId?: string | null
   }): void
   replaceLocalMessageId(tempId: string, realId: string): void
 
@@ -87,6 +92,7 @@ export const useAppStore = create<AppState>()(
     activeConversationId: null,
     previewArtifactId: null,
     replyTargetByConv: {},
+    highlightedMessageId: null,
     streamConnected: false,
 
     setStreamConnected: (connected) =>
@@ -168,7 +174,22 @@ export const useAppStore = create<AppState>()(
         else delete s.replyTargetByConv[conversationId]
       }),
 
-    addLocalUserMessage: ({ tempId, conversationId, content, mentionedAgentIds }) =>
+    highlightMessage: (messageId) => {
+      set((s) => {
+        s.highlightedMessageId = messageId
+      })
+      setTimeout(() => {
+        // 仅在仍是同一目标时清除（避免连续点击的竞态）
+        const current = useAppStore.getState().highlightedMessageId
+        if (current === messageId) {
+          useAppStore.setState((s) => {
+            s.highlightedMessageId = null
+          })
+        }
+      }, 1500)
+    },
+
+    addLocalUserMessage: ({ tempId, conversationId, content, mentionedAgentIds, parentMessageId }) =>
       set((s) => {
         s.messages[tempId] = {
           id: tempId,
@@ -177,7 +198,7 @@ export const useAppStore = create<AppState>()(
           agentId: null,
           parts: [{ type: 'text', content }] as MessagePart[],
           status: 'complete',
-          parentMessageId: null,
+          parentMessageId: parentMessageId ?? null,
           mentionedAgentIds,
           runId: null,
           createdAt: Date.now(),
