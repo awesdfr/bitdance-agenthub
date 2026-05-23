@@ -1,4 +1,4 @@
-import type { AgentRow, ArtifactRow, ConversationRow, MessageRow } from '@/db/schema'
+import type { AgentRow, ArtifactRow, AttachmentRow, ConversationRow, MessageRow } from '@/db/schema'
 
 export interface ArtifactListItem {
   id: string
@@ -122,6 +122,7 @@ export interface SendMessageBody {
   content: string
   mentionedAgentIds?: string[]
   parentMessageId?: string
+  attachmentIds?: string[]
 }
 
 export interface SendMessageResult {
@@ -164,4 +165,38 @@ export async function deleteArtifact(artifactId: string): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/artifacts/${artifactId}`, { method: 'DELETE' }),
   )
+}
+
+// ─── Attachments ───────────────────────────────
+export async function fetchAttachments(conversationId: string): Promise<AttachmentRow[]> {
+  const { attachments } = await json<{ attachments: AttachmentRow[] }>(
+    fetch(`/api/conversations/${conversationId}/attachments`),
+  )
+  return attachments
+}
+
+export async function uploadAttachment(
+  conversationId: string,
+  file: File,
+): Promise<AttachmentRow> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`/api/conversations/${conversationId}/attachments`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
+  }
+  const { attachment } = (await res.json()) as { attachment: AttachmentRow }
+  return attachment
+}
+
+export async function deleteAttachment(attachmentId: string): Promise<void> {
+  await json<{ ok: true }>(fetch(`/api/attachments/${attachmentId}`, { method: 'DELETE' }))
+}
+
+export function attachmentDownloadUrl(attachmentId: string): string {
+  return `/api/attachments/${attachmentId}`
 }

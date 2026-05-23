@@ -11,6 +11,20 @@ export type MessagePart =
   | { type: 'tool_use'; callId: string; toolName: string; args: unknown }
   | { type: 'tool_result'; callId: string; result: unknown; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
+  | {
+      type: 'image_attachment'
+      attachmentId: string
+      fileName: string
+      size: number
+      mimeType: string
+    }
+  | {
+      type: 'file_attachment'
+      attachmentId: string
+      fileName: string
+      size: number
+      mimeType: string
+    }
 
 // ─── 增量 delta（流式追加）─────────────────────────────────
 export type PartDelta =

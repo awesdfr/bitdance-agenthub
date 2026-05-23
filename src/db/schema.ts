@@ -113,6 +113,26 @@ export const workspaces = sqliteTable('workspaces', {
   createdAt: integer('created_at').notNull(),
 })
 
+// ─── Attachments (会话文件库) ─────────────────────────────────
+export const attachments = sqliteTable(
+  'attachments',
+  {
+    id: text('id').primaryKey(),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+
+    kind: text('kind', { enum: ['image', 'file'] }).notNull(),
+    fileName: text('file_name').notNull(),
+    filePath: text('file_path').notNull(),    // 相对 workspace.rootPath
+    size: integer('size').notNull(),
+    mimeType: text('mime_type').notNull(),
+
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_attachments_conv').on(t.conversationId)],
+)
+
 // ─── AgentRuns ───────────────────────────────────────────────
 export const agentRuns = sqliteTable(
   'agent_runs',
@@ -152,6 +172,9 @@ export type ArtifactInsert = typeof artifacts.$inferInsert
 
 export type WorkspaceRow = typeof workspaces.$inferSelect
 export type WorkspaceInsert = typeof workspaces.$inferInsert
+
+export type AttachmentRow = typeof attachments.$inferSelect
+export type AttachmentInsert = typeof attachments.$inferInsert
 
 export type AgentRunRow = typeof agentRuns.$inferSelect
 export type AgentRunInsert = typeof agentRuns.$inferInsert

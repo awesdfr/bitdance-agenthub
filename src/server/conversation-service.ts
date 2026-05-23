@@ -178,6 +178,7 @@ export interface SendMessageArgs {
   content: string
   mentionedAgentIds?: string[]
   parentMessageId?: string
+  attachmentIds?: string[]
 }
 
 export async function sendMessage(args: SendMessageArgs) {
@@ -191,6 +192,33 @@ export async function sendMessage(args: SendMessageArgs) {
   const now = Date.now()
   const messageId = newMessageId()
   const parts: MessagePart[] = [{ type: 'text', content: args.content }]
+
+  // 把附件作为新 parts 加到 message
+  if (args.attachmentIds && args.attachmentIds.length > 0) {
+    const rows = await db.query.attachments.findMany({
+      where: (a, { inArray }) => inArray(a.id, args.attachmentIds!),
+    })
+    for (const r of rows) {
+      if (r.conversationId !== args.conversationId) continue // 防越权引用其他会话的附件
+      parts.push(
+        r.kind === 'image'
+          ? {
+              type: 'image_attachment',
+              attachmentId: r.id,
+              fileName: r.fileName,
+              size: r.size,
+              mimeType: r.mimeType,
+            }
+          : {
+              type: 'file_attachment',
+              attachmentId: r.id,
+              fileName: r.fileName,
+              size: r.size,
+              mimeType: r.mimeType,
+            },
+      )
+    }
+  }
 
   await db.insert(schema.messages).values({
     id: messageId,
