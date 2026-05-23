@@ -43,7 +43,7 @@ export function MessageItem({ message }: { message: MessageRow }) {
     <div
       id={`message-${message.id}`}
       className={cn(
-        'group flex gap-3 rounded-lg transition-shadow duration-300 animate-in fade-in slide-in-from-bottom-1',
+        'group flex items-start gap-3 rounded-lg transition-shadow duration-300 animate-in fade-in slide-in-from-bottom-1',
         isUser && 'flex-row-reverse',
         isHighlighted && 'ring-2 ring-primary ring-offset-2',
       )}

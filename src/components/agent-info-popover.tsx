@@ -41,7 +41,7 @@ export function AgentInfoPopover({
       <Popover>
         <PopoverTrigger
           className={cn(
-            'cursor-pointer rounded-full p-0 transition focus:outline-none focus:ring-2 focus:ring-primary/40',
+            'inline-flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
             className,
           )}
           aria-label={`查看 ${agent.name} 的资料`}
