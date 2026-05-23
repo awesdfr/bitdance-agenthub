@@ -132,6 +132,26 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   }
 }
 
+// ─── 重命名会话 ──────────────────────────────────────────
+export async function renameConversation(conversationId: string, title: string) {
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, conversationId),
+  })
+  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+  const trimmed = title.trim()
+  if (!trimmed) throw new Error('Title cannot be empty')
+  if (trimmed.length > 100) throw new Error('Title too long (max 100)')
+
+  const now = Date.now()
+  await db
+    .update(schema.conversations)
+    .set({ title: trimmed, updatedAt: now })
+    .where(eq(schema.conversations.id, conversationId))
+
+  return { ...conv, title: trimmed, updatedAt: now }
+}
+
 // ─── 添加 Agent 到现有会话 ──────────────────────────────
 export interface AddAgentsArgs {
   conversationId: string

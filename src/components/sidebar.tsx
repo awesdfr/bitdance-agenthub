@@ -1,7 +1,7 @@
 'use client'
 
-import { Bot, Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Bot, Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { AgentLibrary } from '@/components/agent-library'
 import { AgentAvatar } from '@/components/agent-avatar'
@@ -19,8 +19,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { deleteConversation as deleteConversationAPI, fetchAgents, fetchConversations } from '@/lib/api'
+import {
+  deleteConversation as deleteConversationAPI,
+  fetchAgents,
+  fetchConversations,
+  renameConversation as renameConversationAPI,
+} from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { AgentRow, ConversationRow } from '@/db/schema'
 import { useAppStore, useConversationList } from '@/stores/app-store'
 
 type Mode = 'conversations' | 'artifacts' | 'agents'
@@ -33,12 +39,14 @@ export function Sidebar() {
   const setAgents = useAppStore((s) => s.setAgents)
   const agents = useAppStore((s) => s.agents)
   const removeConversation = useAppStore((s) => s.removeConversation)
+  const upsertConversation = useAppStore((s) => s.upsertConversation)
 
   const [mode, setMode] = useState<Mode>('conversations')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchConversations().then(setConversations).catch(console.error)
@@ -191,44 +199,27 @@ export function Sidebar() {
                     }
 
                     return (
-                      <div
+                      <ConversationItem
                         key={c.id}
-                        className={cn(
-                          'group flex w-full items-center gap-3 rounded-md px-2 py-2 transition hover:bg-accent',
-                          isActive && 'bg-accent',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setActive(c.id)}
-                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        >
-                          {firstAgent ? (
-                            <AgentAvatar agent={firstAgent} size="lg" />
-                          ) : (
-                            <Avatar className="size-9 shrink-0">
-                              <AvatarFallback className="text-sm">?</AvatarFallback>
-                            </Avatar>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium">{c.title}</div>
-                            <div className="truncate text-xs text-muted-foreground">
-                              {c.mode === 'single' ? '单聊' : '群聊'} · {c.agentIds.length} 位 Agent
-                            </div>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setDeleteTargetId(c.id)
-                          }}
-                          title="删除会话"
-                          className="opacity-0 transition group-hover:opacity-100 hover:text-red-600"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
-                      </div>
+                        conversation={c}
+                        firstAgent={firstAgent}
+                        isActive={isActive}
+                        isRenaming={renamingId === c.id}
+                        onActivate={() => setActive(c.id)}
+                        onStartRename={() => setRenamingId(c.id)}
+                        onFinishRename={async (next) => {
+                          const trimmed = next.trim()
+                          setRenamingId(null)
+                          if (!trimmed || trimmed === c.title) return
+                          try {
+                            const updated = await renameConversationAPI(c.id, trimmed)
+                            upsertConversation(updated)
+                          } catch (err) {
+                            console.error('[Sidebar] rename failed', err)
+                          }
+                        }}
+                        onRequestDelete={() => setDeleteTargetId(c.id)}
+                      />
                     )
                   })}
             </div>
@@ -266,6 +257,130 @@ export function Sidebar() {
         </DialogContent>
       </Dialog>
     </aside>
+  )
+}
+
+function ConversationItem({
+  conversation,
+  firstAgent,
+  isActive,
+  isRenaming,
+  onActivate,
+  onStartRename,
+  onFinishRename,
+  onRequestDelete,
+}: {
+  conversation: ConversationRow
+  firstAgent: AgentRow | null
+  isActive: boolean
+  isRenaming: boolean
+  onActivate: () => void
+  onStartRename: () => void
+  onFinishRename: (next: string) => void | Promise<void>
+  onRequestDelete: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'group flex w-full items-center gap-3 rounded-md px-2 py-2 transition hover:bg-accent',
+        isActive && 'bg-accent',
+      )}
+    >
+      <button
+        type="button"
+        onClick={onActivate}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        disabled={isRenaming}
+      >
+        {firstAgent ? (
+          <AgentAvatar agent={firstAgent} size="lg" />
+        ) : (
+          <Avatar className="size-9 shrink-0">
+            <AvatarFallback className="text-sm">?</AvatarFallback>
+          </Avatar>
+        )}
+        <div className="min-w-0 flex-1">
+          {isRenaming ? (
+            <RenameInput
+              key={conversation.id}
+              initial={conversation.title}
+              onCommit={(next) => onFinishRename(next)}
+              onCancel={() => onFinishRename(conversation.title)}
+            />
+          ) : (
+            <div className="truncate text-sm font-medium">{conversation.title}</div>
+          )}
+          <div className="truncate text-xs text-muted-foreground">
+            {conversation.mode === 'single' ? '单聊' : '群聊'} · {conversation.agentIds.length} 位 Agent
+          </div>
+        </div>
+      </button>
+      {!isRenaming && (
+        <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onStartRename()
+            }}
+            title="重命名"
+            className="hover:text-foreground"
+          >
+            <Pencil className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRequestDelete()
+            }}
+            title="删除会话"
+            className="hover:text-red-600"
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RenameInput({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string
+  onCommit: (next: string) => void
+  onCancel: () => void
+}) {
+  const [draft, setDraft] = useState(initial)
+  const ref = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+
+  return (
+    <input
+      ref={ref}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={() => onCommit(draft)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onCommit(draft)
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          onCancel()
+        }
+      }}
+      maxLength={100}
+      className="w-full rounded border border-primary/40 bg-background px-1.5 py-0.5 text-sm font-medium outline-none ring-2 ring-primary/30"
+    />
   )
 }
 

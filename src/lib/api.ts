@@ -115,6 +115,20 @@ export async function addAgentsToConversation(
   return conversation
 }
 
+export async function renameConversation(
+  conversationId: string,
+  title: string,
+): Promise<ConversationRow> {
+  const { conversation } = await json<{ conversation: ConversationRow }>(
+    fetch(`/api/conversations/${conversationId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  )
+  return conversation
+}
+
 // ─── Messages ───────────────────────────────────
 export async function fetchMessages(conversationId: string): Promise<MessageRow[]> {
   const { messages } = await json<{ messages: MessageRow[] }>(

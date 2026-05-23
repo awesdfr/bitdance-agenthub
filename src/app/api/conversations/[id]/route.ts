@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { addAgentsToConversation, deleteConversation } from '@/server/conversation-service'
+import {
+  addAgentsToConversation,
+  deleteConversation,
+  renameConversation,
+} from '@/server/conversation-service'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -18,9 +22,14 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
   }
 }
 
-const PatchBody = z.object({
-  addAgentIds: z.array(z.string()).min(1),
-})
+const PatchBody = z
+  .object({
+    addAgentIds: z.array(z.string()).min(1).optional(),
+    title: z.string().min(1).max(100).optional(),
+  })
+  .refine((d) => d.addAgentIds !== undefined || d.title !== undefined, {
+    message: 'Either addAgentIds or title is required',
+  })
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params
@@ -31,10 +40,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    const conversation = await addAgentsToConversation({
-      conversationId: id,
-      agentIds: parsed.data.addAgentIds,
-    })
+    let conversation
+    if (parsed.data.title !== undefined) {
+      conversation = await renameConversation(id, parsed.data.title)
+    }
+    if (parsed.data.addAgentIds !== undefined) {
+      conversation = await addAgentsToConversation({
+        conversationId: id,
+        agentIds: parsed.data.addAgentIds,
+      })
+    }
     return NextResponse.json({ conversation })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
