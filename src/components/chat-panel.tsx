@@ -4,7 +4,7 @@ import { FolderOpen, MessagesSquare, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
-import { AgentAvatar } from '@/components/agent-avatar'
+import { AgentInfoPopover } from '@/components/agent-info-popover'
 import { FileLibraryDialog } from '@/components/file-library-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,7 +45,12 @@ export function ChatPanel() {
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex shrink-0 -space-x-2">
             {participantAgents.map((a) => (
-              <AgentAvatar key={a.id} agent={a} size="md" className="border-2 border-background" />
+              <AgentInfoPopover
+                key={a.id}
+                agent={a}
+                size="md"
+                avatarClassName="border-2 border-background"
+              />
             ))}
           </div>
           <div className="min-w-0">

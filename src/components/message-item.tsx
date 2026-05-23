@@ -3,6 +3,7 @@
 import { AtSign, CornerUpLeft, Loader2 } from 'lucide-react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
+import { AgentInfoPopover } from '@/components/agent-info-popover'
 import { DispatchPlanCard } from '@/components/dispatch-plan-card'
 import { PartList } from '@/components/message-parts'
 import { QuotedMessage } from '@/components/quoted-message'
@@ -54,10 +55,10 @@ export function MessageItem({ message }: { message: MessageRow }) {
           </AvatarFallback>
         </Avatar>
       ) : agent ? (
-        <AgentAvatar
+        <AgentInfoPopover
           agent={agent}
           size="md"
-          className={cn(
+          avatarClassName={cn(
             'transition-all',
             message.status === 'streaming' && 'ring-2 ring-primary ring-offset-1',
           )}
