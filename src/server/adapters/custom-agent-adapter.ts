@@ -86,6 +86,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       let textPartIndex = -1
       let textBuffer = ''
+      let thinkingPartIndex = -1
+      let reasoningBuffer = ''
+      let nextPartIndex = 0
       const toolCallBuffer = new Map<number, AccumulatingToolCall>()
 
       let stream: Awaited<ReturnType<typeof client.chat.completions.create>>
@@ -110,11 +113,35 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         if (signal.aborted) return
         const choice = chunk.choices[0]
         if (!choice) continue
-        const delta = choice.delta
+        // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
+        // 字段，OpenAI SDK 的官方类型不含，这里宽放成扩展形态。
+        const delta = choice.delta as OpenAI.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'] & {
+          reasoning_content?: string
+        }
+
+        // —— reasoning_content (thinking mode) —— 先 yield 出来让 UI 渲染 thinking part
+        if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+          if (thinkingPartIndex < 0) {
+            thinkingPartIndex = nextPartIndex++
+            yield baseEvent(input, {
+              type: 'part.start',
+              messageId,
+              partIndex: thinkingPartIndex,
+              part: { type: 'thinking', content: '' },
+            })
+          }
+          reasoningBuffer += delta.reasoning_content
+          yield baseEvent(input, {
+            type: 'part.delta',
+            messageId,
+            partIndex: thinkingPartIndex,
+            delta: { type: 'thinking.append', text: delta.reasoning_content },
+          })
+        }
 
         if (typeof delta.content === 'string' && delta.content.length > 0) {
           if (textPartIndex < 0) {
-            textPartIndex = 0
+            textPartIndex = nextPartIndex++
             yield baseEvent(input, {
               type: 'part.start',
               messageId,
@@ -148,6 +175,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         if (choice.finish_reason) finishReason = choice.finish_reason
       }
 
+      if (thinkingPartIndex >= 0) {
+        yield baseEvent(input, { type: 'part.end', messageId, partIndex: thinkingPartIndex })
+      }
       if (textPartIndex >= 0) {
         yield baseEvent(input, { type: 'part.end', messageId, partIndex: textPartIndex })
       }
@@ -155,8 +185,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       const toolCalls = Array.from(toolCallBuffer.values()).filter((tc) => tc.id && tc.name)
 
       // 写回 assistant message
-      messages.push({
-        role: 'assistant',
+      // DeepSeek thinking-mode 模型要求把 reasoning_content 一起回传到下一轮，
+      // 否则 API 返回 "The reasoning_content in the thinking mode must be passed back".
+      // OpenAI SDK 类型不识 reasoning_content，用扩展 cast。
+      const assistantMsg = {
+        role: 'assistant' as const,
         content: textBuffer || null,
         tool_calls:
           toolCalls.length > 0
@@ -166,7 +199,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
                 function: { name: tc.name, arguments: tc.argsBuffer || '{}' },
               }))
             : undefined,
-      })
+        ...(reasoningBuffer ? { reasoning_content: reasoningBuffer } : {}),
+      }
+      messages.push(assistantMsg as ChatMessage)
 
       if (toolCalls.length === 0 || finishReason === 'stop') {
         yield baseEvent(input, { type: 'message.end', messageId })
