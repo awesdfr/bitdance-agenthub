@@ -26,6 +26,32 @@ export async function fetchAgents(): Promise<AgentRow[]> {
   return agents
 }
 
+export interface CreateAgentBody {
+  name: string
+  avatar: string
+  description: string
+  capabilities: string[]
+  systemPrompt: string
+  modelProvider: 'anthropic' | 'openai' | 'deepseek'
+  modelId: string
+  toolNames: string[]
+}
+
+export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {
+  const { agent } = await json<{ agent: AgentRow }>(
+    fetch('/api/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return agent
+}
+
+export async function deleteAgent(agentId: string): Promise<void> {
+  await json<{ ok: true }>(fetch(`/api/agents/${agentId}`, { method: 'DELETE' }))
+}
+
 // ─── Conversations ──────────────────────────────
 export async function fetchConversations(): Promise<ConversationRow[]> {
   const { conversations } = await json<{ conversations: ConversationRow[] }>(

@@ -1,8 +1,9 @@
 'use client'
 
-import { Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from 'lucide-react'
+import { Bot, Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { AgentLibrary } from '@/components/agent-library'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { NewConversationDialog } from '@/components/new-conversation-dialog'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -20,7 +21,7 @@ import { deleteConversation as deleteConversationAPI, fetchAgents, fetchConversa
 import { cn } from '@/lib/utils'
 import { useAppStore, useConversationList } from '@/stores/app-store'
 
-type Mode = 'conversations' | 'artifacts'
+type Mode = 'conversations' | 'artifacts' | 'agents'
 
 export function Sidebar() {
   const conversations = useConversationList()
@@ -111,6 +112,14 @@ export function Sidebar() {
           onClick={() => setMode('artifacts')}
           icon={<Layers className="size-4" />}
           label="产物库"
+        />
+        <TabButton
+          mode={mode}
+          self="agents"
+          collapsed={collapsed}
+          onClick={() => setMode('agents')}
+          icon={<Bot className="size-4" />}
+          label="Agents"
         />
       </div>
 
@@ -216,9 +225,10 @@ export function Sidebar() {
             </div>
           </ScrollArea>
         </>
-      ) : (
-        // 产物库
+      ) : mode === 'artifacts' ? (
         !collapsed && <ArtifactLibrary />
+      ) : (
+        !collapsed && <AgentLibrary />
       )}
 
       <NewConversationDialog open={dialogOpen} onOpenChange={setDialogOpen} />

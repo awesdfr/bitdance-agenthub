@@ -48,6 +48,8 @@ interface AppState {
   removeConversation(id: string): void
 
   setAgents(list: AgentRow[]): void
+  upsertAgent(agent: AgentRow): void
+  removeAgent(agentId: string): void
 
   setMessagesForConversation(conversationId: string, list: MessageRow[]): void
   setActiveConversation(id: string | null): void
@@ -110,6 +112,16 @@ export const useAppStore = create<AppState>()(
     setAgents: (list) =>
       set((s) => {
         for (const a of list) s.agents[a.id] = a
+      }),
+
+    upsertAgent: (agent) =>
+      set((s) => {
+        s.agents[agent.id] = agent
+      }),
+
+    removeAgent: (agentId) =>
+      set((s) => {
+        delete s.agents[agentId]
       }),
 
     setMessagesForConversation: (conversationId, list) =>

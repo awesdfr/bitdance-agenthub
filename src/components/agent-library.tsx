@@ -1,0 +1,147 @@
+'use client'
+
+import { Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+
+import { CreateAgentDialog } from '@/components/create-agent-dialog'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { deleteAgent as deleteAgentAPI } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { useAgentList, useAppStore } from '@/stores/app-store'
+
+/**
+ * AgentLibrary — 「Agents」tab 的内容。列出内置 + 自建 Agent，
+ * 顶部入口创建新的，自建项 hover 显示删除。
+ */
+export function AgentLibrary() {
+  const agents = useAgentList()
+  const removeAgent = useAppStore((s) => s.removeAgent)
+
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const deleteTarget = deleteTargetId ? agents.find((a) => a.id === deleteTargetId) : null
+
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return
+    setDeleting(true)
+    try {
+      await deleteAgentAPI(deleteTargetId)
+      removeAgent(deleteTargetId)
+      setDeleteTargetId(null)
+    } catch (err) {
+      console.error('[AgentLibrary] delete failed', err)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-3 pt-3">
+        <Button
+          className="w-full justify-start gap-2"
+          variant="outline"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="size-4" />
+          创建 Agent
+        </Button>
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-1 p-2">
+          {agents.length === 0 ? (
+            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+              没有 Agent
+            </div>
+          ) : (
+            agents.map((a) => (
+              <div
+                key={a.id}
+                className="group flex items-start gap-2 rounded-md border bg-card px-2 py-2 transition hover:border-foreground/20"
+              >
+                <Avatar className="size-8 shrink-0">
+                  <AvatarFallback className="text-sm">{a.avatar}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-medium">{a.name}</span>
+                    {a.isBuiltin && (
+                      <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[9px] text-muted-foreground">
+                        内置
+                      </span>
+                    )}
+                    {a.isOrchestrator && (
+                      <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[9px] text-primary">
+                        Orchestrator
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">
+                    {a.description}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[9px] text-muted-foreground">
+                    {a.adapterName}
+                    {a.modelId ? ` · ${a.modelId}` : ''}
+                  </div>
+                </div>
+                {!a.isBuiltin && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDeleteTargetId(a.id)
+                    }}
+                    title="删除 Agent"
+                    className={cn(
+                      'shrink-0 self-center opacity-0 transition group-hover:opacity-100 hover:text-red-600',
+                    )}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+
+      <CreateAgentDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 Agent</DialogTitle>
+            <DialogDescription>
+              确定删除「{deleteTarget?.name}」吗？已使用该 Agent 的会话将无法继续使用它。该操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+              取消
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => void confirmDelete()}
+              disabled={deleting}
+            >
+              {deleting ? '删除中...' : '删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
