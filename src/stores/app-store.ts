@@ -4,7 +4,7 @@ import { enableMapSet } from 'immer'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
-import type { AgentRunRow, AgentRow, ArtifactRow, ConversationRow, MessageRow } from '@/db/schema'
+import type { AgentRunRow, AgentRow, ArtifactRow, AttachmentRow, ConversationRow, MessageRow } from '@/db/schema'
 import type { DispatchPlanItem, MessagePart, StreamEvent } from '@/shared/types'
 
 enableMapSet()
@@ -74,6 +74,7 @@ interface AppState {
     content: string
     mentionedAgentIds: string[]
     parentMessageId?: string | null
+    attachments?: AttachmentRow[]
   }): void
   replaceLocalMessageId(tempId: string, realId: string): void
 
@@ -189,14 +190,35 @@ export const useAppStore = create<AppState>()(
       }, 1500)
     },
 
-    addLocalUserMessage: ({ tempId, conversationId, content, mentionedAgentIds, parentMessageId }) =>
+    addLocalUserMessage: ({ tempId, conversationId, content, mentionedAgentIds, parentMessageId, attachments }) =>
       set((s) => {
+        const parts: MessagePart[] = []
+        if (content) parts.push({ type: 'text', content })
+        for (const a of attachments ?? []) {
+          parts.push(
+            a.kind === 'image'
+              ? {
+                  type: 'image_attachment',
+                  attachmentId: a.id,
+                  fileName: a.fileName,
+                  size: a.size,
+                  mimeType: a.mimeType,
+                }
+              : {
+                  type: 'file_attachment',
+                  attachmentId: a.id,
+                  fileName: a.fileName,
+                  size: a.size,
+                  mimeType: a.mimeType,
+                },
+          )
+        }
         s.messages[tempId] = {
           id: tempId,
           conversationId,
           role: 'user',
           agentId: null,
-          parts: [{ type: 'text', content }] as MessagePart[],
+          parts,
           status: 'complete',
           parentMessageId: parentMessageId ?? null,
           mentionedAgentIds,

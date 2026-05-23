@@ -703,10 +703,22 @@ function extractTextFromParts(parts: MessagePart[]): string {
     .map((p) => {
       if (p.type === 'text' || p.type === 'thinking') return p.content
       if (p.type === 'code') return '```' + p.language + '\n' + p.content + '\n```'
+      if (p.type === 'image_attachment') {
+        return `[图片附件: ${p.fileName} (${formatSize(p.size)}, ${p.mimeType}) · id=${p.attachmentId}]`
+      }
+      if (p.type === 'file_attachment') {
+        return `[文件附件: ${p.fileName} (${formatSize(p.size)}, ${p.mimeType}) · id=${p.attachmentId}]`
+      }
       return ''
     })
     .filter(Boolean)
     .join('\n\n')
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
 }
 
 function ensureIncludes(arr: string[], v: string): string[] {

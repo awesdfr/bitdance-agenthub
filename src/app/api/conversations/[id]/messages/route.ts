@@ -7,12 +7,17 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
-const SendBody = z.object({
-  content: z.string().min(1),
-  mentionedAgentIds: z.array(z.string()).optional(),
-  parentMessageId: z.string().optional(),
-  attachmentIds: z.array(z.string()).optional(),
-})
+const SendBody = z
+  .object({
+    content: z.string().default(''),
+    mentionedAgentIds: z.array(z.string()).optional(),
+    parentMessageId: z.string().optional(),
+    attachmentIds: z.array(z.string()).optional(),
+  })
+  .refine(
+    (d) => d.content.trim().length > 0 || (d.attachmentIds && d.attachmentIds.length > 0),
+    { message: '必须提供 content 或 attachmentIds 之一' },
+  )
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params

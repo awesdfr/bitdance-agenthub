@@ -206,13 +206,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
     const tempId = `temp_${nanoid()}`
     const parentId = replyTargetId ?? undefined
-    const submitContent = text || (hasAttachments ? '(附件)' : '')
     addLocalUserMessage({
       tempId,
       conversationId,
-      content: submitContent,
+      content: text,
       mentionedAgentIds: mentionedIds,
       parentMessageId: parentId,
+      attachments: pending,
     })
     setContent('')
     setMentionedIds([])
@@ -224,7 +224,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
     try {
       const { messageId } = await sendMessageAPI(conversationId, {
-        content: submitContent,
+        content: text,
         mentionedAgentIds: mentionedIds,
         parentMessageId: parentId,
         attachmentIds,

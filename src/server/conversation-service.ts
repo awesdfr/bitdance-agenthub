@@ -191,7 +191,10 @@ export async function sendMessage(args: SendMessageArgs) {
 
   const now = Date.now()
   const messageId = newMessageId()
-  const parts: MessagePart[] = [{ type: 'text', content: args.content }]
+  const parts: MessagePart[] = []
+  if (args.content && args.content.trim()) {
+    parts.push({ type: 'text', content: args.content })
+  }
 
   // 把附件作为新 parts 加到 message
   if (args.attachmentIds && args.attachmentIds.length > 0) {
