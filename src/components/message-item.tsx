@@ -18,8 +18,14 @@ export function MessageItem({ message }: { message: MessageRow }) {
   const avatar = isUser ? '我' : agent?.avatar ?? '?'
 
   return (
-    <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      <Avatar className={cn('size-8 shrink-0', isUser && 'bg-primary text-primary-foreground')}>
+    <div className={cn('flex gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200', isUser && 'flex-row-reverse')}>
+      <Avatar
+        className={cn(
+          'size-8 shrink-0 transition-all',
+          isUser && 'bg-primary text-primary-foreground',
+          !isUser && message.status === 'streaming' && 'ring-2 ring-primary ring-offset-1',
+        )}
+      >
         <AvatarFallback className={cn('text-sm', isUser && 'bg-primary text-primary-foreground')}>
           {avatar}
         </AvatarFallback>
