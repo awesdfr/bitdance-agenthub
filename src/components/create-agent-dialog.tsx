@@ -60,6 +60,7 @@ export function CreateAgentDialog({
   const [toolNames, setToolNames] = useState<Set<string>>(
     new Set(['write_artifact', 'read_artifact']),
   )
+  const [supportsVision, setSupportsVision] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,6 +76,7 @@ export function CreateAgentDialog({
       setProvider(p)
       setModelId(agent.modelId ?? PROVIDER_DEFAULTS[p].defaultModel)
       setToolNames(new Set(agent.toolNames))
+      setSupportsVision(agent.supportsVision)
     } else {
       setName('')
       setDescription('')
@@ -83,6 +85,7 @@ export function CreateAgentDialog({
       setProvider('deepseek')
       setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
       setToolNames(new Set(['write_artifact', 'read_artifact']))
+      setSupportsVision(false)
     }
     setError(null)
   }, [open, agent])
@@ -127,6 +130,7 @@ export function CreateAgentDialog({
           modelProvider: provider,
           modelId: modelId.trim(),
           toolNames: Array.from(toolNames),
+          supportsVision,
         }
         const updated = await updateAgent(agent.id, patch)
         upsertAgent(updated)
@@ -140,6 +144,7 @@ export function CreateAgentDialog({
           modelProvider: provider,
           modelId: modelId.trim(),
           toolNames: Array.from(toolNames),
+          supportsVision,
         }
         const created = await createAgent(body)
         upsertAgent(created)
@@ -249,6 +254,29 @@ export function CreateAgentDialog({
                 </label>
               ))}
             </div>
+          </div>
+
+          <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+            <Label>视觉</Label>
+            <label
+              className={cn(
+                'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                supportsVision && 'border-primary bg-primary/5',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={supportsVision}
+                onChange={(e) => setSupportsVision(e.target.checked)}
+                className="mt-0.5 accent-primary"
+              />
+              <div className="min-w-0">
+                <div className="text-xs font-medium">该模型支持视觉（多模态）</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  勾选后，发图片时会以 base64 注入 messages.content。模型不支持会被 API 拒绝 (400)，请确认你填的 modelId 真的支持视觉。
+                </div>
+              </div>
+            </label>
           </div>
 
           {error && (

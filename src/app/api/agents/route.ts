@@ -17,6 +17,7 @@ const CreateBody = z.object({
   modelProvider: z.enum(['anthropic', 'openai', 'deepseek']),
   modelId: z.string().min(1),
   toolNames: z.array(z.string()).default([]),
+  supportsVision: z.boolean().optional(),
 })
 
 export async function POST(req: NextRequest) {

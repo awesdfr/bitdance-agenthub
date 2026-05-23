@@ -26,6 +26,7 @@ export const agents = sqliteTable('agents', {
 
   isBuiltin: integer('is_builtin', { mode: 'boolean' }).notNull().default(false),
   isOrchestrator: integer('is_orchestrator', { mode: 'boolean' }).notNull().default(false),
+  supportsVision: integer('supports_vision', { mode: 'boolean' }).notNull().default(false),
 
   createdAt: integer('created_at').notNull(),
 })

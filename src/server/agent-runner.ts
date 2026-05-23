@@ -5,7 +5,8 @@ import type { AgentRow, ArtifactRow } from '@/db/schema'
 import type { DispatchPlanItem, MessagePart, StreamEvent } from '@/shared/types'
 
 import { agentRegistry } from './adapters/registry'
-import type { AdapterInput } from './adapters/types'
+import type { AdapterAttachment, AdapterInput } from './adapters/types'
+import { getAttachmentAbsolutePath } from './attachment-service'
 import { eventBus } from './event-bus'
 import { newRunId } from './ids'
 
@@ -107,6 +108,25 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
 
   const prompt = args.overridePrompt ?? extractTextFromParts(triggerMessage.parts)
 
+  // 解析 trigger message 里的附件（子 run / overridePrompt 场景不解析，避免子 agent 重复处理）
+  const attachments: AdapterAttachment[] = []
+  if (!args.overridePrompt) {
+    for (const p of triggerMessage.parts) {
+      if (p.type === 'image_attachment' || p.type === 'file_attachment') {
+        const absPath = await getAttachmentAbsolutePath(p.attachmentId)
+        if (absPath) {
+          attachments.push({
+            id: p.attachmentId,
+            fileName: p.fileName,
+            mimeType: p.mimeType,
+            kind: p.type === 'image_attachment' ? 'image' : 'file',
+            absPath,
+          })
+        }
+      }
+    }
+  }
+
   // 写 run 记录 + 发 run.start
   await insertRun(runId, args, agent.id)
   publish({
@@ -121,8 +141,8 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
 
   try {
     const result = agent.isOrchestrator
-      ? await executeOrchestratorRun(runId, signal, args, agent, workspace.rootPath, prompt)
-      : await executeSimpleRun(runId, signal, args, agent, workspace.rootPath, prompt)
+      ? await executeOrchestratorRun(runId, signal, args, agent, workspace.rootPath, prompt, attachments)
+      : await executeSimpleRun(runId, signal, args, agent, workspace.rootPath, prompt, attachments)
     return await finalizeOk(runId, args, result)
   } catch (err) {
     if (signal.aborted) {
@@ -141,11 +161,24 @@ async function executeSimpleRun(
   agent: AgentRow,
   workspacePath: string,
   prompt: string,
+  attachments: AdapterAttachment[],
 ): Promise<{ artifactIds: string[]; outputMessageIds: string[] }> {
   const toolNames = args.overrideToolNames ?? agent.toolNames
 
   const adapter = agentRegistry.getAdapter(agent)
-  const stream = adapter.stream(buildAdapterInput(args, agent, runId, prompt, workspacePath, toolNames, args.overrideSystemPrompt), signal)
+  const stream = adapter.stream(
+    buildAdapterInput(
+      args,
+      agent,
+      runId,
+      prompt,
+      workspacePath,
+      toolNames,
+      args.overrideSystemPrompt,
+      attachments,
+    ),
+    signal,
+  )
 
   return consumeStream(stream, args.agentId, runId)
 }
@@ -158,6 +191,7 @@ async function executeOrchestratorRun(
   agent: AgentRow,
   workspacePath: string,
   userPrompt: string,
+  attachments: AdapterAttachment[],
 ): Promise<{ artifactIds: string[]; outputMessageIds: string[] }> {
   const conv = await db.query.conversations.findFirst({
     where: eq(schema.conversations.id, args.conversationId),
@@ -182,7 +216,7 @@ async function executeOrchestratorRun(
   const planStream = agentRegistry
     .getAdapter(agent)
     .stream(
-      buildAdapterInput(args, agent, runId, userPrompt, workspacePath, planToolNames, planSystemPrompt),
+      buildAdapterInput(args, agent, runId, userPrompt, workspacePath, planToolNames, planSystemPrompt, attachments),
       signal,
     )
 
@@ -244,6 +278,8 @@ async function executeOrchestratorRun(
         workspacePath,
         aggregateToolNames,
         aggregateSystemPrompt,
+        // aggregate 阶段不再带原始图片附件（避免重复传图片浪费 token；plan 阶段已经看过）
+        [],
       ),
       signal,
     )
@@ -547,6 +583,7 @@ function buildAdapterInput(
   workspacePath: string,
   toolNames: string[],
   systemPromptOverride: string | undefined,
+  attachments: AdapterAttachment[],
 ): AdapterInput {
   return {
     agentId: agent.id,
@@ -555,12 +592,14 @@ function buildAdapterInput(
     prompt,
     workspacePath,
     toolNames,
+    attachments: attachments.length > 0 ? attachments : undefined,
     customConfig:
       agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
         ? {
             systemPrompt: systemPromptOverride ?? agent.systemPrompt,
             modelProvider: agent.modelProvider,
             modelId: agent.modelId,
+            supportsVision: agent.supportsVision,
           }
         : undefined,
   }

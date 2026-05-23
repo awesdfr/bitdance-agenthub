@@ -26,10 +26,24 @@ export interface AdapterInput {
   /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。 */
   toolNames: string[]
 
+  /** 触发消息的附件（图片 / 文件），adapter 决定是否注入到 LLM content */
+  attachments?: AdapterAttachment[]
+
   /** 仅 CustomAgentAdapter 使用 */
   customConfig?: {
     systemPrompt: string
     modelProvider: ModelProvider
     modelId: string
+    /** 该 agent 的 model 是否支持视觉（来自 agent.supportsVision） */
+    supportsVision?: boolean
   }
+}
+
+export interface AdapterAttachment {
+  id: string
+  fileName: string
+  mimeType: string
+  kind: 'image' | 'file'
+  /** 文件的本地绝对路径，adapter 读 base64 用 */
+  absPath: string
 }

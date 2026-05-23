@@ -35,6 +35,7 @@ export interface CreateAgentBody {
   modelProvider: 'anthropic' | 'openai' | 'deepseek'
   modelId: string
   toolNames: string[]
+  supportsVision?: boolean
 }
 
 export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {

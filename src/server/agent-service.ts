@@ -20,6 +20,7 @@ export interface CreateAgentArgs {
   modelProvider: ModelProvider
   modelId: string
   toolNames: string[]
+  supportsVision?: boolean
 }
 
 export async function createCustomAgent(args: CreateAgentArgs) {
@@ -39,6 +40,7 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     toolNames: args.toolNames,
     isBuiltin: false,
     isOrchestrator: false,
+    supportsVision: args.supportsVision ?? false,
     createdAt,
   }
 
@@ -72,6 +74,7 @@ export interface UpdateAgentPatch {
   modelProvider?: ModelProvider
   modelId?: string
   toolNames?: string[]
+  supportsVision?: boolean
 }
 
 export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch) {
@@ -89,6 +92,7 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   if (patch.modelProvider !== undefined) updates.modelProvider = patch.modelProvider
   if (patch.modelId !== undefined) updates.modelId = patch.modelId
   if (patch.toolNames !== undefined) updates.toolNames = patch.toolNames
+  if (patch.supportsVision !== undefined) updates.supportsVision = patch.supportsVision
 
   if (Object.keys(updates).length === 0) return agent
 

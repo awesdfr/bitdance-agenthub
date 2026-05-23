@@ -16,6 +16,7 @@ const PatchBody = z
     modelProvider: z.enum(['anthropic', 'openai', 'deepseek']).optional(),
     modelId: z.string().min(1).optional(),
     toolNames: z.array(z.string()).optional(),
+    supportsVision: z.boolean().optional(),
   })
   .strict()
 

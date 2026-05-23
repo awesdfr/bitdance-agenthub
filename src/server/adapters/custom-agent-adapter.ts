@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import OpenAI from 'openai'
 
 import { newMessageId } from '@/server/ids'
@@ -5,7 +7,7 @@ import { toolRegistry } from '@/server/tools/registry'
 import type { ToolContext } from '@/server/tools/types'
 import type { StreamEvent } from '@/shared/types'
 
-import type { AdapterInput, AgentPlatformAdapter } from './types'
+import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
  * CustomAgentAdapter —— 自配置 Agent 的适配器。
@@ -27,6 +29,9 @@ interface AccumulatingToolCall {
 
 const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
 
+/** 防止单条 user message 塞太多图片（token 爆炸 + provider 通常有上限） */
+const MAX_IMAGES_PER_MESSAGE = 5
+
 export class CustomAgentAdapter implements AgentPlatformAdapter {
   readonly name = 'custom' as const
 
@@ -34,7 +39,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     if (!input.customConfig) {
       throw new Error('CustomAgentAdapter requires customConfig')
     }
-    const { systemPrompt, modelProvider, modelId } = input.customConfig
+    const { systemPrompt, modelProvider, modelId, supportsVision } = input.customConfig
 
     const client = buildClient(modelProvider)
 
@@ -49,9 +54,18 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       abortSignal: signal,
     }
 
+    // 构造 user message content：若 agent 声明 vision + 实际有图片，走 multimodal blocks
+    const imageAttachments =
+      input.attachments?.filter((a) => a.kind === 'image').slice(0, MAX_IMAGES_PER_MESSAGE) ?? []
+    const useMultimodal = !!supportsVision && imageAttachments.length > 0
+
+    const userContent: ChatMessage['content'] = useMultimodal
+      ? buildMultimodalUserContent(input.prompt, imageAttachments)
+      : input.prompt
+
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: input.prompt },
+      { role: 'user', content: userContent },
     ]
 
     const MAX_TURNS = 8
@@ -265,6 +279,36 @@ function toApiTool(t: {
       parameters: t.parameters,
     },
   }
+}
+
+/**
+ * 构造 OpenAI 风格的多模态 user message content：
+ *   [{ type: 'text', text: ... }, { type: 'image_url', image_url: { url: 'data:...' } }, ...]
+ *
+ * DeepSeek 兼容 OpenAI schema；Anthropic 的 image block 形态不同，目前 CustomAgentAdapter
+ * 走 openai SDK + OpenAI-compatible endpoint，先只支持这一套。
+ */
+function buildMultimodalUserContent(
+  prompt: string,
+  images: AdapterAttachment[],
+): OpenAI.Chat.Completions.ChatCompletionContentPart[] {
+  const blocks: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    { type: 'text', text: prompt },
+  ]
+  for (const img of images) {
+    try {
+      const data = readFileSync(img.absPath).toString('base64')
+      blocks.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:${img.mimeType};base64,${data}`,
+        },
+      })
+    } catch (err) {
+      console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
+    }
+  }
+  return blocks
 }
 
 function baseEvent<T extends Omit<StreamEvent, 'conversationId' | 'timestamp'>>(
