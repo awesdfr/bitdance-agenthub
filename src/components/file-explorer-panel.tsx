@@ -101,14 +101,13 @@ export function FileExplorerPanel() {
     void loadDir('').finally(() => setLoadingRoot(false))
   }, [conv, loadDir])
 
-  // 切换会话或第一次打开时加载根
+  // 切换会话时清空 + 重新加载根；首次打开时同样加载
   useEffect(() => {
     if (!open || !conv) return
-    if (!nodes['']) {
-      setLoadingRoot(true)
-      void loadDir('').finally(() => setLoadingRoot(false))
-    }
-  }, [open, conv, loadDir, nodes])
+    setNodes({})
+    setLoadingRoot(true)
+    void loadDir('').finally(() => setLoadingRoot(false))
+  }, [open, conv?.id, loadDir])
 
   if (!open || !conv) return null
 
