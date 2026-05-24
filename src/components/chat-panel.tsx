@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
 import { AgentInfoPopover } from '@/components/agent-info-popover'
+import { ConversationOutline } from '@/components/conversation-outline'
 import { FileLibraryDialog } from '@/components/file-library-dialog'
 import { FileTab } from '@/components/file-tab'
 import { PendingWriteDiffTab } from '@/components/pending-write-diff-tab'
@@ -139,6 +140,7 @@ export function ChatPanel() {
           >
             <FolderOpen className="size-4" />
           </Button>
+          <ConversationOutline conversationId={conv.id} />
           <Button
             size="icon"
             variant="ghost"

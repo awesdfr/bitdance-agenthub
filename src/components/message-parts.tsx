@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, ChevronRight, FileText, Image as ImageIcon, Layers, Loader2, XCircle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Layers, Loader2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -22,25 +22,53 @@ export function PartList({ parts }: { parts: MessagePart[] }) {
     }
   }
 
+  // 把 parts 重新折叠：连续的 tool_use 合并为一个 cluster；tool_result 跳过（已合到 tool_use）
+  type ClusterItem =
+    | { kind: 'part'; part: MessagePart; index: number }
+    | { kind: 'cluster'; tools: Array<{ part: Extract<MessagePart, { type: 'tool_use' }>; index: number }> }
+  const clusters: ClusterItem[] = []
+  let currentCluster: Extract<ClusterItem, { kind: 'cluster' }> | null = null
+  parts.forEach((p, i) => {
+    if (p.type === 'tool_result') return // 已合并到 tool_use 内
+    if (p.type === 'tool_use') {
+      if (!currentCluster) {
+        currentCluster = { kind: 'cluster', tools: [] }
+        clusters.push(currentCluster)
+      }
+      currentCluster.tools.push({ part: p, index: i })
+    } else {
+      currentCluster = null
+      clusters.push({ kind: 'part', part: p, index: i })
+    }
+  })
+
   return (
     <div className="space-y-2">
-      {parts.map((p, i) => {
-        if (p.type === 'tool_use') {
+      {clusters.map((c, i) => {
+        if (c.kind === 'part') {
+          return <PartRenderer key={`p-${c.index}`} part={c.part} />
+        }
+        // tool cluster
+        if (c.tools.length === 1) {
+          // 单个工具：保持原样不折叠
+          const t = c.tools[0]
           return (
             <ToolUsePart
-              key={i}
-              toolName={p.toolName}
-              args={p.args}
-              callId={p.callId}
-              completion={resultByCallId.get(p.callId)}
+              key={`tool-${t.index}`}
+              toolName={t.part.toolName}
+              args={t.part.args}
+              callId={t.part.callId}
+              completion={resultByCallId.get(t.part.callId)}
             />
           )
         }
-        if (p.type === 'tool_result') {
-          // tool_result 已经被合并进 ToolUsePart 渲染，跳过单独显示
-          return null
-        }
-        return <PartRenderer key={i} part={p} />
+        return (
+          <ToolCluster
+            key={`cluster-${i}`}
+            tools={c.tools}
+            resultByCallId={resultByCallId}
+          />
+        )
       })}
     </div>
   )
@@ -194,6 +222,94 @@ function ToolUsePart({
               </div>
             )}
             <div className="font-mono text-[10px] text-muted-foreground">{callId}</div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── 连续 tool_use 折叠 cluster ────────────────────────
+function ToolCluster({
+  tools,
+  resultByCallId,
+}: {
+  tools: Array<{ part: Extract<MessagePart, { type: 'tool_use' }>; index: number }>
+  resultByCallId: Map<string, { result: unknown; isError: boolean }>
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  // 统计每种工具数量 + 是否有 running / error
+  const counts = new Map<string, number>()
+  let runningCount = 0
+  let errorCount = 0
+  for (const t of tools) {
+    counts.set(t.part.toolName, (counts.get(t.part.toolName) ?? 0) + 1)
+    const c = resultByCallId.get(t.part.callId)
+    if (!c) runningCount++
+    else if (c.isError) errorCount++
+  }
+  const distribution = Array.from(counts.entries())
+    .map(([name, n]) => (n > 1 ? `${name}×${n}` : name))
+    .join(' · ')
+
+  const overallState: 'running' | 'success' | 'error' =
+    runningCount > 0 ? 'running' : errorCount > 0 ? 'error' : 'success'
+
+  const styles = {
+    running: 'border-amber-200 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-950/10',
+    success: 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/10',
+    error: 'border-red-200 bg-red-50/40 dark:border-red-900/40 dark:bg-red-950/10',
+  }[overallState]
+
+  return (
+    <Card className={cn(styles)}>
+      <CardContent className="space-y-1 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center gap-2 text-left text-xs"
+        >
+          <ChevronDown
+            className={cn('size-3.5 shrink-0 transition-transform', !expanded && '-rotate-90')}
+          />
+          {overallState === 'running' && (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-amber-600 dark:text-amber-400" />
+          )}
+          {overallState === 'success' && (
+            <Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          )}
+          {overallState === 'error' && (
+            <XCircle className="size-3.5 shrink-0 text-red-600 dark:text-red-400" />
+          )}
+          <span className="font-medium">工具调用 × {tools.length}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+            {distribution}
+          </span>
+          {runningCount > 0 && (
+            <span className="ml-auto shrink-0 text-[10px] text-amber-600 dark:text-amber-400">
+              {runningCount} 进行中
+            </span>
+          )}
+          {errorCount > 0 && runningCount === 0 && (
+            <span className="ml-auto shrink-0 text-[10px] text-red-600 dark:text-red-400">
+              {errorCount} 失败
+            </span>
+          )}
+        </button>
+
+        {expanded && (
+          <div className="space-y-1.5 pl-5 pt-1">
+            {tools.map((t) => (
+              <ToolUsePart
+                key={t.index}
+                toolName={t.part.toolName}
+                args={t.part.args}
+                callId={t.part.callId}
+                completion={resultByCallId.get(t.part.callId)}
+              />
+            ))}
           </div>
         )}
       </CardContent>
