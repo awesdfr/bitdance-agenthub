@@ -572,6 +572,7 @@ export const useAppStore = create<AppState>()(
 // ─── 派生 hooks ──────────────────────────────────────
 // 用 useShallow 防止派生数组每次新引用导致无限渲染（Zustand 5 标准做法）。
 import { useShallow } from 'zustand/react/shallow'
+import { useMemo } from 'react'
 
 export const useMessagesForConversation = (conversationId: string) =>
   useAppStore(
@@ -655,43 +656,43 @@ export interface ConversationUsageTotal {
   runCount: number
 }
 
-export const useConversationUsageTotal = (conversationId: string | null): ConversationUsageTotal =>
-  useAppStore(
-    useShallow((s) => {
-      const empty: ConversationUsageTotal = {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-        totalTokens: 0,
-        lastInputTokens: 0,
-        byAgent: {},
-        byModel: {},
-        runCount: 0,
+export const useConversationUsageTotal = (conversationId: string | null): ConversationUsageTotal => {
+  // 选原始 runs map（immer 保证未变更时 ref 稳定）。再用 useMemo 派生统计，避免在 store
+  // selector 里返回新对象引用导致 useShallow 死循环。
+  const runs = useAppStore((s) => (conversationId ? s.runsByConv[conversationId] : undefined))
+  return useMemo(() => {
+    const result: ConversationUsageTotal = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+      lastInputTokens: 0,
+      byAgent: {},
+      byModel: {},
+      runCount: 0,
+    }
+    if (!runs) return result
+    let latestRunWithUsage = -1
+    let latestInput = 0
+    for (const run of Object.values(runs)) {
+      const u = run.usage
+      if (!u) continue
+      result.inputTokens += u.inputTokens
+      result.outputTokens += u.outputTokens
+      result.cacheCreationTokens += u.cacheCreationTokens
+      result.cacheReadTokens += u.cacheReadTokens
+      result.runCount++
+      const sub = u.inputTokens + u.outputTokens
+      result.byAgent[run.agentId] = (result.byAgent[run.agentId] ?? 0) + sub
+      if (u.model) result.byModel[u.model] = (result.byModel[u.model] ?? 0) + sub
+      if (run.startedAt > latestRunWithUsage) {
+        latestRunWithUsage = run.startedAt
+        latestInput = u.lastInputTokens ?? u.inputTokens
       }
-      if (!conversationId) return empty
-      const runs = s.runsByConv[conversationId]
-      if (!runs) return empty
-      let latestRunWithUsage = -1
-      let latestInput = 0
-      for (const run of Object.values(runs)) {
-        const u = run.usage
-        if (!u) continue
-        empty.inputTokens += u.inputTokens
-        empty.outputTokens += u.outputTokens
-        empty.cacheCreationTokens += u.cacheCreationTokens
-        empty.cacheReadTokens += u.cacheReadTokens
-        empty.runCount++
-        const sub = u.inputTokens + u.outputTokens
-        empty.byAgent[run.agentId] = (empty.byAgent[run.agentId] ?? 0) + sub
-        if (u.model) empty.byModel[u.model] = (empty.byModel[u.model] ?? 0) + sub
-        if (run.startedAt > latestRunWithUsage) {
-          latestRunWithUsage = run.startedAt
-          latestInput = u.lastInputTokens ?? u.inputTokens
-        }
-      }
-      empty.totalTokens = empty.inputTokens + empty.outputTokens
-      empty.lastInputTokens = latestInput
-      return empty
-    }),
-  )
+    }
+    result.totalTokens = result.inputTokens + result.outputTokens
+    result.lastInputTokens = latestInput
+    return result
+  }, [runs])
+}
