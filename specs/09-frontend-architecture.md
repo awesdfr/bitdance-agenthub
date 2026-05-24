@@ -1,0 +1,254 @@
+# Spec 09 — 前端架构
+
+> L4（State + Transport）+ L5（UI 组件）的内部组织。本 spec 定义状态结构、SSE 接入、事件应用 reducer、派生 hooks 与组件树。
+
+源文件：`src/stores/app-store.ts`、`src/components/stream-provider.tsx`、`src/app/page.tsx`、`src/components/`
+
+---
+
+## 分层定位
+
+```
+L5  UI 组件 (src/components/*.tsx)
+        ▲
+        │ Zustand hook (useAppStore + 派生 hooks)
+        │
+L4  ┌──────────────────────────────────────┐
+    │ AppState (zustand + immer)          │
+    │ ─ entity maps + 关系桶 + UI 状态     │
+    │ ─ applyEvent(StreamEvent): reducer  │
+    │                                      │
+    │ StreamProvider (SSE 客户端)          │
+    │ ─ /api/stream → applyEvent           │
+    └──────────────────────────────────────┘
+        ▲
+        │ SSE
+        │
+L3  Application Services（见 Spec 02/06）
+```
+
+**铁律**：UI 组件不直接调 LLM SDK，不直接 fetch DB 行（除 lazy load artifact 详情这类特例）。所有 state 变更都要么走 `applyEvent`（来自 SSE），要么走显式 action（用户操作 + REST 响应）。
+
+---
+
+## AppState 结构
+
+源文件：`src/stores/app-store.ts:20-89`
+
+```typescript
+interface AppState {
+  // ─── 实体 maps ─────────────────────────────────────
+  conversations: Record<string, ConversationRow>
+  agents: Record<string, AgentRow>
+  messages: Record<string, MessageRow>
+  artifacts: Record<string, ArtifactRow>
+
+  // ─── 关系桶（按 conversationId 分桶）─────────────
+  messageIdsByConv: Record<string, string[]>       // 该会话消息按时间顺序的 id 列表
+  runsByConv: Record<string, Record<string, AgentRunRow>>
+
+  // ─── Orchestrator 调度状态（按 Orchestrator runId 索引）
+  dispatchesByRunId: Record<string, DispatchState>
+
+  // ─── UI 状态 ──────────────────────────────────────
+  activeConversationId: string | null
+  previewArtifactId: string | null
+  replyTargetByConv: Record<string, string | null>           // 引用回复目标
+  pendingAttachmentsByConv: Record<string, AttachmentRow[]>  // 待发送附件
+  highlightedMessageId: string | null                         // 跳转后短暂高亮
+  streamConnected: boolean
+}
+```
+
+**设计要点**：
+- **实体 normalize 成 `Record<id, Row>`**，不放在 conversations 的嵌套里（避免重复存储 + 局部更新困难）
+- **关系用「id 列表」分桶**，渲染时 map 拿实体。这样新增 / 删除消息只动 id 列表 + 实体 map，不破坏 React shallow equality
+- **UI 状态按 conversationId 分桶**（pendingAttachments / replyTarget），切会话不会污染
+- **不放在 store 的东西**：表单 draft、modal 开关、临时 hover 状态——这些用组件内 `useState`
+
+---
+
+## applyEvent reducer
+
+源文件：`src/stores/app-store.ts:274-442`
+
+逐 `event.type` 分发，所有 case 都在一个 `set((s) => switch)` 内，依赖 immer 直接 mutate。
+
+| Event | State 变更 |
+|---|---|
+| `heartbeat` | 无变更（仅作连接保活信号，由 SSE 端定期发） |
+| `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running' }` |
+| `run.end` | 更新 run 的 `status` / `finishedAt` / `error` |
+| `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
+| `message.end` | `messages[messageId].status = 'complete'` |
+| `part.start` | `messages[messageId].parts[partIndex] = event.part`（按 index 插入，不 push） |
+| `part.delta` | 按 delta type 追加：`text.append` / `thinking.append` / `code.append`（其它类型 part 不增量） |
+| `part.end` | 无变更（前端用 `message.end` 收尾，不需要 part 级别 end） |
+| `tool.call` | 给消息 push 一个 `tool_use` part |
+| `tool.result` | 给消息 push 一个 `tool_result` part（前端按 callId 合并渲染） |
+| `artifact.create` | `artifacts[artifact.id] = artifact`（不在消息里插 `artifact_ref` part，那由 `part.start` 单独投递） |
+| `artifact.update` | 浅合并 `content` patch（TODO：当前没有 emitter，前端 reducer 已就绪） |
+| `dispatch.plan` | 找该 runId 最新的 agent 消息作挂载点，创建 `DispatchState` |
+| `dispatch.start` | `taskStatus[taskId] = 'running'`，记 `childRunIds[taskId] = childRunId` |
+| `dispatch.end` | 通过 `childRunId` 反查 `dispatchesByRunId`，更新 `taskStatus[taskId]` |
+
+**幂等性**：`message.start` / `run.start` 在 id 已存在时仍 idempotent（覆盖写）；`messageIdsByConv` 用 `includes` 检查防重复。这样支持事件重放（未来重连补发）。
+
+---
+
+## 乐观更新：本地用户消息
+
+为减少「发完才看到」的延迟，用户发消息时先在 store 插一条临时消息：
+
+源文件：`src/stores/app-store.ts:222-272`
+
+```typescript
+addLocalUserMessage({ tempId, ... })           // 用 tempId（'local-<nanoid>'）插入
+// → 服务端返回真实 messageId
+replaceLocalMessageId(tempId, realId)          // 把 messages 表和 messageIdsByConv 里的 id 全部替换
+```
+
+**约束**：
+- `tempId` 必须能与真实 id 区分（避免 SSE 推回的 `message.start` 撞 id）。约定用 `local-<nanoid>` 前缀
+- `parts` 包含 text + 附件 part（实体上和服务端写入的一致，免得替换后视觉抖动）
+- `replaceLocalMessageId` 必须扫所有 `messageIdsByConv` 桶（虽然只会在一个里命中）—— 防御性写法
+
+**为什么不直接等 SSE**：服务端 `sendMessage` 先持久化后返回 messageId，再起 AgentRunner 推 SSE。前端要在「点发送」的瞬间就显示自己的消息，不能等 200~500ms 的 round-trip。
+
+---
+
+## 派生 hooks
+
+源文件：`src/stores/app-store.ts:446-489`
+
+所有派生 selector 返回新数组 / 对象时**必须**用 `useShallow`（Zustand 5 + immer 标配），否则每次 store 变更都触发新引用 → 无限 re-render。
+
+| Hook | 返回 |
+|---|---|
+| `useMessagesForConversation(convId)` | 该会话的 `MessageRow[]`，按时间序 |
+| `useActiveConversation()` | 当前会话或 null |
+| `useConversationList()` | 全部会话按 `updatedAt` 降序 |
+| `useAgentList()` | 全部 agent |
+| `usePendingAttachments(convId)` | 该会话待发送附件 |
+| `useTopLevelRunningRuns(convId)` | 当前会话顶层正在跑的 run（用于「中止」按钮）—— `parentRunId == null && status == 'running'` |
+| `useDispatchForMessage(messageId)` | 该消息上挂的 DispatchState（O(n) 扫，n 通常 < 10） |
+
+**性能注意**：`useMessagesForConversation` 是 hot path，每个 SSE delta 都会触发 selector 重算。useShallow 比较的是数组中每个元素引用 —— 因为 immer 只改动了变化的消息行，其余引用不变，shallow 比较成功 → 不渲染。
+
+---
+
+## SSE 连接管理
+
+源文件：`src/components/stream-provider.tsx`
+
+```typescript
+let activeSource: EventSource | null = null
+let refCount = 0
+
+useEffect(() => {
+  refCount++
+  if (!activeSource) {
+    activeSource = new EventSource('/api/stream')
+    // onopen / onerror / onmessage 接入 applyEvent
+  }
+  return () => {
+    refCount--
+    if (refCount <= 0) {
+      activeSource?.close()
+      activeSource = null
+    }
+  }
+}, [])
+```
+
+**模块级 ref + refCount 的原因**：React 19 StrictMode dev 下会双 mount，普通 `useEffect` 单连接模式会立刻断开重连。用 refCount 跨 mount 共享同一连接，**全部** unmount 后才真正关闭。
+
+**重连**：`EventSource` 浏览器原生自动重连，`onerror` 仅更新 `streamConnected` 显示。前端不需要写重连循环。
+
+**事件格式约定**（详见 Spec 02）：
+- 所有事件都用 `event: message`（默认），不分 `event: tool.call` 等命名事件
+- `data:` 是单行 JSON，前端 `JSON.parse(e.data).type` 分发
+- 有一种特殊事件 `{ type: 'connected' }` —— SSE 端在首次握手时发，前端把 `streamConnected` 置 true（onopen 也会置，但 connected 是双保险）
+
+---
+
+## 组件树
+
+```
+app/page.tsx
+└── <Home>
+    ├── <Sidebar />               ── 会话/Agent库/产物库 三 tab 切换
+    │   ├── <ThemeToggle />
+    │   ├── <NewConversationDialog />
+    │   ├── <ConversationItem />  ── 单条会话 + hover 重命名/删除
+    │   ├── <ArtifactLibrary />
+    │   ├── <AgentLibrary />
+    │   │   └── <CreateAgentDialog />
+    │   └── <RenameInput />       ── 内联重命名
+    ├── <ChatPanel />             ── 当前会话主区
+    │   ├── header: 头像堆 + AgentInfoPopover + FileLibraryDialog + AddAgentDialog
+    │   ├── <MessageList>
+    │   │   └── <MessageItem>     ── 每条消息
+    │   │       ├── <AgentInfoPopover />
+    │   │       ├── <QuotedMessage />     ── 引用预览
+    │   │       ├── <PartList>            ── 渲染 message.parts
+    │   │       │   ├── <Markdown />      ── text part
+    │   │       │   ├── <CodeBlock />     ── code part + fenced markdown code
+    │   │       │   ├── <ToolUsePart />   ── 工具卡片（按 callId 合并 tool_use+tool_result）
+    │   │       │   ├── <ThinkingPart />  ── 可折叠思考
+    │   │       │   ├── <ArtifactRefPart /> ── 产物卡片，点击打开预览
+    │   │       │   └── <AttachmentChip />  ── 附件
+    │   │       └── <DispatchPlanCard />  ── 调度卡片（Orchestrator）
+    │   └── <MessageInput>        ── @mention popup + 附件 + 引用回复
+    └── <ArtifactPreviewPanel />  ── 右侧产物预览（按 type 分发：web_app/document/image/code_file/diff）
+
+<StreamProvider>                  ── 顶层 layout，全局 SSE 接入
+<ThemeProvider>                   ── next-themes
+```
+
+**组件原则**：
+- 组件文件名 `PascalCase.tsx`（CLAUDE.md §4.1），一个文件一个主组件 + 几个内联辅助
+- 不创建 `index.ts` barrel（CLAUDE.md §4.1）
+- 副作用（API 调用）放在组件 mount effect 或事件 handler；不在 selector 里跑
+- 表单临时 state 用 `useState`；跨组件共享或要持久化的进 store
+
+---
+
+## Lazy load 策略
+
+某些数据不全量灌进 store，按需 fetch：
+
+| 数据 | 加载时机 | 落位 |
+|---|---|---|
+| `messages` | 切换会话时一次性拉全量（`fetchMessages`） | `messageIdsByConv` + `messages` |
+| `artifacts` | 不预加载；首次见到 `artifact_ref` part 时 lazy fetch 详情（`ArtifactRefPart` 组件内 effect） | `artifacts[id]` |
+| `attachments` | 打开 `FileLibraryDialog` 时拉该会话列表；附件 chip 渲染时也按需拉 | 组件内 useState |
+| `agents` / `conversations` | 应用启动时全量拉一次 | 同名 maps |
+
+**404 行为**：artifact lazy fetch 404 → 渲染「产物已删除」墓碑卡片（不在 store 标记 deleted；用组件 local state）。
+
+---
+
+## 错误可见性
+
+服务端 run 失败时，AgentRunner 通过 `emitErrorVisualisation` 注入一条 `msg_err_*` 消息（role=agent，status=error），前端无需特殊处理 —— SSE 推过来后 reducer 走正常 `message.start` + `part.start(text)` + `message.end`，渲染时 `MessageItem` 看到 `status==='error'` 显示红边框气泡。同理 `aborted` 显示灰色边框。
+
+**为什么走 message 而不是 toast**：错误是对话内容的一部分，应该和对话一起滚动 / 滚动到、可复制、可作为后续消息的上下文。toast 一关就丢，不适合 LLM 上下文。
+
+---
+
+## CSS / 样式
+
+- Tailwind v4 + shadcn/ui（base-ui 底座，「base-nova」preset）
+- 主题色由 `src/app/globals.css` 的 CSS 变量驱动：`--primary` (字节蓝 #3370FF) / `--destructive` (火山红 #FE3B25) / `--ring` 等。light / dark 双模式
+- 代码块用 shiki 双主题（github-light / dark）；shiki pre 强制透明底，外层 CodeBlock 容器统一底色（见 `src/components/code-block.tsx` 与 `src/lib/highlighter.ts`）
+- 不引入新 UI 库（CLAUDE.md §2）；新 UI 组件先在 shadcn registry 里找，没有就自写
+
+---
+
+## 与其它 spec 的关系
+
+- Spec 02：StreamEvent 是 reducer 输入
+- Spec 03：MessagePart 是 message.parts 元素，PartList 按 type 分发
+- Spec 04：Artifact 渲染在 `ArtifactPreviewPanel`，按 `content.type` 分发
+- Spec 06：DispatchState + DispatchPlanCard 是 Orchestrator 调度的前端表达
