@@ -149,6 +149,7 @@ function ArtifactView({ artifact }: { artifact: ArtifactRow }) {
     <div
       data-selection-target="artifact"
       data-selection-label={`产物「${artifact.title}」 v${artifact.version}`}
+      data-selection-artifact-id={artifact.id}
       className="contents"
     >
       {children}

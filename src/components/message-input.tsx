@@ -217,7 +217,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
     // 选区改写：把 pendingQuote 注入消息开头（XML 块给 LLM 当上下文）
     const finalContent = pendingQuote
-      ? `<quoted_selection source="${pendingQuote.sourceLabel}">\n${pendingQuote.text}\n</quoted_selection>\n\n${text}`
+      ? `<quoted_selection source="${pendingQuote.sourceLabel}"${pendingQuote.artifactId ? ` artifactId="${pendingQuote.artifactId}"` : ''}${pendingQuote.filePath ? ` filePath="${pendingQuote.filePath}"` : ''}>\n${pendingQuote.text}\n</quoted_selection>\n\n${text}`
       : text
 
     const tempId = `temp_${nanoid()}`

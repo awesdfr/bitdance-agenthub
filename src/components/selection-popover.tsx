@@ -19,6 +19,8 @@ import { useAppStore } from '@/stores/app-store'
 interface State {
   text: string
   sourceLabel: string
+  artifactId?: string
+  filePath?: string
   rect: DOMRect
 }
 
@@ -49,6 +51,8 @@ export function SelectionPopover() {
         return
       }
       const sourceLabel = target.dataset.selectionLabel ?? '选中片段'
+      const artifactId = target.dataset.selectionArtifactId
+      const filePath = target.dataset.selectionFilePath
       const rect = range.getBoundingClientRect()
       if (rect.width === 0 && rect.height === 0) {
         setState(null)
@@ -57,6 +61,8 @@ export function SelectionPopover() {
       setState({
         text: text.length > MAX_TEXT_PREVIEW ? text.slice(0, MAX_TEXT_PREVIEW) + '\n[...截断]' : text,
         sourceLabel,
+        artifactId,
+        filePath,
         rect,
       })
     }
@@ -74,7 +80,12 @@ export function SelectionPopover() {
   )
 
   const handlePick = () => {
-    setPendingQuote({ text: state.text, sourceLabel: state.sourceLabel })
+    setPendingQuote({
+      text: state.text,
+      sourceLabel: state.sourceLabel,
+      artifactId: state.artifactId,
+      filePath: state.filePath,
+    })
     window.getSelection()?.removeAllRanges()
     setState(null)
   }

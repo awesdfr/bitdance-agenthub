@@ -167,6 +167,7 @@ export function FileTab({
         className="min-h-0 flex-1 overflow-auto"
         data-selection-target={editing ? undefined : 'file'}
         data-selection-label={`文件 ${relPath}`}
+        data-selection-file-path={editing ? undefined : relPath}
       >
         {editing ? (
           <textarea

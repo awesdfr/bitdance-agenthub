@@ -49,7 +49,14 @@ interface AppState {
   replyTargetByConv: Record<string, string | null>
 
   // ─── 选区改写：等待注入到 MessageInput 的引用块（全局，不分会话） ─
-  pendingQuoteForInput: { text: string; sourceLabel: string } | null
+  pendingQuoteForInput: {
+    text: string
+    sourceLabel: string
+    /** 可选：选区来自哪个 artifact，方便 agent 用 read_artifact 拿完整上下文 */
+    artifactId?: string
+    /** 可选：选区来自哪个文件路径 */
+    filePath?: string
+  } | null
 
   // ─── 待发送的附件（按 conversationId 分桶）。文件库和 MessageInput 共享。
   pendingAttachmentsByConv: Record<string, AttachmentRow[]>
@@ -97,7 +104,7 @@ interface AppState {
 
   setReplyTarget(conversationId: string, messageId: string | null): void
 
-  setPendingQuote(quote: { text: string; sourceLabel: string } | null): void
+  setPendingQuote(quote: AppState['pendingQuoteForInput']): void
 
   setBookmarkedMessageIds(conversationId: string, ids: string[]): void
 

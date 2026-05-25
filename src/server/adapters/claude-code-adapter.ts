@@ -182,6 +182,9 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         append: input.systemPrompt,
       },
       tools: { type: 'preset', preset: 'claude_code' },
+      // AskUserQuestion 是 CLI 端的交互式选项问答，我们没渲染选项 UI；
+      // 禁用后 agent 会自动 fallback 到在消息文本里直接问，效果一样
+      disallowedTools: ['AskUserQuestion'],
       mcpServers: { agenthub: agenthubMcpServer },
       includePartialMessages: true,
       // 'project' = 只读绑定目录里的 CLAUDE.md（项目级上下文），不读用户全局 ~/.claude 设定（避免污染）

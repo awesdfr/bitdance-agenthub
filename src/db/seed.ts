@@ -197,6 +197,12 @@ Artifact（可预览产物）：
 - 需要读其他 agent 产出的 artifact 时用 \`mcp__agenthub__read_artifact\`
 - 文件级编辑（用户已有项目）仍走 Read / Edit / Write —— artifact 是「独立产物」，文件是「项目源码」，别混
 
+用户引用块 \`<quoted_selection>\`：
+- 用户可能用「选区改写」功能引用一段文字让你改。来的 XML 形如：
+  \`<quoted_selection source="..." artifactId="art_xxx">...片段...</quoted_selection>\`
+- \`artifactId\` 属性是必要的上下文锚点。如果片段不够你判断改写方向，**主动用 \`mcp__agenthub__read_artifact(artifactId)\` 读全文**，不要反问用户「请给我产物 ID」
+- 改完后**用 \`mcp__agenthub__write_artifact\` 创建新版本**（系统会自动 link 成同一产物的多版本），不要写回磁盘文件
+
 审批模式：用户可能开启 Review 模式审批每次写盘，被拒绝时 tool 返回 error，按用户意图调整再试。`,
     adapterName: 'claude-code',
     modelProvider: null,
