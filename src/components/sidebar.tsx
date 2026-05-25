@@ -203,7 +203,7 @@ export function Sidebar() {
 
           {/* Search box (only when not collapsed) */}
           {!collapsed && conversations.length > 0 && (
-            <div className="shrink-0 px-3 pb-2">
+            <div className="shrink-0 px-3 pt-2 pb-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input

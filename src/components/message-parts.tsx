@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Layers, Loader2, XCircle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Layers, Loader2, Sparkles, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -106,7 +106,109 @@ function PartRenderer({ part }: { part: MessagePart }) {
 // ─── Text ──────────────────────────────────────────────
 function TextPart({ content }: { content: string }) {
   if (!content) return null
-  return <Markdown>{content}</Markdown>
+  // 把消息体里 <quoted_selection ...>...</quoted_selection> 块抠出来，渲染成卡片；
+  // 剩余文本走 Markdown。规避了纯文本里裸 XML 显丑的问题。
+  const segments = splitQuotedSelections(content)
+  return (
+    <div className="space-y-2">
+      {segments.map((seg, i) =>
+        seg.kind === 'quote' ? (
+          <QuotedSelectionCard key={i} {...seg} />
+        ) : (
+          <Markdown key={i}>{seg.text}</Markdown>
+        ),
+      )}
+    </div>
+  )
+}
+
+interface QuotedSegment {
+  kind: 'quote'
+  source?: string
+  artifactId?: string
+  filePath?: string
+  text: string
+}
+interface PlainSegment {
+  kind: 'plain'
+  text: string
+}
+type Segment = QuotedSegment | PlainSegment
+
+/** 把 <quoted_selection source=".." artifactId=".." filePath="..">...</quoted_selection> 块和普通文本切开。 */
+function splitQuotedSelections(content: string): Segment[] {
+  const re = /<quoted_selection([^>]*)>([\s\S]*?)<\/quoted_selection>/g
+  const out: Segment[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) {
+      const before = content.slice(last, m.index).trim()
+      if (before) out.push({ kind: 'plain', text: before })
+    }
+    const attrs = m[1] ?? ''
+    out.push({
+      kind: 'quote',
+      source: extractAttr(attrs, 'source'),
+      artifactId: extractAttr(attrs, 'artifactId'),
+      filePath: extractAttr(attrs, 'filePath'),
+      text: m[2].trim(),
+    })
+    last = m.index + m[0].length
+  }
+  if (last < content.length) {
+    const tail = content.slice(last).trim()
+    if (tail) out.push({ kind: 'plain', text: tail })
+  }
+  if (out.length === 0) out.push({ kind: 'plain', text: content })
+  return out
+}
+
+function extractAttr(attrs: string, name: string): string | undefined {
+  const m = new RegExp(`${name}\\s*=\\s*"([^"]*)"`).exec(attrs)
+  return m?.[1]
+}
+
+function QuotedSelectionCard({ source, artifactId, filePath, text }: QuotedSegment) {
+  const [expanded, setExpanded] = useState(false)
+  const lines = text.split('\n')
+  const collapsed = lines.length > 4
+  return (
+    <div className="overflow-hidden rounded-md border border-[#3370FF]/30 bg-[#3370FF]/5 text-xs">
+      <div className="flex items-center gap-1.5 border-b border-[#3370FF]/20 bg-[#3370FF]/10 px-2.5 py-1 text-[11px]">
+        <Sparkles className="size-3 text-[#3370FF]" />
+        <span className="font-medium text-[#3370FF]">引用</span>
+        {source && (
+          <>
+            <span className="text-muted-foreground">·</span>
+            <span className="truncate text-muted-foreground">{source}</span>
+          </>
+        )}
+        {(artifactId || filePath) && (
+          <code className="ml-1 truncate font-mono text-[10px] text-muted-foreground/70">
+            {artifactId ?? filePath}
+          </code>
+        )}
+        {collapsed && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-auto rounded px-1 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            {expanded ? '收起' : '展开'}
+          </button>
+        )}
+      </div>
+      <pre
+        className={cn(
+          'whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/90',
+          !expanded && collapsed && 'line-clamp-3',
+        )}
+      >
+        {text}
+      </pre>
+    </div>
+  )
 }
 
 // ─── Thinking（可折叠）──────────────────────────────────
