@@ -214,75 +214,6 @@ export function MessageItem({ message }: { message: MessageRow }) {
               tok
             </span>
           )}
-          {/* 引用按钮 — hover 时显示 */}
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => setReplyTarget(message.conversationId, message.id)}
-              className="opacity-0 transition group-hover:opacity-100 hover:text-foreground"
-              title="引用回复"
-            >
-              <CornerUpLeft className="size-3" />
-            </button>
-          )}
-          {/* Pin / Unpin 按钮 — hover 显示；达上限时未 pin 按钮 disabled */}
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => void handleTogglePin()}
-              disabled={busy || (!isPinned && pinnedCount >= PIN_LIMIT_PER_CONVERSATION)}
-              className={cn(
-                'transition disabled:opacity-30',
-                isPinned
-                  ? 'text-primary opacity-100 hover:text-primary/80'
-                  : 'opacity-0 group-hover:opacity-100 hover:text-foreground',
-              )}
-              title={
-                isPinned
-                  ? '取消 pin（不再注入 LLM 上下文）'
-                  : pinnedCount >= PIN_LIMIT_PER_CONVERSATION
-                    ? `已达 ${PIN_LIMIT_PER_CONVERSATION} 条上限，请先取消其它 pin`
-                    : 'Pin 此消息（注入 LLM 长期上下文）'
-              }
-            >
-              <Pin className={cn('size-3', isPinned && 'fill-primary')} />
-            </button>
-          )}
-          {/* 最新一条 user 消息：编辑 / 撤回 */}
-          {isLatestUser && !editing && (
-            <>
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                disabled={busy}
-                className="opacity-0 transition group-hover:opacity-100 hover:text-foreground disabled:opacity-30"
-                title="编辑文字并重发（@ 和附件保持不变）"
-              >
-                <Pencil className="size-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmWithdraw(true)}
-                disabled={busy}
-                className="opacity-0 transition group-hover:opacity-100 hover:text-red-600 disabled:opacity-30"
-                title="撤回此消息及之后的回复"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </>
-          )}
-          {/* 最新一条 agent 消息：重新生成 */}
-          {isLatestAgent && message.status !== 'streaming' && (
-            <button
-              type="button"
-              onClick={() => void handleRegenerate()}
-              disabled={busy}
-              className="opacity-0 transition group-hover:opacity-100 hover:text-foreground disabled:opacity-30"
-              title="重新生成（删除当前回答，重新让 agent 回答最后一条提问）"
-            >
-              <RotateCcw className={cn('size-3', busy && 'animate-spin')} />
-            </button>
-          )}
         </div>
 
         <div
@@ -342,6 +273,78 @@ export function MessageItem({ message }: { message: MessageRow }) {
             </>
           )}
         </div>
+
+        {/* 操作工具栏 — 永远渲染占位，仅 hover 时可见。
+            放在 bubble 外避免历史/最新消息按钮数量不同导致 meta 行宽度抖动；
+            invisible 而非 hidden 是为了不让 hover 时 bubble 下方多出一行高度导致页面流动。 */}
+        {!editing && (
+          <div
+            className={cn(
+              'flex gap-2 text-xs text-muted-foreground invisible group-hover:visible',
+              isUser && 'justify-end',
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setReplyTarget(message.conversationId, message.id)}
+              className="transition hover:text-foreground"
+              title="引用回复"
+            >
+              <CornerUpLeft className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleTogglePin()}
+              disabled={busy || (!isPinned && pinnedCount >= PIN_LIMIT_PER_CONVERSATION)}
+              className={cn(
+                'transition disabled:opacity-30',
+                isPinned ? 'text-primary hover:text-primary/80' : 'hover:text-foreground',
+              )}
+              title={
+                isPinned
+                  ? '取消 pin（不再注入 LLM 上下文）'
+                  : pinnedCount >= PIN_LIMIT_PER_CONVERSATION
+                    ? `已达 ${PIN_LIMIT_PER_CONVERSATION} 条上限，请先取消其它 pin`
+                    : 'Pin 此消息（注入 LLM 长期上下文）'
+              }
+            >
+              <Pin className={cn('size-3.5', isPinned && 'fill-primary')} />
+            </button>
+            {isLatestUser && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  disabled={busy}
+                  className="transition hover:text-foreground disabled:opacity-30"
+                  title="编辑文字并重发（@ 和附件保持不变）"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmWithdraw(true)}
+                  disabled={busy}
+                  className="transition hover:text-red-600 disabled:opacity-30"
+                  title="撤回此消息及之后的回复"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </>
+            )}
+            {isLatestAgent && message.status !== 'streaming' && (
+              <button
+                type="button"
+                onClick={() => void handleRegenerate()}
+                disabled={busy}
+                className="transition hover:text-foreground disabled:opacity-30"
+                title="重新生成（删除当前回答，重新让 agent 回答最后一条提问）"
+              >
+                <RotateCcw className={cn('size-3.5', busy && 'animate-spin')} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <Dialog
