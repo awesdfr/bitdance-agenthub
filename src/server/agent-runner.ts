@@ -7,6 +7,7 @@ import type { DispatchPlanItem, MessagePart, StreamEvent } from '@/shared/types'
 import { agentRegistry } from './adapters/registry'
 import type { AdapterAttachment, AdapterInput } from './adapters/types'
 import { getAttachmentAbsolutePath } from './attachment-service'
+import { buildHistoryFor } from './conversation-context'
 import { eventBus } from './event-bus'
 import { newRunId } from './ids'
 import { getAppSettings } from './settings-service'
@@ -696,6 +697,18 @@ async function buildAdapterInput(
     }
   }
 
+  // 跨 run 对话历史（仅 CustomAgentAdapter 消费；ClaudeCode 走 SDK session resume）。
+  // 失败回退到空数组，让 agent 退化到「无历史」模式而不是整个 run 崩。详见 specs/13-conversation-context.md。
+  const history =
+    agent.adapterName === 'custom'
+      ? await buildHistoryFor(agent.id, args.conversationId, {
+          excludeMessageId: args.triggerMessageId,
+        }).catch((err) => {
+          console.warn('[agent-runner] buildHistoryFor failed; continuing without history', err)
+          return []
+        })
+      : []
+
   return {
     agentId: agent.id,
     conversationId: args.conversationId,
@@ -708,6 +721,7 @@ async function buildAdapterInput(
     modelId: agent.modelId,
     toolNames,
     attachments: attachments.length > 0 ? attachments : undefined,
+    history: history.length > 0 ? history : undefined,
     customConfig:
       agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
         ? {

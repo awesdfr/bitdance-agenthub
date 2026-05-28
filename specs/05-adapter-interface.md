@@ -88,6 +88,13 @@ interface AdapterInput {
     absPath: string             // 服务端绝对路径，Adapter 自读
   }>
 
+  // 跨 run 对话历史（OpenAI ChatMessage 格式），不含当前触发消息。
+  // 由 AgentRunner 通过 conversation-context.buildHistoryFor 序列化，详见 Spec 13。
+  // - CustomAgentAdapter：拼到 [system, ...history, currentUser] 中间
+  // - ClaudeCodeAdapter：忽略（走 SDK 自己的 session resume）
+  // - MockAdapter：忽略
+  history?: ChatCompletionMessageParam[]
+
   // 仅 CustomAgentAdapter 使用（OpenAI 兼容协议特有的模型选择）
   customConfig?: {
     modelProvider: 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark'

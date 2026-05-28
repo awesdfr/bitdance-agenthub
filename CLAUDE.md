@@ -274,6 +274,7 @@ Key 来源按优先级（详见 `src/server/settings-service.ts` 与 `src/server
 - `10-agent-builder.md` — 自建 Agent 流程
 - `11-platform.md` — 平台抽象（POSIX / Windows shell 选择、双平台黑名单、子进程清理）
 - `12-desktop-electron.md` — 桌面版（Electron 打包 DMG / EXE，进程模型 / 路径迁移）
+- `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 
 ### `skills/`（可复用开发任务模板，后续按需添加）
 

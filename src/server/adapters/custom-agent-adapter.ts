@@ -72,6 +72,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
+      // 跨 run 历史：spec 13 序列化的对话上下文。空数组时行为与旧版一致（向后兼容）。
+      ...(input.history ?? []),
       { role: 'user', content: userContent },
     ]
 
