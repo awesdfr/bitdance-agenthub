@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
-import type { ArtifactRow, MessageRow } from '@/db/schema'
+import type { AgentRow, ArtifactRow, MessageRow } from '@/db/schema'
 import { estimateTokens } from '@/shared/model-registry'
 import type { MessagePart } from '@/shared/types'
 
@@ -59,13 +59,15 @@ export async function buildHistoryFor(
     .orderBy(desc(schema.messages.createdAt))
     .limit(maxTurns)
 
+  // 始终拉 conversation 用于 pinned ids + agentIds（agent 名字 map 给 Phase C 跨 agent 渲染用）
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, conversationId),
+  })
+
   // pinned 消息：可能在最近 N 条之外，单独拉
   let pinned: MessageRow[] = []
   let pinnedIdSet = new Set<string>()
   if (includePinned) {
-    const conv = await db.query.conversations.findFirst({
-      where: eq(schema.conversations.id, conversationId),
-    })
     const pinnedIds = (conv?.pinnedMessageIds ?? []).filter((id) => id !== excludeMessageId)
     if (pinnedIds.length > 0) {
       pinned = await db
@@ -78,6 +80,18 @@ export async function buildHistoryFor(
           ),
         )
       pinnedIdSet = new Set(pinned.map((p) => p.id))
+    }
+  }
+
+  // agent 名字 map：Phase C 群聊里把别 agent 的消息渲染成 [名字]: text 的 user 消息时要用
+  const agentNames = new Map<string, string>()
+  if (conv && conv.agentIds.length > 1) {
+    const rows = await db
+      .select({ id: schema.agents.id, name: schema.agents.name })
+      .from(schema.agents)
+      .where(inArray(schema.agents.id, conv.agentIds))
+    for (const r of rows as Pick<AgentRow, 'id' | 'name'>[]) {
+      agentNames.set(r.id, r.name)
     }
   }
 
@@ -99,7 +113,7 @@ export async function buildHistoryFor(
     tokens: number
   }> = []
   for (const msg of merged) {
-    const serialized = serializeMessage(msg, agentId, artifactTitles)
+    const serialized = serializeMessage(msg, agentId, artifactTitles, agentNames)
     if (!serialized) continue
     const tokens = serialized.reduce((sum, m) => sum + estimateChatMessageTokens(m), 0)
     items.push({ msgId: msg.id, isPinned: pinnedIdSet.has(msg.id), serialized, tokens })
@@ -153,6 +167,7 @@ function serializeMessage(
   msg: MessageRow,
   currentAgentId: string,
   artifactTitles: Map<string, string>,
+  agentNames: Map<string, string>,
 ): ChatCompletionMessageParam[] | null {
   if (msg.role === 'system') return null // system prompt 由 agent-runner 注入，不进 history
 
@@ -164,9 +179,15 @@ function serializeMessage(
 
   // role === 'agent'
   if (msg.role === 'agent') {
-    // Phase A / B：只处理「自己」的 agent message；他人的留给 Phase C
-    if (msg.agentId !== currentAgentId) return null
-    return renderSelfAssistantParts(msg.parts, artifactTitles)
+    if (msg.agentId === currentAgentId) {
+      return renderSelfAssistantParts(msg.parts, artifactTitles)
+    }
+    // Phase C：别 agent 的消息 → [名字]: text 的 user role 注入；仅在群聊场景（agentNames 非空）启用
+    if (msg.agentId && agentNames.has(msg.agentId)) {
+      const m = renderOtherAgentAsUser(msg.parts, agentNames.get(msg.agentId)!, artifactTitles)
+      return m ? [m] : null
+    }
+    return null
   }
 
   return null
@@ -277,6 +298,40 @@ function stringifyToolResult(result: unknown, isError: boolean): string {
   } catch {
     return isError ? '[error] (unserializable)' : '(unserializable)'
   }
+}
+
+/**
+ * Phase C：把别 agent 的 message 转成 [名字]: text 的 user role 消息注入给当前 agent。
+ * 只保留 text / code / artifact_ref 折叠占位；drop thinking / tool_use / tool_result。
+ * 详见 specs/13-conversation-context.md「群聊 / Orchestrator」节。
+ */
+function renderOtherAgentAsUser(
+  parts: MessagePart[],
+  agentName: string,
+  artifactTitles: Map<string, string>,
+): ChatCompletionMessageParam | null {
+  const buf: string[] = []
+  for (const p of parts) {
+    switch (p.type) {
+      case 'text':
+        if (p.content) buf.push(p.content)
+        break
+      case 'code':
+        if (p.content) buf.push(p.content)
+        break
+      case 'artifact_ref': {
+        const title = artifactTitles.get(p.artifactId) ?? ''
+        buf.push(title ? `[产物: ${title} (id=${p.artifactId})]` : `[产物 ${p.artifactId}]`)
+        break
+      }
+      // thinking / tool_use / tool_result / image_attachment / file_attachment：跨 agent 视野下一律丢
+      default:
+        break
+    }
+  }
+  const text = buf.join('\n').trim()
+  if (!text) return null
+  return { role: 'user', content: `[${agentName}] ${text}` }
 }
 
 // ─── 批量取 artifact title ───────────────────────────────

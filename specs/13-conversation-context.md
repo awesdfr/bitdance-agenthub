@@ -110,9 +110,13 @@ export async function buildHistoryFor(
 
 **注意**：tool_calls 数组里所有 callId 必须有对应 tool role message 跟随，否则 OpenAI API 报错。`buildHistoryFor` 必须保证 tool_use / tool_result 配对完整；若某个 tool_use 找不到对应 tool_result（极少情况，如 run abort 留下半截工具），跳过整条 assistant message 不进历史。
 
-### 别 agent 的 assistant message（role='assistant' && agentId !== currentAgentId）
+### 别 agent 的 message（role='agent' && agentId !== currentAgentId）
 
-**Phase A / B 跳过**（单聊场景不会出现；群聊在 Phase C 处理）。
+**群聊场景（Phase C，已实现）**：当 `conversation.agentIds.length > 1` 时，别 agent 的发言渲染成 `user` role 消息、加 `[<Agent名>] ` 前缀注入给当前 agent。只保留 `text` / `code` / `artifact_ref`（折叠占位）；`thinking` / `tool_use` / `tool_result` 一律丢——「文字是公共语言，思考与工具调用是 agent 私事」。文本为空则整条跳过。
+
+单聊场景（`agentIds` 长度 ≤ 1）不会出现别 agent 消息，跳过。
+
+实现：`renderOtherAgentAsUser`。是否启用由 `buildHistoryFor` 内部按 `agentIds.length > 1` 自动判定（构造 `agentNames` map），不需要 caller 传开关。
 
 ---
 
@@ -187,14 +191,22 @@ const history = await buildHistoryFor(agent.id, args.conversationId, {
 
 ---
 
-## 群聊 / Orchestrator（Phase C，本 spec 现在不实现，但提前定好契约）
+## 群聊 / Orchestrator（Phase C，已实现）
 
-`buildHistoryFor` 在群聊场景下要根据 agent 角色返回不同视图：
+群聊（`conversation.agentIds.length > 1`）下，`buildHistoryFor` 按「当前 agent 为主体」的视角返回不同视图，**无需 caller 显式传 policy**——是否注入跨 agent 文本由会话 agent 数自动判定：
 
-- **isOrchestrator agent**：看见所有 worker 的**文本输出**（折叠 thinking/tool_use/tool_result）+ user 消息。自己的 plan_tasks 调用还原 tool_calls。
-- **普通 worker agent**：看自己的完整 history + user 消息 + **其他 agent 的文本摘要**，其他 agent 文本作为 `user` role 注入，前缀 `[<Agent名>]:`。worker 的 system prompt 自动追加一段说明这套前缀语义。
+- **当前 agent 自己的消息**：完整还原 `assistant` + `tool_calls` + 配对的 `tool` 结果（`renderSelfAssistantParts`）。Orchestrator 自己的 `plan_tasks` 调用因此也被还原成 tool_calls。
+- **其他成员的消息（含 Orchestrator 与其他 worker）**：折叠成 `[<Agent名>] <文本>` 的单条 `user` 消息（`renderOtherAgentAsUser`）。drop thinking / tool_use / tool_result；artifact 只留 `[产物: title (id=...)]` 占位。
 
-`BuildHistoryOptions` 在 Phase C 会扩展 `policy: 'self-only' | 'shared-text'`，默认 `shared-text`。
+> 设计取舍：worker 一次写网页可能产生数 K token 的 tool_use/tool_result，别 agent 看了无意义；artifact 才是真正的跨 agent 交付物，要看内容自己 `read_artifact`。Orchestrator 同理——看 worker「最终发的话」就够决定下一步，不需要 worker 的中间过程。
+
+### worker / Orchestrator 的 system prompt 追加
+
+`agent-runner.ts:buildAdapterInput` 在「群聊 + custom adapter」时，把 `GROUP_CHAT_SYSTEM_NOTE` 追加到 system prompt 末尾，说明 `[名字]` 前缀语义：别人的话不是自己的输出、不带前缀的才是用户本人、产物用 `read_artifact` 取。追加发生在 token 预算估算**之前**，让这段说明计入 `promptEstimate`。
+
+仅 custom adapter 需要：ClaudeCode adapter 不消费 `input.history`（走 SDK session resume），群聊里它只看自己的 session、不会出现 `[名字]` 前缀，故不追加。
+
+`BuildHistoryOptions` 在 Phase C **没有**新增 `policy` 字段——早先设想的 `'self-only' | 'shared-text'` 开关被「按 `agentIds` 数自动判定」取代，省掉一个 caller 必须正确传参的旋钮。
 
 ---
 
@@ -265,7 +277,7 @@ reasoning 模型（DeepSeek R1 / OpenAI o1 等）`outputReserve` 加大到 16K-3
 
 ---
 
-## 验证清单（Phase A + B + D 合并前）
+## 验证清单（Phase A + B + C + D 合并前）
 
 **Phase A + B**：
 - [ ] 单聊：连续两轮对话，第二轮 agent 能正确引用第一轮的内容
@@ -273,8 +285,15 @@ reasoning 模型（DeepSeek R1 / OpenAI o1 等）`outputReserve` 加大到 16K-3
 - [ ] 单聊：把消息 pin 之后，即使发了 25+ 条新消息，pinned 那条仍在 history 里
 - [ ] 单聊：tool_use 与 tool_result 配对正确，OpenAI 没报「tool_call_id not found」之类错
 - [ ] 单聊：artifact_ref 折叠为占位文本，agent 没把整个产物吐出来
-- [ ] 群聊：不报错（即便 worker 现在没有跨 agent 视野，至少不能 crash）
+- [ ] 群聊：单聊路径不 crash（消息选取 / tool 配对在多 agent 下仍正确）
 - [ ] Claude Code agent：行为不变（不消费 history）
+
+**Phase C（群聊跨 agent 视野）**：
+- [ ] 群聊：worker 能看到别 agent 的文字发言（以 `[名字] ` 前缀的 user 消息出现），但看不到别人的 thinking / tool 调用细节
+- [ ] 群聊：worker / Orchestrator（custom adapter）的 system prompt 末尾出现 `## 群聊上下文` 说明段
+- [ ] 群聊：别 agent 的 artifact 只以 `[产物: title (id=...)]` 占位出现，需要全文走 read_artifact
+- [ ] 单聊：system prompt 不追加群聊说明段（agentIds ≤ 1 不触发）
+- [ ] Claude Code worker：群聊里不追加说明段、行为不变
 
 **Phase D**：
 - [ ] 跑 20+ 轮对话后，最新对话不会因为超 contextWindow 报 LLM API 错
@@ -288,5 +307,5 @@ reasoning 模型（DeepSeek R1 / OpenAI o1 等）`outputReserve` 加大到 16K-3
 
 - Spec 03（MessagePart）：本 spec 是 MessagePart → OpenAI ChatMessage 的反向映射
 - Spec 05（adapter interface）：`AdapterInput.history` 字段在 spec 05 描述
-- Spec 06（orchestrator flow）：Phase C 时本 spec 与 spec 06 「子 Agent 看到的上下文」节合并去重
+- Spec 06（orchestrator flow）：两条上下文注入路径**当前并存、未合并**——spec 06 的 `buildSubAgentPrompt` 把最近 N 条群聊渲染成 `<recent_conversation>` XML 塞进被分派 worker 的 prompt；本 spec 的 `buildHistoryFor` 把跨 run 历史渲染成 `[名字]` 前缀的 history。custom adapter 的 sub-agent 会同时收到两者（有部分重叠，尚未去重）
 - Spec 09（frontend）：pinned 消息的 UI 操作不变，本 spec 仅消费其结果

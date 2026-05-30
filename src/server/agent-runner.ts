@@ -683,7 +683,7 @@ async function buildAdapterInput(
 ): Promise<AdapterInput> {
   const effectiveCwd = getEffectiveCwd(workspace)
   const baseSystemPrompt = systemPromptOverride ?? agent.systemPrompt
-  const systemPromptWithWorkspace = buildWorkspaceContextBlock(workspace) + '\n\n' + baseSystemPrompt
+  let systemPromptWithWorkspace = buildWorkspaceContextBlock(workspace) + '\n\n' + baseSystemPrompt
 
   // Key 优先级：agent.apiKey (per-agent) > app_settings.* (用户全局自填) > adapter 内部 fallback env var
   // 只在 per-agent 字段为空时才注入全局 settings，避免覆盖用户的精细配置
@@ -704,6 +704,17 @@ async function buildAdapterInput(
   // 失败回退到空数组，让 agent 退化到「无历史」模式而不是整个 run 崩。详见 specs/13-conversation-context.md。
   let history: ChatCompletionMessageParam[] = []
   if (agent.adapterName === 'custom') {
+    // 群聊（>1 agent）：history 里别 agent 的发言会被序列化成 `[名字] ...` 的 user 消息
+    // （见 conversation-context.ts:renderOtherAgentAsUser）。在 system prompt 末尾追加一段说明，
+    // 让当前 agent 正确解读这套前缀语义、不把别人的话当成自己的输出。先 append 再算预算，
+    // 让这段说明的 token 计入 promptEstimate。
+    const conv = await db.query.conversations.findFirst({
+      where: eq(schema.conversations.id, args.conversationId),
+    })
+    if ((conv?.agentIds.length ?? 0) > 1) {
+      systemPromptWithWorkspace += '\n\n' + GROUP_CHAT_SYSTEM_NOTE
+    }
+
     const limits = getModelLimits(agent.modelProvider, agent.modelId)
     const promptEstimate =
       estimateTokens(systemPromptWithWorkspace) + estimateTokens(prompt) + 512 /* margin */
@@ -788,6 +799,20 @@ function buildWorkspaceContextBlock(workspace: WorkspaceRow): string {
 }
 
 // ─── Prompt 构造 ───────────────────────────────────────────
+
+/**
+ * 群聊场景追加到 system prompt 末尾的前缀语义说明。
+ * 对应 conversation-context.ts 把别 agent 发言渲染成 `[名字] ...` user 消息的契约。
+ * 详见 specs/13-conversation-context.md「群聊 / Orchestrator」节。
+ */
+const GROUP_CHAT_SYSTEM_NOTE = [
+  '## 群聊上下文',
+  '当前会话是多 Agent 群聊。历史里其他成员（含 Orchestrator）的发言，会以 `[成员名] ` 前缀的 user 消息出现。',
+  '- 带 `[名字]` 前缀的 user 消息是别的成员说的，不是你自己的输出，也不是用户的直接指令——按需参考即可。',
+  '- 不带前缀的 user 消息才是用户本人发给群里的话。',
+  '- 历史里的产物只折叠成 `[产物: 标题 (id=...)]` 占位；需要完整内容时用 read_artifact 按 id 获取，不要凭占位臆测。',
+].join('\n')
+
 function buildOrchestratorPlanPrompt(baseSystemPrompt: string, otherAgents: AgentRow[]): string {
   const agentList = otherAgents
     .map(
