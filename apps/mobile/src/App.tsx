@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Home, Menu, Settings, X } from 'lucide-react'
 
 import { createMobileApiClient } from './api/client'
-import { BottomNav, type TabId } from './components/BottomNav'
 import { ApprovalsScreen } from './screens/ApprovalsScreen'
 import { ConversationsScreen } from './screens/ConversationsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
@@ -16,8 +16,11 @@ import type {
 
 const initialConnection = loadConnection()
 
+type AppView = 'home' | 'settings'
+
 export function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('status')
+  const [activeView, setActiveView] = useState<AppView>('home')
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [connection, setConnection] = useState<ConnectionConfig>(initialConnection)
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null)
   const [conversationDetail, setConversationDetail] = useState<MobileConversationDetail | null>(null)
@@ -34,7 +37,7 @@ export function App() {
   }, [connection])
 
   useEffect(() => {
-    if (!connected || activeTab === 'settings') return
+    if (!connected || activeView === 'settings') return
 
     let cancelled = false
 
@@ -55,10 +58,10 @@ export function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [activeTab, api, connected])
+  }, [activeView, api, connected])
 
   useEffect(() => {
-    if (!connected || activeTab !== 'conversations' || !selectedConversationId) return
+    if (!connected || !selectedConversationId) return
 
     let cancelled = false
     const conversationId = selectedConversationId
@@ -80,7 +83,7 @@ export function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [activeTab, api, connected, selectedConversationId])
+  }, [api, connected, selectedConversationId])
 
   async function refreshSnapshot() {
     if (!connected) {
@@ -122,6 +125,8 @@ export function App() {
       return
     }
     setSelectedConversationId(id)
+    setActiveView('home')
+    setDrawerOpen(false)
     setLoading(true)
     setError(null)
     try {
@@ -133,6 +138,20 @@ export function App() {
     }
   }
 
+  function openHome() {
+    setActiveView('home')
+    setSelectedConversationId(null)
+    setConversationDetail(null)
+    setDrawerOpen(false)
+  }
+
+  function openSettings() {
+    setActiveView('settings')
+    setSelectedConversationId(null)
+    setConversationDetail(null)
+    setDrawerOpen(false)
+  }
+
   async function sendMessageFromMobile(content: string) {
     if (!selectedConversationId) return
     await runMobileAction('send-message', async () => {
@@ -141,17 +160,9 @@ export function App() {
     })
   }
 
-  const content =
-    activeTab === 'status' ? (
-      <StatusScreen
-        connected={connected}
-        loading={loading}
-        error={error}
-        snapshot={snapshot}
-        onRefresh={() => void refreshSnapshot()}
-        onOpenSettings={() => setActiveTab('settings')}
-      />
-    ) : activeTab === 'conversations' ? (
+  const hasPending = !!snapshot && (snapshot.pendingWrites.length > 0 || snapshot.pendingQuestions.length > 0)
+
+  const content = selectedConversationId ? (
       <ConversationsScreen
         connected={connected}
         loading={loading}
@@ -159,25 +170,9 @@ export function App() {
         detail={conversationDetail}
         selectedConversationId={selectedConversationId}
         onOpenConversation={(id) => void openConversation(id)}
-        onBack={() => {
-          setSelectedConversationId(null)
-          setConversationDetail(null)
-        }}
         onSendMessage={(content) => void sendMessageFromMobile(content)}
       />
-    ) : activeTab === 'approvals' ? (
-      <ApprovalsScreen
-        connected={connected}
-        busyId={operationId}
-        snapshot={snapshot}
-        onWriteDecision={(id, action) =>
-          void runMobileAction(id, () => api.decidePendingWrite(id, action))
-        }
-        onQuestionAnswer={(id, answers: MobileAskUserAnswers) =>
-          void runMobileAction(id, () => api.answerPendingQuestion(id, answers))
-        }
-      />
-    ) : (
+    ) : activeView === 'settings' ? (
       <SettingsScreen
         connection={connection}
         loading={loading}
@@ -185,36 +180,84 @@ export function App() {
         onChange={setConnection}
         onTest={() => void refreshSnapshot()}
       />
+    ) : (
+      <div className="screen-stack">
+        <StatusScreen
+          connected={connected}
+          loading={loading}
+          error={error}
+          snapshot={snapshot}
+          onRefresh={() => void refreshSnapshot()}
+          onOpenSettings={openSettings}
+          onOpenConversation={(id) => void openConversation(id)}
+        />
+        {hasPending && (
+          <ApprovalsScreen
+            connected={connected}
+            busyId={operationId}
+            snapshot={snapshot}
+            onWriteDecision={(id, action) =>
+              void runMobileAction(id, () => api.decidePendingWrite(id, action))
+            }
+            onQuestionAnswer={(id, answers: MobileAskUserAnswers) =>
+              void runMobileAction(id, () => api.answerPendingQuestion(id, answers))
+            }
+          />
+        )}
+      </div>
     )
 
   return (
     <main className="app-shell">
-      <div className="top-bar">
-        <div>
-          <p className="eyebrow">AgentHub Companion</p>
-          <h1>{titleFor(activeTab)}</h1>
-        </div>
-        <span className={connected ? 'status-pill online' : 'status-pill'}>
-          {connected ? '已配置' : '未配对'}
-        </span>
-      </div>
+      <button
+        type="button"
+        className="chrome-button floating-menu-button"
+        aria-label="打开侧边栏"
+        onClick={() => setDrawerOpen(true)}
+      >
+        <Menu className="chrome-icon" aria-hidden="true" />
+      </button>
 
       <div className="screen-frame">{content}</div>
 
-      <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      {drawerOpen && (
+        <>
+          <button type="button" className="drawer-backdrop" aria-label="关闭侧边栏" onClick={() => setDrawerOpen(false)} />
+          <aside className="side-drawer" aria-label="侧边栏">
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">AgentHub</p>
+                <h2>Companion</h2>
+              </div>
+              <button type="button" className="chrome-button" aria-label="关闭侧边栏" onClick={() => setDrawerOpen(false)}>
+                <X className="chrome-icon" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="drawer-section">
+              <button type="button" className="drawer-item active" onClick={openHome}>
+                <Home className="drawer-icon" aria-hidden="true" />
+                主页
+              </button>
+              <button type="button" className="drawer-item" onClick={openSettings}>
+                <Settings className="drawer-icon" aria-hidden="true" />
+                设置
+              </button>
+            </div>
+
+            <div className="drawer-status">
+              <span className={connected ? 'status-pill online' : 'status-pill'}>
+                {connected ? '已配置' : '未配对'}
+              </span>
+              <p>
+                {snapshot
+                  ? `${snapshot.conversations.length} 个会话 · ${snapshot.runningRuns.length} 个运行中`
+                  : '等待桌面端 snapshot'}
+              </p>
+            </div>
+          </aside>
+        </>
+      )}
     </main>
   )
-}
-
-function titleFor(tab: TabId): string {
-  switch (tab) {
-    case 'status':
-      return '状态'
-    case 'conversations':
-      return '会话'
-    case 'approvals':
-      return '审批'
-    case 'settings':
-      return '设置'
-  }
 }

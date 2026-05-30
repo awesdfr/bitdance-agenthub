@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Check, FileText, MessageCircleQuestion, Send, X } from 'lucide-react'
 
 import type { MobileAskUserAnswers, MobilePendingQuestion, MobileSnapshot } from '../types'
 
@@ -27,7 +28,10 @@ export function ApprovalsScreen({
   return (
     <div className="screen-stack">
       <section className="card-list">
-        <h2 className="section-title">文件修改审批</h2>
+        <h2 className="section-title">
+          <FileText className="section-icon" aria-hidden="true" />
+          文件修改审批
+        </h2>
         {writes.length > 0 ? (
           writes.map((write) => (
             <article key={write.id} className="approval-card">
@@ -55,6 +59,7 @@ export function ApprovalsScreen({
                   disabled={busyId === write.id}
                   onClick={() => onWriteDecision(write.id, 'reject')}
                 >
+                  <X className="button-icon" aria-hidden="true" />
                   {busyId === write.id ? '处理中' : '拒绝'}
                 </button>
                 <button
@@ -63,6 +68,7 @@ export function ApprovalsScreen({
                   disabled={busyId === write.id}
                   onClick={() => onWriteDecision(write.id, 'approve')}
                 >
+                  <Check className="button-icon" aria-hidden="true" />
                   {busyId === write.id ? '处理中' : '批准'}
                 </button>
               </div>
@@ -74,7 +80,10 @@ export function ApprovalsScreen({
       </section>
 
       <section className="card-list">
-        <h2 className="section-title">Agent 提问</h2>
+        <h2 className="section-title">
+          <MessageCircleQuestion className="section-icon" aria-hidden="true" />
+          Agent 提问
+        </h2>
         {questions.length > 0 ? (
           questions.map((item) => {
             const draft = drafts[item.id] ?? emptyAnswers(item)
@@ -109,7 +118,10 @@ export function ApprovalsScreen({
                               }))
                             }
                           >
-                            <span>{option.label}</span>
+                            <span>
+                              {selected && <Check className="option-icon" aria-hidden="true" />}
+                              {option.label}
+                            </span>
                             {option.description && <small>{option.description}</small>}
                           </button>
                         )
@@ -124,6 +136,7 @@ export function ApprovalsScreen({
                   disabled={!canSubmit || busyId === item.id}
                   onClick={() => onQuestionAnswer(item.id, draft)}
                 >
+                  <Send className="button-icon" aria-hidden="true" />
                   {busyId === item.id ? '提交中' : '提交回答'}
                 </button>
               </article>

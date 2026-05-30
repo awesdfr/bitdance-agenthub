@@ -1,3 +1,5 @@
+import { Wifi } from 'lucide-react'
+
 import type { ConnectionConfig } from '../types'
 
 export function SettingsScreen({
@@ -46,6 +48,7 @@ export function SettingsScreen({
         {error && <div className="error-banner">{error}</div>}
 
         <button type="button" className="primary-action full" onClick={onTest}>
+          <Wifi className="button-icon" aria-hidden="true" />
           {loading ? '测试中' : '测试连接'}
         </button>
       </section>
