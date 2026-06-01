@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server'
 const BUILTIN_ALLOWED_ORIGINS = new Set([
   'capacitor://localhost',
   'ionic://localhost',
+  'https://localhost',
+  'http://localhost',
 ])
 
 export function mobileOptions(req: NextRequest): NextResponse {
