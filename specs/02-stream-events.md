@@ -47,7 +47,12 @@ type StreamEvent = BaseEvent & (
   // —— Orchestrator 调度可视化 ——
   | { type: 'dispatch.plan',  runId: string, plan: DispatchPlanItem[] }
   | { type: 'dispatch.start', parentRunId: string, childRunId: string, taskId: string, agentId: string }
-  | { type: 'dispatch.end',   childRunId: string, taskId: string, status: 'complete' | 'failed' }
+  | { type: 'dispatch.end',
+      parentRunId: string,
+      childRunId?: string,
+      taskId: string,
+      status: 'complete' | 'failed' | 'aborted' | 'skipped',
+      error?: string }
 
   // —— Agent fs_write 审批（仅 review 模式发；详见 Spec 07） ——
   | { type: 'fs_write.pending',  pendingWrite: PendingWrite }       // agent 调 fs_write，等用户审批
@@ -135,11 +140,11 @@ dispatch.start    (r1, r2, t1, pm)
   message.start   (m2, pm, r2)
   ...
   run.end         (r2, 'complete')
-dispatch.end      (r2, t1, 'complete')
+dispatch.end      (parentRunId=r1, childRunId=r2, taskId=t1, status='complete')
 
 dispatch.start    (r1, r3, t2, design)
   ...
-dispatch.end      (r3, t2, 'complete')
+dispatch.end      (parentRunId=r1, childRunId=r3, taskId=t2, status='complete')
 
 # 聚合
 message.start     (m4, orch, r1)
@@ -147,6 +152,12 @@ part.start        (m4, 0, { type:'text', content:'' })
 part.delta        (...)
 message.end       (m4)
 run.end           (r1, 'complete')
+```
+
+若某任务因上游失败 / 中止被跳过，不会有 `dispatch.start` / child `run.start`，只发：
+
+```
+dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream task did not complete')
 ```
 
 ---

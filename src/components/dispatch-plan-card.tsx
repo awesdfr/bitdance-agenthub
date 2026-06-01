@@ -1,22 +1,22 @@
 'use client'
 
-import { CheckCircle2, Circle, Loader2, Network, XCircle } from 'lucide-react'
+import { Ban, CheckCircle2, Circle, Loader2, Network, XCircle } from 'lucide-react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { DispatchState } from '@/stores/app-store'
 import { useAppStore } from '@/stores/app-store'
-
-type TaskStatus = 'pending' | 'running' | 'complete' | 'failed'
+import type { DispatchTaskStatus } from '@/shared/types'
 
 export function DispatchPlanCard({ dispatch }: { dispatch: DispatchState }) {
   const agents = useAppStore((s) => s.agents)
   const total = dispatch.plan.length
-  const done = Object.values(dispatch.taskStatus).filter(
-    (s) => s === 'complete' || s === 'failed',
-  ).length
+  const statuses = Object.values(dispatch.taskStatus)
+  const done = statuses.filter(isTerminalStatus).length
   const allDone = done === total
+  const hasFailed = statuses.some((s) => s === 'failed' || s === 'aborted')
+  const hasSkipped = statuses.some((s) => s === 'skipped')
   const progress = total > 0 ? Math.round((done / total) * 100) : 0
 
   return (
@@ -35,7 +35,10 @@ export function DispatchPlanCard({ dispatch }: { dispatch: DispatchState }) {
           <div
             className={cn(
               'h-full rounded-full transition-all duration-500 ease-out',
-              allDone ? 'bg-emerald-500' : 'bg-primary',
+              allDone && hasFailed && 'bg-red-500',
+              allDone && !hasFailed && hasSkipped && 'bg-zinc-400',
+              allDone && !hasFailed && !hasSkipped && 'bg-emerald-500',
+              !allDone && 'bg-primary',
             )}
             style={{ width: `${progress}%` }}
           />
@@ -43,7 +46,7 @@ export function DispatchPlanCard({ dispatch }: { dispatch: DispatchState }) {
 
         <div className="space-y-1.5">
           {dispatch.plan.map((task, idx) => {
-            const status = (dispatch.taskStatus[task.id] ?? 'pending') as TaskStatus
+            const status = dispatch.taskStatus[task.id] ?? 'pending'
             const agent = agents[task.agentId]
             return (
               <div
@@ -57,6 +60,8 @@ export function DispatchPlanCard({ dispatch }: { dispatch: DispatchState }) {
                     'border-amber-300 bg-amber-50/40 ring-2 ring-amber-200/60 dark:bg-amber-950/20',
                   status === 'complete' && 'border-emerald-200 dark:border-emerald-900/40',
                   status === 'failed' && 'border-red-300',
+                  status === 'aborted' && 'border-zinc-300 bg-zinc-50/50 dark:border-zinc-700',
+                  status === 'skipped' && 'border-zinc-200 bg-muted/40 dark:border-zinc-800',
                 )}
               >
                 <StatusIcon status={status} />
@@ -94,7 +99,11 @@ export function DispatchPlanCard({ dispatch }: { dispatch: DispatchState }) {
   )
 }
 
-function StatusIcon({ status }: { status: TaskStatus }) {
+function isTerminalStatus(status: DispatchTaskStatus): boolean {
+  return status === 'complete' || status === 'failed' || status === 'aborted' || status === 'skipped'
+}
+
+function StatusIcon({ status }: { status: DispatchTaskStatus }) {
   const base = 'mt-0.5 size-3.5 shrink-0 transition-colors'
   if (status === 'pending') {
     return <Circle className={cn(base, 'text-muted-foreground/40')} />
@@ -108,6 +117,9 @@ function StatusIcon({ status }: { status: TaskStatus }) {
         className={cn(base, 'text-emerald-600 animate-in zoom-in-50 duration-300')}
       />
     )
+  }
+  if (status === 'aborted' || status === 'skipped') {
+    return <Ban className={cn(base, 'text-zinc-500 animate-in zoom-in-50 duration-300')} />
   }
   return <XCircle className={cn(base, 'text-red-600 animate-in zoom-in-50 duration-300')} />
 }

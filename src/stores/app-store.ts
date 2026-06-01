@@ -4,8 +4,15 @@ import { enableMapSet } from 'immer'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
-import type { AgentRunRow, AgentRow, ArtifactRow, AttachmentRow, ConversationRow, ConversationWithMeta, MessageRow } from '@/db/schema'
-import type { DispatchPlanItem, MessagePart, PendingQuestion, PendingWrite, StreamEvent } from '@/shared/types'
+import type { AgentRunRow, AgentRow, ArtifactRow, AttachmentRow, ConversationWithMeta, MessageRow } from '@/db/schema'
+import type {
+  DispatchPlanItem,
+  DispatchTaskStatus,
+  MessagePart,
+  PendingQuestion,
+  PendingWrite,
+  StreamEvent,
+} from '@/shared/types'
 
 enableMapSet()
 
@@ -13,7 +20,7 @@ export interface DispatchState {
   runId: string                                    // Orchestrator 的 runId
   messageId: string                                // 触发 plan 的 Orchestrator message id
   plan: DispatchPlanItem[]
-  taskStatus: Record<string, 'pending' | 'running' | 'complete' | 'failed'>
+  taskStatus: Record<string, DispatchTaskStatus>
   childRunIds: Record<string, string>              // taskId → childRunId
 }
 
@@ -617,9 +624,16 @@ export const useAppStore = create<AppState>()(
           }
 
           case 'dispatch.end': {
-            // dispatch.end 没有 parentRunId,得通过 childRunId 反查
+            const direct = s.dispatchesByRunId[event.parentRunId]
+            if (direct) {
+              direct.taskStatus[event.taskId] = event.status
+              if (event.childRunId) direct.childRunIds[event.taskId] = event.childRunId
+              return
+            }
+
+            // 兼容旧事件形态：如果没有找到 parentRunId，再通过 childRunId 反查
             for (const d of Object.values(s.dispatchesByRunId)) {
-              if (d.childRunIds[event.taskId] === event.childRunId) {
+              if (event.childRunId && d.childRunIds[event.taskId] === event.childRunId) {
                 d.taskStatus[event.taskId] = event.status
                 return
               }

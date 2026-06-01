@@ -88,6 +88,16 @@ export interface DispatchPlanItem {
   dependsOn?: string[]
 }
 
+export type DispatchTaskStatus =
+  | 'pending'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'aborted'
+  | 'skipped'
+
+export type DispatchTaskEndStatus = Exclude<DispatchTaskStatus, 'pending' | 'running'>
+
 // ─── Agent 写文件审批 ─────────────────────────────────────
 /**
  * Agent 调 fs_write 在 review 模式下产出的「待审批」记录。后端持有 promise，
@@ -165,7 +175,14 @@ export type StreamEvent = BaseEvent &
     | { type: 'artifact.update'; artifactId: string; patch: Partial<ArtifactContent> }
     | { type: 'dispatch.plan'; runId: string; plan: DispatchPlanItem[] }
     | { type: 'dispatch.start'; parentRunId: string; childRunId: string; taskId: string; agentId: string }
-    | { type: 'dispatch.end'; childRunId: string; taskId: string; status: 'complete' | 'failed' }
+    | {
+        type: 'dispatch.end'
+        parentRunId: string
+        childRunId?: string
+        taskId: string
+        status: DispatchTaskEndStatus
+        error?: string
+      }
     | { type: 'fs_write.pending'; pendingWrite: PendingWrite }
     | { type: 'fs_write.resolved'; pendingId: string; applied: boolean }
     | { type: 'ask_user.pending'; pendingQuestion: PendingQuestion }

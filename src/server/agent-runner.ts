@@ -3,7 +3,12 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import { db, schema } from '@/db/client'
 import type { AgentRow, ArtifactRow, MessageRow, WorkspaceRow } from '@/db/schema'
-import type { DispatchPlanItem, MessagePart, StreamEvent } from '@/shared/types'
+import type {
+  DispatchPlanItem,
+  DispatchTaskEndStatus,
+  MessagePart,
+  StreamEvent,
+} from '@/shared/types'
 import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 
 import { agentRegistry } from './adapters/registry'
@@ -48,7 +53,80 @@ export interface RunResult {
   outputMessageIds: string[]
 }
 
+interface DispatchTaskResult {
+  runId: string | null
+  status: DispatchTaskEndStatus
+  error?: string
+  artifactIds: string[]
+  outputMessageIds: string[]
+}
+
+interface BlockedDependency {
+  taskId: string
+  result: DispatchTaskResult
+}
+
+class Semaphore {
+  private active = 0
+  private readonly queue: Array<{
+    resolve: (release: () => void) => void
+    reject: (reason?: unknown) => void
+    signal: AbortSignal
+    onAbort: () => void
+  }> = []
+
+  constructor(private readonly limit: number) {}
+
+  acquire(signal: AbortSignal): Promise<() => void> {
+    if (signal.aborted) return Promise.reject(new Error('Semaphore acquire aborted'))
+    if (this.active < this.limit) {
+      this.active++
+      return Promise.resolve(this.createRelease())
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        signal,
+        onAbort: () => {
+          const idx = this.queue.indexOf(waiter)
+          if (idx >= 0) this.queue.splice(idx, 1)
+          reject(new Error('Semaphore acquire aborted'))
+        },
+      }
+      signal.addEventListener('abort', waiter.onAbort, { once: true })
+      this.queue.push(waiter)
+    })
+  }
+
+  private createRelease(): () => void {
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.active--
+      this.drain()
+    }
+  }
+
+  private drain(): void {
+    while (this.active < this.limit && this.queue.length > 0) {
+      const waiter = this.queue.shift()
+      if (!waiter) return
+      waiter.signal.removeEventListener('abort', waiter.onAbort)
+      if (waiter.signal.aborted) continue
+      this.active++
+      waiter.resolve(this.createRelease())
+    }
+  }
+}
+
+const SUB_AGENT_CONTEXT_RECENT_LIMIT = 5
+const MAX_CONCURRENT_SUB_AGENT_RUNS = 4
+
 const activeRuns = new Map<string, AbortController>()
+const subAgentRunSemaphore = new Semaphore(MAX_CONCURRENT_SUB_AGENT_RUNS)
 
 export const AgentRunner = {
   run(args: RunArgs): { runId: string; promise: Promise<RunResult> } {
@@ -148,6 +226,9 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     const result = agent.isOrchestrator
       ? await executeOrchestratorRun(runId, signal, args, agent, workspace, prompt, attachments)
       : await executeSimpleRun(runId, signal, args, agent, workspace, prompt, attachments)
+    if (signal.aborted) {
+      return await finalize(runId, args, 'aborted', result)
+    }
     return await finalizeOk(runId, args, result)
   } catch (err) {
     if (signal.aborted) {
@@ -227,18 +308,18 @@ async function executeOrchestratorRun(
 
   const planRun = await consumeStream(planStream, agent.id, runId, (event) => {
     if (event.type === 'tool.call' && event.toolName === 'plan_tasks') {
-      const a = event.args as { reasoning?: string; tasks?: DispatchPlanItem[] }
-      if (Array.isArray(a?.tasks)) planRef.value = a.tasks
+      planRef.value = parseDispatchPlanToolArgs(event.args)
     }
   })
   allArtifactIds.push(...planRun.artifactIds)
   allOutputMessageIds.push(...planRun.outputMessageIds)
 
   const plan = planRef.value
-  if (!plan || plan.length === 0) {
+  if (!plan) {
     // 没拆出 plan：当作 Orchestrator 直接回答了用户，结束
     return { artifactIds: allArtifactIds, outputMessageIds: allOutputMessageIds }
   }
+  validateDispatchPlan(plan, otherAgents, agent.id)
 
   publish({
     type: 'dispatch.plan',
@@ -267,7 +348,6 @@ async function executeOrchestratorRun(
     userPrompt,
     plan,
     taskResults,
-    args.conversationId,
   )
   // Aggregate 阶段不再带 plan_tasks 工具，避免重复拆解
   const aggregateToolNames = agent.toolNames.filter((n) => n !== 'plan_tasks')
@@ -296,6 +376,131 @@ async function executeOrchestratorRun(
   return { artifactIds: allArtifactIds, outputMessageIds: allOutputMessageIds }
 }
 
+function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
+  if (!isRecord(args) || !Array.isArray(args.tasks)) {
+    throw new Error('Invalid dispatch plan: plan_tasks args must include a tasks array')
+  }
+
+  return args.tasks.map((raw, index) => {
+    if (!isRecord(raw)) {
+      throw new Error(`Invalid dispatch plan: task at index ${index} must be an object`)
+    }
+    const id = readNonEmptyString(raw.id, `task at index ${index} id`)
+    const agentId = readNonEmptyString(raw.agentId, `task "${id}" agentId`)
+    const task = readNonEmptyString(raw.task, `task "${id}" instruction`)
+
+    let dependsOn: string[] | undefined
+    if (raw.dependsOn !== undefined) {
+      if (!Array.isArray(raw.dependsOn)) {
+        throw new Error(`Invalid dispatch plan: task "${id}" dependsOn must be an array`)
+      }
+      dependsOn = raw.dependsOn.map((dep, depIndex) =>
+        readNonEmptyString(dep, `task "${id}" dependsOn[${depIndex}]`),
+      )
+    }
+
+    const item: DispatchPlanItem = { id, agentId, task }
+    if (dependsOn && dependsOn.length > 0) item.dependsOn = dependsOn
+    return item
+  })
+}
+
+function validateDispatchPlan(
+  plan: DispatchPlanItem[],
+  availableAgents: AgentRow[],
+  orchestratorAgentId: string,
+): void {
+  if (plan.length === 0) {
+    throw new Error('Invalid dispatch plan: tasks must not be empty')
+  }
+
+  const availableAgentIds = new Set(availableAgents.map((a) => a.id))
+  const taskIds = new Set<string>()
+  const duplicateTaskIds = new Set<string>()
+
+  for (const task of plan) {
+    if (taskIds.has(task.id)) duplicateTaskIds.add(task.id)
+    taskIds.add(task.id)
+  }
+  if (duplicateTaskIds.size > 0) {
+    throw new Error(
+      `Invalid dispatch plan: duplicate task id(s): ${[...duplicateTaskIds].join(', ')}`,
+    )
+  }
+
+  for (const task of plan) {
+    if (task.agentId === orchestratorAgentId) {
+      throw new Error(
+        `Invalid dispatch plan: task "${task.id}" dispatches to the orchestrator itself, which would recurse`,
+      )
+    }
+    if (!availableAgentIds.has(task.agentId)) {
+      throw new Error(
+        `Invalid dispatch plan: task "${task.id}" references unavailable agentId "${task.agentId}"`,
+      )
+    }
+
+    const depIds = new Set<string>()
+    for (const dep of task.dependsOn ?? []) {
+      if (dep === task.id) {
+        throw new Error(`Invalid dispatch plan: task "${task.id}" cannot depend on itself`)
+      }
+      if (depIds.has(dep)) {
+        throw new Error(
+          `Invalid dispatch plan: task "${task.id}" lists duplicate dependency "${dep}"`,
+        )
+      }
+      depIds.add(dep)
+      if (!taskIds.has(dep)) {
+        throw new Error(
+          `Invalid dispatch plan: task "${task.id}" depends on unknown task "${dep}"`,
+        )
+      }
+    }
+  }
+
+  assertAcyclicDispatchPlan(plan)
+}
+
+function assertAcyclicDispatchPlan(plan: DispatchPlanItem[]): void {
+  const byId = new Map(plan.map((task) => [task.id, task]))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const stack: string[] = []
+
+  const visit = (taskId: string) => {
+    if (visited.has(taskId)) return
+    if (visiting.has(taskId)) {
+      const cycleStart = stack.indexOf(taskId)
+      const cycle = [...stack.slice(cycleStart), taskId]
+      throw new Error(`Invalid dispatch plan: circular dependency ${cycle.join(' -> ')}`)
+    }
+
+    const task = byId.get(taskId)
+    if (!task) return
+
+    visiting.add(taskId)
+    stack.push(taskId)
+    for (const dep of task.dependsOn ?? []) visit(dep)
+    stack.pop()
+    visiting.delete(taskId)
+    visited.add(taskId)
+  }
+
+  for (const task of plan) visit(task.id)
+}
+
+function readNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Invalid dispatch plan: ${label} must be a non-empty string`)
+  }
+  return value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 // ─── DAG 调度 ──────────────────────────────────────────────
 interface DagContext {
   parentRunId: string
@@ -307,15 +512,36 @@ interface DagContext {
 async function executeDag(
   plan: DispatchPlanItem[],
   ctx: DagContext,
-): Promise<Map<string, RunResult>> {
-  const results = new Map<string, RunResult>()
+): Promise<Map<string, DispatchTaskResult>> {
+  const results = new Map<string, DispatchTaskResult>()
   const remaining = new Set(plan.map((t) => t.id))
 
   while (remaining.size > 0) {
-    if (ctx.signal.aborted) break
+    if (ctx.signal.aborted) {
+      markRemainingTasksAborted(plan, remaining, results, ctx)
+      throw new Error('Orchestrator run aborted')
+    }
+
+    for (const task of plan) {
+      if (!remaining.has(task.id)) continue
+      const blockers = (task.dependsOn ?? []).flatMap((dep) => {
+        const result = results.get(dep)
+        return result && result.status !== 'complete' ? [{ taskId: dep, result }] : []
+      })
+      if (blockers.length === 0) continue
+
+      const result = skippedTaskResult(task, blockers)
+      results.set(task.id, result)
+      remaining.delete(task.id)
+      publishDispatchEnd(ctx, task.id, result)
+    }
+
+    if (remaining.size === 0) break
 
     const ready = plan.filter(
-      (t) => remaining.has(t.id) && (t.dependsOn ?? []).every((d) => results.has(d)),
+      (t) =>
+        remaining.has(t.id) &&
+        (t.dependsOn ?? []).every((d) => results.get(d)?.status === 'complete'),
     )
     if (ready.length === 0) {
       throw new Error('Circular dependency or unresolved task in plan')
@@ -333,42 +559,127 @@ async function executeDag(
 
 async function runChildTask(
   task: DispatchPlanItem,
-  upstream: Map<string, RunResult>,
+  upstream: Map<string, DispatchTaskResult>,
   ctx: DagContext,
-): Promise<RunResult> {
-  const subPrompt = await buildSubAgentPrompt(task, upstream, ctx.conversationId)
+): Promise<DispatchTaskResult> {
+  let release: (() => void) | null = null
+  try {
+    release = await subAgentRunSemaphore.acquire(ctx.signal)
+  } catch {
+    const result = abortedBeforeStartTaskResult(task, 'Aborted while waiting for sub-agent concurrency slot')
+    publishDispatchEnd(ctx, task.id, result)
+    return result
+  }
 
-  const { runId: childRunId, promise } = AgentRunner.run({
-    agentId: task.agentId,
-    conversationId: ctx.conversationId,
-    triggerMessageId: ctx.triggerMessageId,
-    parentRunId: ctx.parentRunId,
-    overridePrompt: subPrompt,
-    parentSignal: ctx.signal,
-  })
+  try {
+    if (ctx.signal.aborted) {
+      const result = abortedBeforeStartTaskResult(task, 'Aborted before sub-agent run started')
+      publishDispatchEnd(ctx, task.id, result)
+      return result
+    }
 
-  publish({
-    type: 'dispatch.start',
-    conversationId: ctx.conversationId,
-    timestamp: Date.now(),
-    parentRunId: ctx.parentRunId,
-    childRunId,
-    taskId: task.id,
-    agentId: task.agentId,
-  })
+    const subPrompt = await buildSubAgentPrompt(task, upstream, ctx.conversationId)
 
-  const result = await promise
+    const { runId: childRunId, promise } = AgentRunner.run({
+      agentId: task.agentId,
+      conversationId: ctx.conversationId,
+      triggerMessageId: ctx.triggerMessageId,
+      parentRunId: ctx.parentRunId,
+      overridePrompt: subPrompt,
+      parentSignal: ctx.signal,
+    })
 
+    publish({
+      type: 'dispatch.start',
+      conversationId: ctx.conversationId,
+      timestamp: Date.now(),
+      parentRunId: ctx.parentRunId,
+      childRunId,
+      taskId: task.id,
+      agentId: task.agentId,
+    })
+
+    const result = await promise
+
+    publish({
+      type: 'dispatch.end',
+      conversationId: ctx.conversationId,
+      timestamp: Date.now(),
+      parentRunId: ctx.parentRunId,
+      childRunId,
+      taskId: task.id,
+      status: result.status,
+      error: result.error,
+    })
+
+    return result
+  } finally {
+    release?.()
+  }
+}
+
+function skippedTaskResult(
+  task: DispatchPlanItem,
+  blockers: BlockedDependency[],
+): DispatchTaskResult {
+  const blockerText = blockers
+    .map(({ taskId, result }) => `${taskId}:${result.status}`)
+    .join(', ')
+  return {
+    runId: null,
+    status: 'skipped',
+    error: `Skipped because upstream task(s) did not complete for task "${task.id}": ${blockerText}`,
+    artifactIds: [],
+    outputMessageIds: [],
+  }
+}
+
+function markRemainingTasksAborted(
+  plan: DispatchPlanItem[],
+  remaining: Set<string>,
+  results: Map<string, DispatchTaskResult>,
+  ctx: DagContext,
+): void {
+  for (const task of plan) {
+    if (!remaining.has(task.id)) continue
+    const result: DispatchTaskResult = {
+      runId: null,
+      status: 'aborted',
+      error: `Aborted before task "${task.id}" started`,
+      artifactIds: [],
+      outputMessageIds: [],
+    }
+    results.set(task.id, result)
+    remaining.delete(task.id)
+    publishDispatchEnd(ctx, task.id, result)
+  }
+}
+
+function abortedBeforeStartTaskResult(task: DispatchPlanItem, error: string): DispatchTaskResult {
+  return {
+    runId: null,
+    status: 'aborted',
+    error: `${error} for task "${task.id}"`,
+    artifactIds: [],
+    outputMessageIds: [],
+  }
+}
+
+function publishDispatchEnd(
+  ctx: DagContext,
+  taskId: string,
+  result: DispatchTaskResult,
+): void {
   publish({
     type: 'dispatch.end',
     conversationId: ctx.conversationId,
     timestamp: Date.now(),
-    childRunId,
-    taskId: task.id,
-    status: result.status === 'complete' ? 'complete' : 'failed',
+    parentRunId: ctx.parentRunId,
+    childRunId: result.runId ?? undefined,
+    taskId,
+    status: result.status,
+    error: result.error,
   })
-
-  return result
 }
 
 // ─── 流消费 + 持久化 ─────────────────────────────────────
@@ -861,40 +1172,42 @@ function buildOrchestratorAggregatePrompt(baseSystemPrompt: string): string {
 
 async function buildSubAgentPrompt(
   task: DispatchPlanItem,
-  upstream: Map<string, RunResult>,
+  upstream: Map<string, DispatchTaskResult>,
   conversationId: string,
 ): Promise<string> {
   // 收集已完成上游任务的 artifact 列表，作为隐式上下文
-  const upstreamArtifactIds: string[] = []
+  const upstreamArtifactIds = new Set<string>()
   for (const dep of task.dependsOn ?? []) {
     const r = upstream.get(dep)
-    if (r) upstreamArtifactIds.push(...r.artifactIds)
+    if (r) {
+      for (const artifactId of r.artifactIds) upstreamArtifactIds.add(artifactId)
+    }
   }
 
   let upstreamArtifactsXml = ''
-  if (upstreamArtifactIds.length > 0) {
+  if (upstreamArtifactIds.size > 0) {
     const artifacts = await db.query.artifacts.findMany({
-      where: inArray(schema.artifacts.id, upstreamArtifactIds),
+      where: inArray(schema.artifacts.id, [...upstreamArtifactIds]),
     })
-    upstreamArtifactsXml = artifacts
-      .map((a) => `  <artifact id="${a.id}" type="${a.type}" title=${JSON.stringify(a.title)} />`)
-      .join('\n')
+    upstreamArtifactsXml = artifacts.map(renderArtifactSummaryXml).join('\n')
   }
 
   const existing = await db.query.artifacts.findMany({
     where: eq(schema.artifacts.conversationId, conversationId),
+    orderBy: [desc(schema.artifacts.createdAt)],
   })
   const existingXml = existing
-    .map((a) => `  <artifact id="${a.id}" type="${a.type}" title=${JSON.stringify(a.title)} />`)
+    .filter((a) => !upstreamArtifactIds.has(a.id))
+    .slice(0, SUB_AGENT_CONTEXT_RECENT_LIMIT)
+    .map(renderArtifactSummaryXml)
     .join('\n')
 
   // spec 06 §「子 Agent 看到的上下文」要求注入最近 N 条群聊 + 全部 pin。
-  const RECENT_LIMIT = 5
   const recent = (
     await db.query.messages.findMany({
       where: eq(schema.messages.conversationId, conversationId),
       orderBy: [desc(schema.messages.createdAt)],
-      limit: RECENT_LIMIT,
+      limit: SUB_AGENT_CONTEXT_RECENT_LIMIT,
     })
   ).reverse()
 
@@ -949,6 +1262,10 @@ async function buildSubAgentPrompt(
     .join('\n')
 }
 
+function renderArtifactSummaryXml(artifact: ArtifactRow): string {
+  return `  <artifact id="${artifact.id}" type="${artifact.type}" title=${JSON.stringify(artifact.title)} />`
+}
+
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -956,8 +1273,7 @@ function escapeXml(s: string): string {
 async function buildAggregatePrompt(
   originalUserPrompt: string,
   plan: DispatchPlanItem[],
-  taskResults: Map<string, RunResult>,
-  conversationId: string,
+  taskResults: Map<string, DispatchTaskResult>,
 ): Promise<string> {
   const allArtifactIds = [...taskResults.values()].flatMap((r) => r.artifactIds)
   const artifacts =
