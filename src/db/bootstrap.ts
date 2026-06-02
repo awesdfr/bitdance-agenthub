@@ -125,6 +125,21 @@ const DDL: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)`,
 
+  // ─── conversation_context_summaries ─────────────────────────
+  `CREATE TABLE IF NOT EXISTS conversation_context_summaries (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    covered_until_message_id TEXT NOT NULL,
+    covered_until_created_at INTEGER NOT NULL,
+    source_message_count INTEGER NOT NULL,
+    token_estimate INTEGER NOT NULL,
+    model_provider TEXT,
+    model_id TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_context_summaries_conv_created ON conversation_context_summaries(conversation_id, created_at)`,
+
   // ─── app_settings ──────────────────────────────
   `CREATE TABLE IF NOT EXISTS app_settings (
     id TEXT PRIMARY KEY,

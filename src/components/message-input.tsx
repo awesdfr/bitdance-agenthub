@@ -9,9 +9,10 @@ import { AttachmentChip, PendingAttachmentChip } from '@/components/attachment-c
 import { QuotedMessage } from '@/components/quoted-message'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import type { AgentRow, AttachmentRow } from '@/db/schema'
+import type { AgentRow } from '@/db/schema'
 import {
   abortRun,
+  compactConversation as compactConversationAPI,
   sendMessage as sendMessageAPI,
   setFsWriteApprovalMode,
   uploadAttachment as uploadAttachmentAPI,
@@ -37,6 +38,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const addLocalUserMessage = useAppStore((s) => s.addLocalUserMessage)
+  const upsertMessage = useAppStore((s) => s.upsertMessage)
   const replaceLocalMessageId = useAppStore((s) => s.replaceLocalMessageId)
   const conversation = useAppStore((s) => s.conversations[conversationId])
   const upsertConversation = useAppStore((s) => s.upsertConversation)
@@ -214,6 +216,24 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     const text = content.trim()
     const hasAttachments = pending.length > 0
     if ((!text && !hasAttachments) || sending || isRunning) return
+
+    if (text === '/compact' && !hasAttachments) {
+      setContent('')
+      setMentionedIds([])
+      setTrigger(null)
+      if (pendingQuote) setPendingQuote(null)
+      if (replyTargetId) setReplyTarget(conversationId, null)
+      setSending(true)
+      try {
+        const result = await compactConversationAPI(conversationId)
+        upsertMessage(result.message)
+      } catch (err) {
+        console.error('[MessageInput] compact failed', err)
+      } finally {
+        setSending(false)
+      }
+      return
+    }
 
     // 选区改写：把 pendingQuote 注入消息开头（XML 块给 LLM 当上下文）
     const finalContent = pendingQuote

@@ -1,10 +1,15 @@
-import { and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
 import type { AgentRow, ArtifactRow, MessageRow } from '@/db/schema'
 import { estimateTokens } from '@/shared/model-registry'
 import type { MessagePart } from '@/shared/types'
+
+import {
+  getLatestContextSummary,
+  renderConversationSummaryBlock,
+} from './context-compaction-service'
 
 /**
  * 把 conversation messages 序列化成 OpenAI ChatMessage 数组，给 CustomAgentAdapter 拼到
@@ -39,18 +44,20 @@ export async function buildHistoryFor(
   const includePinned = options.includePinned ?? true
   const excludeMessageId = options.excludeMessageId
   const tokenBudget = options.tokenBudget
+  const latestSummary = await getLatestContextSummary(conversationId)
 
   // 拉最近 N 条 complete 消息（按时间逆序取，下面再翻回正序）
-  const recentWhere = excludeMessageId
-    ? and(
-        eq(schema.messages.conversationId, conversationId),
-        eq(schema.messages.status, 'complete'),
-        ne(schema.messages.id, excludeMessageId),
-      )
-    : and(
-        eq(schema.messages.conversationId, conversationId),
-        eq(schema.messages.status, 'complete'),
-      )
+  const recentWhereClauses = [
+    eq(schema.messages.conversationId, conversationId),
+    eq(schema.messages.status, 'complete'),
+  ]
+  if (excludeMessageId) recentWhereClauses.push(ne(schema.messages.id, excludeMessageId))
+  if (latestSummary) {
+    recentWhereClauses.push(
+      gt(schema.messages.createdAt, latestSummary.coveredUntilCreatedAt),
+    )
+  }
+  const recentWhere = and(...recentWhereClauses)
 
   const recent = await db
     .select()
@@ -112,6 +119,18 @@ export async function buildHistoryFor(
     serialized: ChatCompletionMessageParam[]
     tokens: number
   }> = []
+  if (latestSummary) {
+    const summaryMessage: ChatCompletionMessageParam = {
+      role: 'user',
+      content: renderConversationSummaryBlock(latestSummary),
+    }
+    items.push({
+      msgId: latestSummary.id,
+      isPinned: true,
+      serialized: [summaryMessage],
+      tokens: estimateChatMessageTokens(summaryMessage),
+    })
+  }
   for (const msg of merged) {
     const serialized = serializeMessage(msg, agentId, artifactTitles, agentNames)
     if (!serialized) continue

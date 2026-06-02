@@ -4,6 +4,7 @@ import type {
   ArtifactRow,
   AttachmentRow,
   ConversationWithMeta,
+  ContextSummaryRow,
   MessageRow,
 } from '@/db/schema'
 import type { AskUserAnswer, PendingQuestion, PendingWrite } from '@/shared/types'
@@ -261,6 +262,19 @@ export async function sendMessage(
 }
 
 // ─── Runs ───────────────────────────────────────
+export interface CompactConversationResult {
+  summary: ContextSummaryRow
+  message: MessageRow
+}
+
+export async function compactConversation(
+  conversationId: string,
+): Promise<CompactConversationResult> {
+  return json<CompactConversationResult>(
+    fetch(`/api/conversations/${conversationId}/compact`, { method: 'POST' }),
+  )
+}
+
 export async function abortRun(runId: string): Promise<void> {
   await json<{ ok: true }>(fetch(`/api/runs/${runId}/abort`, { method: 'POST' }))
 }

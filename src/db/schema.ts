@@ -222,6 +222,26 @@ export interface RunUsage {
   model?: string
 }
 
+// ─── Conversation context summaries ────────────────────────────────────────
+export const contextSummaries = sqliteTable(
+  'conversation_context_summaries',
+  {
+    id: text('id').primaryKey(),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    summary: text('summary').notNull(),
+    coveredUntilMessageId: text('covered_until_message_id').notNull(),
+    coveredUntilCreatedAt: integer('covered_until_created_at').notNull(),
+    sourceMessageCount: integer('source_message_count').notNull(),
+    tokenEstimate: integer('token_estimate').notNull(),
+    modelProvider: text('model_provider').$type<ModelProvider>(),
+    modelId: text('model_id'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_context_summaries_conv_created').on(t.conversationId, t.createdAt)],
+)
+
 // ─── AppSettings (全局 API key / endpoint) ──────────────────
 /**
  * 全局应用设置。单行表（PK 固定 'singleton'），存用户在「设置」面板填写的
@@ -275,3 +295,6 @@ export type AttachmentInsert = typeof attachments.$inferInsert
 
 export type AgentRunRow = typeof agentRuns.$inferSelect
 export type AgentRunInsert = typeof agentRuns.$inferInsert
+
+export type ContextSummaryRow = typeof contextSummaries.$inferSelect
+export type ContextSummaryInsert = typeof contextSummaries.$inferInsert

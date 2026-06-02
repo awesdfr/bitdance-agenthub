@@ -233,6 +233,74 @@ reasoning 模型（DeepSeek R1 / OpenAI o1 等）`outputReserve` 加大到 16K-3
 
 ---
 
+## 手动上下文压缩（Phase E，第一版）
+
+第一版提供显式压缩入口，不自动触发：
+
+- 用户在输入框发送 `/compact`
+- 或在 `UsageBadge` popover 点击「压缩上下文」
+
+这两个入口都调用 `POST /api/conversations/:id/compact`，不会创建普通 user message，也不会触发 agent 回复。
+
+### 持久化
+
+压缩结果写入 `conversation_context_summaries` 表（详见 Spec 08）：
+
+- `summary`：压缩后的长期上下文摘要
+- `covered_until_message_id` / `covered_until_created_at`：摘要覆盖到的最后一条 message
+- `source_message_count`：参与压缩的原始 message 数
+- `token_estimate`：summary 粗略 token 估算
+- `model_provider` / `model_id`：生成摘要的模型，启发式 fallback 时为 `NULL`
+
+原始 `messages` 不删除、不改写。聊天记录仍完整可见；压缩只影响后续 LLM 上下文。
+
+### 摘要内容契约
+
+summary 必须保留：
+
+1. 用户目标
+2. 已确认的需求和约束
+3. 已完成的改动或结论
+4. 当前未解决问题
+5. 重要文件、模块、命令
+6. 重要 artifact id 和含义
+7. 后续继续工作时必须记住的注意事项
+
+summary 必须丢弃：寒暄、重复确认、无意义中间日志、完整 tool_result、长代码块、失败但无后续影响的尝试。
+
+artifact 仍只记录 id/title，不内联全文；需要全文时 agent 继续用 `read_artifact`。
+
+### 注入顺序
+
+`buildHistoryFor` 读取同一 conversation 的最新 summary，并把它作为最早的一条 `user` role context message 注入：
+
+```text
+- conversation summary（如果存在）
+- pinned messages（永远保留）
+- 最近 N 条未被 summary 覆盖的普通历史
+- 当前用户消息（adapter 自己追加）
+```
+
+被 summary 覆盖的普通非 pinned 消息不再重复注入，避免摘要和原文双计 token。pinned messages 不受覆盖范围影响，仍按原契约注入。
+
+### ClaudeCodeAdapter 边界
+
+Claude Code agent 默认通过 SDK `resume` 续接内部 session，不消费 `AdapterInput.history`。手动 compact 成功后必须清掉该 conversation 的 Claude Code session 缓存；下一轮 Claude Code run 不再 resume 老 session，而是在新 prompt 前置 `<conversation_summary>` 块。
+
+### UI 反馈
+
+compact 成功后，service 额外写一条 `role='system'` 的提示消息，例如：
+
+```text
+已压缩早期上下文，覆盖 18 条消息。
+```
+
+该系统消息只用于用户可见反馈，不参与 summary 表语义。
+
+第一版不做自动压缩；自动阈值触发留到后续 Phase E.2。
+
+---
+
 ## UI：用量在 UsageBadge popover 里展示
 
 聊天 header 的 `UsageBadge`（`src/components/usage-badge.tsx`）原本就在显示「Σ N.Nk tok」累计；点开 popover 看 input/output/cache 拆分 + per-agent / per-model 拆分。Phase D 把「上下文容量」这件事并进同一个 popover：

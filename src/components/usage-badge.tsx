@@ -1,8 +1,10 @@
 'use client'
 
-import { Coins } from 'lucide-react'
+import { Archive, Coins } from 'lucide-react'
+import { useState } from 'react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { compactConversation } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { getModelLimits } from '@/shared/model-registry'
 import { useAppStore, useConversationUsageTotal } from '@/stores/app-store'
@@ -19,6 +21,8 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
   const total = useConversationUsageTotal(conversationId)
   const agents = useAppStore((s) => s.agents)
   const conv = useAppStore((s) => s.conversations[conversationId])
+  const upsertMessage = useAppStore((s) => s.upsertMessage)
+  const [compacting, setCompacting] = useState(false)
 
   if (total.runCount === 0) return null
 
@@ -34,6 +38,19 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
     }
     return maxCtx
   })()
+
+  const handleCompact = async () => {
+    if (compacting) return
+    setCompacting(true)
+    try {
+      const result = await compactConversation(conversationId)
+      upsertMessage(result.message)
+    } catch (err) {
+      console.error('[UsageBadge] compact failed', err)
+    } finally {
+      setCompacting(false)
+    }
+  }
 
   return (
     <Popover>
@@ -92,6 +109,16 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
           ) : (
             <Row label="当前 ctx" value={total.lastInputTokens} dim hint="最近一次 prompt 大小" />
           )}
+          <button
+            type="button"
+            onClick={() => void handleCompact()}
+            disabled={compacting}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            title="Compact older conversation history into a summary"
+          >
+            <Archive className="size-3" />
+            {compacting ? '正在压缩...' : '压缩上下文'}
+          </button>
           {/* Cache 命中率：cacheRead / (input + cacheRead + cacheCreation) */}
           {total.cacheReadTokens > 0 && (
             <div

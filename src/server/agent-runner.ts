@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
@@ -14,6 +14,11 @@ import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 import { agentRegistry } from './adapters/registry'
 import type { AdapterAttachment, AdapterInput } from './adapters/types'
 import { getAttachmentAbsolutePath } from './attachment-service'
+import {
+  getLatestContextSummary,
+  prefixPromptWithContextSummary,
+  renderConversationSummaryBlock,
+} from './context-compaction-service'
 import { buildHistoryFor } from './conversation-context'
 import { eventBus } from './event-bus'
 import { newRunId } from './ids'
@@ -1042,11 +1047,19 @@ async function buildAdapterInput(
     })
   }
 
+  let effectivePrompt = prompt
+  if (agent.adapterName === 'claude-code' && !args.overridePrompt) {
+    effectivePrompt = await prefixPromptWithContextSummary(args.conversationId, prompt).catch((err) => {
+      console.warn('[agent-runner] prefixPromptWithContextSummary failed; continuing without summary', err)
+      return prompt
+    })
+  }
+
   return {
     agentId: agent.id,
     conversationId: args.conversationId,
     runId,
-    prompt,
+    prompt: effectivePrompt,
     workspacePath: effectiveCwd,
     systemPrompt: systemPromptWithWorkspace,
     apiKey: effectiveApiKey,
@@ -1203,9 +1216,20 @@ async function buildSubAgentPrompt(
     .join('\n')
 
   // spec 06 §「子 Agent 看到的上下文」要求注入最近 N 条群聊 + 全部 pin。
+  const latestSummary = await getLatestContextSummary(conversationId)
+  const recentWhere = latestSummary
+    ? and(
+        eq(schema.messages.conversationId, conversationId),
+        eq(schema.messages.status, 'complete'),
+        gt(schema.messages.createdAt, latestSummary.coveredUntilCreatedAt),
+      )
+    : and(
+        eq(schema.messages.conversationId, conversationId),
+        eq(schema.messages.status, 'complete'),
+      )
   const recent = (
     await db.query.messages.findMany({
-      where: eq(schema.messages.conversationId, conversationId),
+      where: recentWhere,
       orderBy: [desc(schema.messages.createdAt)],
       limit: SUB_AGENT_CONTEXT_RECENT_LIMIT,
     })
@@ -1242,9 +1266,16 @@ async function buildSubAgentPrompt(
 
   const recentXml = recent.map(renderMessage).filter(Boolean).join('\n')
   const pinnedXml = pinned.map(renderMessage).filter(Boolean).join('\n')
+  const summaryXml = latestSummary
+    ? renderConversationSummaryBlock(latestSummary)
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n')
+    : ''
 
   return [
     '<context>',
+    summaryXml,
     recentXml && `  <recent_conversation>\n${recentXml}\n  </recent_conversation>`,
     pinnedXml && `  <pinned_messages>\n${pinnedXml}\n  </pinned_messages>`,
     upstreamArtifactsXml &&
