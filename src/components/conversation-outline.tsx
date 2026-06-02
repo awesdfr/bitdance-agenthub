@@ -1,10 +1,9 @@
 'use client'
 
 import { Filter, ListTree, MessageSquare, Star } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import type { MessageRow } from '@/db/schema'
 import { toggleMessageBookmark } from '@/lib/api'
@@ -30,14 +29,32 @@ export function ConversationOutline({ conversationId }: { conversationId: string
 
   const [onlyStarred, setOnlyStarred] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const userMessages = messages.filter((m) => m.role === 'user')
   const filtered = onlyStarred ? userMessages.filter((m) => bookmarkedIds.has(m.id)) : userMessages
   const starredCount = userMessages.filter((m) => bookmarkedIds.has(m.id)).length
+  const latestVisibleId = filtered[filtered.length - 1]?.id ?? null
+  const activeId = filtered.some((m) => m.id === activeOutlineId) ? activeOutlineId : latestVisibleId
+
+  useEffect(() => {
+    if (!open || filtered.length === 0) return
+
+    const frame = window.requestAnimationFrame(() => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [conversationId, filtered.length, onlyStarred, open])
 
   if (userMessages.length === 0) return null
 
   const handleJump = (id: string) => {
+    setActiveOutlineId(id)
     const el = document.getElementById(`message-${id}`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -60,7 +77,7 @@ export function ConversationOutline({ conversationId }: { conversationId: string
   }
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <Button
@@ -72,8 +89,11 @@ export function ConversationOutline({ conversationId }: { conversationId: string
       >
         <ListTree className="size-4" />
       </PopoverTrigger>
-      <PopoverContent className="w-96 p-0" align="end">
-        <div className="flex items-center justify-between border-b px-3 py-2 text-xs">
+      <PopoverContent
+        className="flex max-h-[calc(100vh-6rem)] w-[min(calc(100vw-2rem),24rem)] gap-0 overflow-hidden p-0 sm:max-h-[70vh]"
+        align="end"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b px-3 py-2 text-xs">
           <span className="flex items-center gap-1.5 font-medium">
             <ListTree className="size-3.5" />
             对话目录
@@ -99,27 +119,35 @@ export function ConversationOutline({ conversationId }: { conversationId: string
             </button>
           </div>
         </div>
-        <ScrollArea className="max-h-[60vh]">
-          <div className="space-y-0.5 p-1">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-6 text-center text-[11px] text-muted-foreground">
-                没有收藏的提问
-              </div>
-            ) : (
-              filtered.map((m) => (
-                <OutlineItem
-                  key={m.id}
-                  index={userMessages.indexOf(m) + 1}
-                  message={m}
-                  starred={bookmarkedIds.has(m.id)}
-                  busy={busy === m.id}
-                  onClick={() => handleJump(m.id)}
-                  onToggleStar={(e) => handleToggleStar(m.id, e)}
-                />
-              ))
-            )}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={scrollRef}
+            className="max-h-[calc(100vh-8.5rem)] min-h-0 overflow-y-auto overscroll-contain sm:max-h-[calc(70vh-2.75rem)]"
+          >
+            <div className="space-y-0.5 p-1">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+                  没有收藏的提问
+                </div>
+              ) : (
+                filtered.map((m) => (
+                  <OutlineItem
+                    key={m.id}
+                    index={userMessages.indexOf(m) + 1}
+                    message={m}
+                    active={activeId === m.id}
+                    starred={bookmarkedIds.has(m.id)}
+                    busy={busy === m.id}
+                    onClick={() => handleJump(m.id)}
+                    onToggleStar={(e) => handleToggleStar(m.id, e)}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        </ScrollArea>
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-popover to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-gradient-to-t from-popover to-transparent" />
+        </div>
       </PopoverContent>
     </Popover>
   )
@@ -128,6 +156,7 @@ export function ConversationOutline({ conversationId }: { conversationId: string
 function OutlineItem({
   index,
   message,
+  active,
   starred,
   busy,
   onClick,
@@ -135,6 +164,7 @@ function OutlineItem({
 }: {
   index: number
   message: MessageRow
+  active: boolean
   starred: boolean
   busy: boolean
   onClick: () => void
@@ -157,7 +187,10 @@ function OutlineItem({
     <div
       className={cn(
         'group flex items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs transition hover:bg-accent',
-        starred && 'bg-amber-50/60 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/40',
+        active && 'bg-primary/10 ring-1 ring-primary/20 hover:bg-primary/10',
+        starred &&
+          !active &&
+          'bg-amber-50/60 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/40',
       )}
     >
       <button
