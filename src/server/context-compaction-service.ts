@@ -12,6 +12,7 @@ import type {
   MessageRow,
 } from '@/db/schema'
 import { clearClaudeCodeSession } from '@/server/adapters/claude-code-adapter'
+import { clearCodexSession } from '@/server/adapters/codex-adapter'
 import { newContextSummaryId, newMessageId } from '@/server/ids'
 import {
   getEffectiveAnthropicBaseUrl,
@@ -149,6 +150,7 @@ export async function compactConversation(
     .where(eq(schema.conversations.id, conversationId))
 
   clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 
   return {
     summary: summaryInsert as ContextSummaryRow,

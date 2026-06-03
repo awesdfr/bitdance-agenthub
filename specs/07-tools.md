@@ -326,8 +326,23 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 
 ---
 
+## Codex agent 的工具集（不走 AgentHub 工具表）
+
+`adapterName === 'codex'` 的 agent 不消费上面的「内置工具清单」。它通过 `@openai/codex-sdk` 暴露 Codex 自身的本地命令、文件变更、MCP、web search、todo/plan 等事件。
+
+**审批策略**：当前 Codex TypeScript SDK 没有 Claude `canUseTool` 等价 hook。AgentHub 因此不在 Review 模式下开放自动写盘：
+
+- Review 模式：`sandboxMode='read-only'`
+- Auto 模式：`sandboxMode='workspace-write'`
+- 所有模式：`approvalPolicy='never'`、`networkAccessEnabled=false`、`webSearchMode='disabled'`
+- 运行时：使用 AgentHub 隔离的 `CODEX_HOME=<dataDir>/codex-home`，不读取用户本机 `~/.codex` 配置 / 登录态
+
+后续若 SDK 暴露 patch / exec approval hook，再桥到 `pendingWrites`、`assertPathWithinWorkspace` 和 `findBannedPattern`。
+
+---
+
 ## 与 Spec 01 / 05 / 06 的关系
 
-- Spec 01：定义了 `Agent.toolNames`（引用本 spec 的工具名；Claude Code agent 强制 `[]`）
-- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Custom / Claude Code 两条 adapter 路径如何分别使用工具
+- Spec 01：定义了 `Agent.toolNames`（引用本 spec 的工具名；Claude Code / Codex agent 强制 `[]`）
+- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Custom / Claude Code / Codex 路径如何分别使用工具
 - Spec 06：`plan_tasks` 工具是 Orchestrator 三阶段工作流的核心

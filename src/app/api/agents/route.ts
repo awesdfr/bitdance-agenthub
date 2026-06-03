@@ -15,7 +15,7 @@ const CreateBody = z
     description: z.string().min(1).max(280),
     capabilities: z.array(z.string()).default([]),
     systemPrompt: z.string().min(1),
-    adapterName: z.enum(['custom', 'claude-code']).default('custom'),
+    adapterName: z.enum(['custom', 'claude-code', 'codex']).default('custom'),
     modelProvider: z.enum(['anthropic', 'openai', 'deepseek', 'volcano-ark']).optional(),
     modelId: z.string().min(1).optional(),
     toolNames: z.array(z.string()).default([]),

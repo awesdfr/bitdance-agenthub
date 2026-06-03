@@ -293,7 +293,7 @@ pnpm electron:rebuild   # 把 better-sqlite3 .node rebuild 到 Electron ABI 130
 
 **Electron 33 vs better-sqlite3 12.10.0**：本项目锁 `electron@33.4.11`，因为 better-sqlite3 12.10.0 native 代码用过时的 `v8::External::New(isolate, addon)` 2 参数形式，跟 Electron 34+ 的 V8 13 不兼容（编译报 "expected 3, have 2"）。等 better-sqlite3 升级支持新 V8 API 后再追新 Electron major。
 
-**asarUnpack: `[".next/standalone/**"]`** 仍然必要（chdir 跨不进 asar 归档，详见 §6.4）。
+**asarUnpack: `[".next/standalone/**"]`** 仍然必要（chdir 跨不进 asar 归档，详见 §6.5）。
 
 ### 6.2 @anthropic-ai/claude-agent-sdk
 
@@ -301,7 +301,15 @@ pnpm electron:rebuild   # 把 better-sqlite3 .node rebuild 到 Electron ABI 130
 - 需求：用户机器上**已**装过 Claude Code CLI（与现状一致；不打包进 app）。打不到时由 SDK 在第一次 `query()` 时抛错，UI 走错误路径展示
 - SDK 自带的 JS 入口需要能被 require：放在 standalone 的 node_modules 里，electron-builder 默认会带
 
-### 6.3 electron-builder 配置（节选 package.json）
+### 6.3 @openai/codex-sdk
+
+- SDK 使用 npm 依赖里的 `@openai/codex` runtime，通过 `runStreamed()` 输出结构化 JSONL 事件；不要求用户额外全局安装 Codex CLI
+- `@openai/codex` 通过 optionalDependencies 携带平台二进制包（darwin / linux / win32 × x64 / arm64）
+- `next.config.ts` 必须把 `@openai/codex-sdk` / `@openai/codex` 放进 `serverExternalPackages`，避免被打包器内联后丢失 CLI binary 查找语义
+- `scripts/electron-prebuild.mjs` 的 standalone 依赖补齐逻辑会递归读取 dependencies / optionalDependencies，把当前平台可用的 Codex runtime 一起带进 `.next/standalone/node_modules`
+- Codex adapter 默认 `networkAccessEnabled=false`、`webSearchMode='disabled'`；Review 模式 read-only，Auto 模式 workspace-write；子进程 `CODEX_HOME` 指到 AgentHub dataDir 下，避免继承用户 `~/.codex` / CC Switch 配置
+
+### 6.4 electron-builder 配置（节选 package.json）
 
 ```json
 {
@@ -338,7 +346,7 @@ pnpm electron:rebuild   # 把 better-sqlite3 .node rebuild 到 Electron ABI 130
 
 `npmRebuild: false` 关键：禁用 electron-builder 内置的 `@electron/rebuild`。我们已经在 setup 阶段 `pnpm electron:rebuild` 把 store 钉到 ABI 130，build 流程从头到尾都用 ABI 130，不需要 electron-builder 再 rebuild。开了它反而会通过 pnpm 硬链接污染 source store。
 
-### 6.4 asarUnpack + .asar.unpacked require 路径
+### 6.5 asarUnpack + .asar.unpacked require 路径
 
 **为什么 `asarUnpack: [".next/standalone/**"]`**：Next 的 standalone `server.js` 启动第一行就 `process.chdir(__dirname)`。`chdir` 是真实文件系统系统调用，跨不进 asar 归档（asar 不是真实目录），会抛 `ENOTDIR`。把整个 standalone 解出到 `app.asar.unpacked/.next/standalone/`，`__dirname` 就指向真实目录，chdir 通过。better-sqlite3 / claude-agent-sdk 都在 standalone 自带的 node_modules 里，跟着一起 unpack，不需要单独写 `**/better-sqlite3/**`。
 
@@ -356,13 +364,18 @@ require(path.join(standaloneRoot, '.next', 'standalone', 'server.js'))
 1. 把 `.next/static` 与 `public/` 拷进 `.next/standalone/` 子树。Next standalone 默认不包含这两份内容，server.js 启动后会找不到静态资源
 2. 扫 standalone 子树清除 broken symlinks。pnpm 在 `.next/standalone/node_modules/.pnpm/node_modules/` 里有部分 hoist 入口指向未被 Next file tracer 收录的旧版本（典型：`semver -> ../semver@6.3.1/...`，但 standalone 只带 `semver@7.8.1`）。这些 dangling link 运行时无害，但 electron-builder 打包阶段 `stat` 会 ENOENT
 
-### 6.5 next.config.ts 改动
+### 6.6 next.config.ts 改动
 
 ```ts
 const nextConfig: NextConfig = {
   output: 'standalone',
-  // Electron 打包后 better-sqlite3 走 require，不要 webpack bundle 它
-  serverExternalPackages: ['better-sqlite3', '@anthropic-ai/claude-agent-sdk'],
+  // Electron 打包后 native / SDK 子进程依赖走运行时 require/import，不要 webpack bundle 它
+  serverExternalPackages: [
+    'better-sqlite3',
+    '@anthropic-ai/claude-agent-sdk',
+    '@openai/codex-sdk',
+    '@openai/codex',
+  ],
 }
 ```
 

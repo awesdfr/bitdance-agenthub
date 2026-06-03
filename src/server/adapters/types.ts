@@ -29,15 +29,16 @@ export interface AdapterInput {
   systemPrompt: string
 
   /** 该 agent 单独配置的 API key（来自 agent.apiKey）；为 null 时 adapter 走环境 / OAuth fallback。
-   *  当 apiBaseUrl 非空时，此值会被当作 AUTH_TOKEN 传给 SDK（兼容第三方网关）。 */
+   *  当 apiBaseUrl 非空时，此值会被当作对应 SDK / endpoint 的 token。 */
   apiKey: string | null
 
-  /** 该 agent 单独配置的 API base URL（如 anyrouter）。null 表示走 SDK 默认 endpoint。 */
+  /** 该 agent 单独配置的 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同。 */
   apiBaseUrl: string | null
 
   /** 该 agent 选择的模型 id。所有 adapter 共用：
    *  - CustomAgentAdapter: 必填（OpenAI 兼容协议的 model 字段）
-   *  - ClaudeCodeAdapter: 可选，null 时 adapter 走 SDK 默认（如 'claude-opus-4-7'） */
+   *  - ClaudeCodeAdapter: 可选，null 时 adapter 走 SDK 默认（如 'claude-opus-4-7'）
+   *  - CodexAdapter: 可选，null 时 adapter 走 SDK 默认（如 'gpt-5-codex'） */
   modelId: string | null
 
   /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。
@@ -51,7 +52,7 @@ export interface AdapterInput {
    * 跨 run 对话历史（OpenAI ChatMessage 格式），不含当前触发消息。
    * 由 AgentRunner 通过 conversation-context.buildHistoryFor 序列化，详见 specs/13-conversation-context.md。
    * - CustomAgentAdapter：拼到 [system, ...history, currentUser] 中间
-   * - ClaudeCodeAdapter：忽略（走 SDK 自己的 session resume）
+   * - ClaudeCodeAdapter / CodexAdapter：忽略（走 SDK 自己的 session resume）
    * - MockAdapter：忽略
    */
   history?: ChatCompletionMessageParam[]

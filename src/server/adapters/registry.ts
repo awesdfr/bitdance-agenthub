@@ -2,6 +2,7 @@ import type { AgentRow } from '@/db/schema'
 import type { AdapterName } from '@/shared/types'
 
 import { ClaudeCodeAdapter } from './claude-code-adapter'
+import { CodexAdapter } from './codex-adapter'
 import { CustomAgentAdapter } from './custom-agent-adapter'
 import { MockAdapter } from './mock-adapter'
 import type { AgentPlatformAdapter } from './types'
@@ -9,7 +10,7 @@ import type { AgentPlatformAdapter } from './types'
 /**
  * AgentRegistry — 根据 Agent.adapterName 路由到对应实现。
  *
- * Codex adapter 暂未实现（后续 milestone）。
+ * Codex adapter 走 @openai/codex-sdk。
  */
 class AgentRegistry {
   private adapters = new Map<AdapterName, AgentPlatformAdapter>()
@@ -34,7 +35,7 @@ function buildRegistry(): AgentRegistry {
   reg.register(new MockAdapter())
   reg.register(new CustomAgentAdapter())
   reg.register(new ClaudeCodeAdapter())
-  // TODO CodexAdapter in later milestone
+  reg.register(new CodexAdapter())
   return reg
 }
 

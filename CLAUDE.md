@@ -39,7 +39,7 @@
 | ORM | Drizzle | 不用 Prisma |
 | DB | SQLite（`better-sqlite3` 驱动） | 不引入 Postgres/MySQL |
 | 流式传输 | SSE（一条全局连接） | 不用 WebSocket |
-| AI SDK | `@anthropic-ai/sdk`、`@anthropic-ai/claude-agent-sdk`、`openai`；CodexAdapter 实装时引入 `@openai/codex-sdk`（当前未安装） | 通过适配器层屏蔽差异 |
+| AI SDK | `@anthropic-ai/sdk`、`@anthropic-ai/claude-agent-sdk`、`openai`、`@openai/codex-sdk` | 通过适配器层屏蔽差异 |
 | 包管理 | pnpm | 不用 npm/yarn（lockfile 唯一） |
 | Node 版本 | ≥ 20 | 用 `node --experimental-strip-types` 跑 TS 脚本时需要 |
 
@@ -173,6 +173,8 @@ Key 来源按优先级（详见 `src/server/settings-service.ts` 与 `src/server
 1. **`agents.api_key`** — per-agent override（最高优先级；agent 库里单独填）
 2. **`app_settings.<provider>_api_key`** — 用户在「设置」面板（Sidebar 齿轮）全局自填，存 SQLite `app_settings` 单行表
 3. **`process.env.<PROVIDER>_API_KEY`** — `.env.local` 兜底（dev / CI 友好）
+
+Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向 AgentHub dataDir 下的隔离目录，不默认读取用户本机 `~/.codex`，避免 CC Switch 等外部 Codex 配置影响 AgentHub。Codex 的自定义 `apiBaseUrl` 必须是 Codex/Responses 兼容 endpoint；DeepSeek 等 Chat Completions-only provider 走 CustomAgentAdapter。
 
 约束：
 

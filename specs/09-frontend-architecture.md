@@ -193,7 +193,7 @@ app/page.tsx
     │   ├── <ConversationItem />  ── 单条会话 + hover 重命名/删除
     │   ├── <ArtifactLibrary />
     │   ├── <AgentLibrary />
-    │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code'）；Claude Code 模式下隐藏 provider/工具集，apiKey 文案改为 "Anthropic key（留空走 ~/.claude OAuth）"
+    │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code' / 'codex'）；SDK adapter 模式下隐藏 provider/工具集，Codex 使用 AgentHub 隔离 CODEX_HOME
     │   └── <RenameInput />       ── 内联重命名
     ├── <ChatPanel />             ── 当前会话主区
     │   ├── header: 头像堆 + AgentInfoPopover + 文件树/产物预览 toggle + FileLibraryDialog + AddAgentDialog + UsageBadge（点开 popover 看 token 拆分）

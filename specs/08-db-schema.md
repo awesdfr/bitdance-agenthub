@@ -33,7 +33,7 @@ agents {
   model_provider  text              // 仅 adapter_name='custom' 时填
   model_id        text              // 同上
   api_key         text              // 该 agent 单独的 key；NULL 走 env
-  api_base_url    text              // 该 agent 单独的 endpoint（如第三方网关）；NULL 走 SDK 默认
+  api_base_url    text              // 该 agent 单独的 endpoint；NULL 走 SDK 默认
   tool_names      text JSON         // string[]，引用 Spec 07
   is_builtin      int  bool default 0
   is_orchestrator int  bool default 0
@@ -43,10 +43,11 @@ agents {
 ```
 
 **约束**：
-- `adapter_name='custom'` 时 `model_provider` + `model_id` 必填
+- `adapter_name='custom'` 时 `model_provider` + `model_id` 必填；`adapter_name='claude-code' | 'codex'` 时 `model_provider=NULL`，`model_id` 可选
 - `is_builtin=1` 的 agent 可修改、不可删除（service 层 enforce）
-- `api_key` 优先级高于 env var；按 provider 路由：`deepseek→DEEPSEEK_API_KEY` / `openai→OPENAI_API_KEY` / `volcano-ark→ARK_API_KEY` / `anthropic→ANTHROPIC_API_KEY`
+- `api_key` 优先级高于 env var；按 provider / adapter 路由：`deepseek→DEEPSEEK_API_KEY` / `openai→OPENAI_API_KEY` / `volcano-ark→ARK_API_KEY` / `anthropic→ANTHROPIC_API_KEY` / `codex→CODEX_API_KEY 或 OPENAI_API_KEY`
 - `api_base_url` 非空时（Claude Code adapter），`api_key` 作为 `ANTHROPIC_AUTH_TOKEN` 传 SDK；`ANTHROPIC_BASE_URL` 设为 `api_base_url`；同时清空 `ANTHROPIC_API_KEY` 防覆盖（详见 Spec 05 ClaudeCodeAdapter）
+- `api_base_url` 非空时（Codex adapter），作为 `@openai/codex-sdk` 的 `baseUrl` 传入；`api_key` 作为 SDK `apiKey`（内部 `CODEX_API_KEY`）传入；endpoint 必须支持 Codex/Responses，DeepSeek 等 Chat Completions-only endpoint 走 Custom adapter
 
 **索引**：无（agent 数量小，全表扫描可接受）
 
@@ -254,10 +255,10 @@ app_settings {
 1. agents.api_key           — per-agent override（最高）
 2. app_settings.<provider>  — 用户在设置面板自填
 3. process.env.<PROVIDER>   — .env.local 兜底
-4. ~/.claude/.credentials.json — 仅 Claude Code adapter 的 OAuth fallback
+4. ~/.claude/.credentials.json — 仅 Claude Code adapter 的 OAuth fallback；Codex adapter 默认使用 AgentHub 隔离的 `<dataDir>/codex-home`，不读取用户本机 `~/.codex`
 ```
 
-`anthropic_base_url` 的解析同链：`agents.api_base_url` → `app_settings.anthropic_base_url` → `process.env.ANTHROPIC_BASE_URL` → SDK 默认。
+`anthropic_base_url` 的解析同链：`agents.api_base_url` → `app_settings.anthropic_base_url` → `process.env.ANTHROPIC_BASE_URL` → SDK 默认。Codex 不读全局 base URL，只接受 per-agent `agents.api_base_url` 或 SDK 默认 endpoint，避免 CC Switch / 本机 `~/.codex` 配置影响 AgentHub。
 
 **索引**：无（单行查询不需要）。
 

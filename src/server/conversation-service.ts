@@ -11,6 +11,7 @@ import type { MessagePart } from '@/shared/types'
 
 import { AgentRunner } from './agent-runner'
 import { clearClaudeCodeSession } from './adapters/claude-code-adapter'
+import { clearCodexSession } from './adapters/codex-adapter'
 import {
   newConversationId,
   newMessageId,
@@ -259,8 +260,9 @@ export async function deleteConversation(conversationId: string): Promise<void> 
     }
   }
 
-  // 清掉 Claude Code session 缓存
+  // 清掉 SDK session 缓存
   clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 }
 
 // ─── 清空会话历史 ────────────────────────────────────────
@@ -319,6 +321,7 @@ export async function clearConversationHistory(
   })
 
   clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 
   return {
     conversation: await withWorkspaceMeta({
@@ -659,6 +662,7 @@ export async function withdrawLatestUserMessage(
 
   // 撤回会让 SDK session 中保存的「user msg → agent reply」对儿和 DB 不一致；清掉重来
   clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 
   // 重新扫一遍待删的 ids（含 wait 期间补写入的死消息）
   const messagesToDelete = await db.query.messages.findMany({
@@ -751,6 +755,7 @@ export async function regenerateLatestResponse(
 
   // 重新生成等价于「让 agent 对同一个 user msg 重新作答」，SDK session 里那个旧 reply 要扔；清掉重新开 session
   clearClaudeCodeSession(conversationId)
+  clearCodexSession(conversationId)
 
   // 删除 latestUser 之后的所有 message（保留 latestUser 本身）
   const messagesToDelete = await db.query.messages.findMany({

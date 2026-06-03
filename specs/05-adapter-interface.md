@@ -11,9 +11,9 @@
 | Adapter | 状态 |
 |---|---|
 | `MockAdapter` | ✅ 已实现，用于开发期不烧 token |
-| `CustomAgentAdapter` | ✅ 已实现，覆盖 DeepSeek / OpenAI / 火山方舟（OpenAI 兼容协议）；**Anthropic 路径在 buildClient 里直接 throw，待实装** |
+| `CustomAgentAdapter` | ✅ 已实现，覆盖 DeepSeek / OpenAI / 火山方舟（OpenAI Chat Completions 兼容协议）；**Anthropic 路径在 buildClient 里直接 throw，待实装** |
 | `ClaudeCodeAdapter` | ✅ 已实现，基于 `@anthropic-ai/claude-agent-sdk` `query()` + `canUseTool` 审批桥 |
-| `CodexAdapter` | ❌ **未实现**（registry 注释里标 TODO；设计目标为 `@openai/codex-sdk`，CLI 仅 fallback） |
+| `CodexAdapter` | ✅ 已实现，基于 `@openai/codex-sdk` `runStreamed()`；Review 模式只读，Auto 模式 workspace-write；自定义 Base URL 必须支持 Codex/Responses |
 
 ---
 
@@ -27,12 +27,12 @@
 ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐
 │ ClaudeCode   │  │ Codex        │  │ CustomAgent      │  │ Mock         │
 │ Adapter      │  │ Adapter      │  │ Adapter          │  │ Adapter      │
-│ ✅ 已实现     │  │ (TODO)       │  │ ✅ 已实现         │  │ ✅ 已实现     │
+│ ✅ 已实现     │  │ ✅ 已实现     │  │ ✅ 已实现         │  │ ✅ 已实现     │
 └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  └──────┬───────┘
        │                 │                   │                    │
    @anthropic-ai/    @openai/           OpenAI SDK            预设脚本
    claude-agent-sdk  codex-sdk          (DeepSeek / 火山方舟 / OpenAI
-                    （CLI 仅 fallback）  均走 OpenAI-compat 协议)
+                    (Responses)         均走 Chat Completions 兼容协议)
                                         + 自写 tool loop
 ```
 
@@ -76,7 +76,7 @@ interface AdapterInput {
   apiKey: string | null
 
   // 当前 agent 可用的工具名。Custom adapter 用 toolRegistry.resolve(toolNames) 拿 ToolDef；
-  // Claude Code adapter 忽略此字段（用 SDK preset 内置工具集）
+  // Claude Code / Codex adapter 忽略此字段（用 SDK 内置工具集）
   toolNames: string[]
 
   // 附件（用户上传的文件/图片）— 用于 multimodal 投递
@@ -91,7 +91,7 @@ interface AdapterInput {
   // 跨 run 对话历史（OpenAI ChatMessage 格式），不含当前触发消息。
   // 由 AgentRunner 通过 conversation-context.buildHistoryFor 序列化，详见 Spec 13。
   // - CustomAgentAdapter：拼到 [system, ...history, currentUser] 中间
-  // - ClaudeCodeAdapter：忽略（走 SDK 自己的 session resume）
+  // - ClaudeCodeAdapter / CodexAdapter：忽略（走 SDK 自己的 session resume）
   // - MockAdapter：忽略
   history?: ChatCompletionMessageParam[]
 
@@ -222,7 +222,7 @@ const result = await toolRegistry.execute(name, args, ctx)
 | Adapter | usage 来源 |
 |---|---|
 | `ClaudeCodeAdapter` | `SDKResultMessage.usage`（success / error 都有）+ `modelUsage` 拿实际模型 id |
-| `CodexAdapter` | TODO：优先读取 Codex SDK run/turn 结果里的 usage；如果临时走 `codex exec --json` fallback，则读 `turn.completed.usage` |
+| `CodexAdapter` | `runStreamed()` 的 `turn.completed.usage` |
 | `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；跨 turn 累加（一个 run 内可能 ≤ MAX_TURNS=8 次 chat.completions.create） |
 | `MockAdapter` | 不上报 usage（agent_runs.usage = null） |
 
@@ -288,17 +288,22 @@ class MockAdapter implements AgentPlatformAdapter {
 | agent.adapterName | agent.modelProvider | app_settings 字段 | env var |
 |---|---|---|---|
 | `claude-code` | — | `anthropicApiKey` | `ANTHROPIC_API_KEY` |
+| `codex` | — | `openaiApiKey` | `CODEX_API_KEY` → `OPENAI_API_KEY` |
 | `custom` | `anthropic` | `anthropicApiKey` | `ANTHROPIC_API_KEY` |
 | `custom` | `openai` | `openaiApiKey` | `OPENAI_API_KEY` |
 | `custom` | `deepseek` | `deepseekApiKey` | `DEEPSEEK_API_KEY` |
 | `custom` | `volcano-ark` | `arkApiKey` | `ARK_API_KEY` |
 
-**`apiBaseUrl` 走同样的链路**：`agent.apiBaseUrl` → `app_settings.anthropicBaseUrl` → `process.env.ANTHROPIC_BASE_URL` → SDK 默认。非空时 ClaudeCodeAdapter 改用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` env 注入（详见 Spec 01 §agents）。
+**`apiBaseUrl` 按 adapter 分协议**：
+- Claude Code：`agent.apiBaseUrl` → `app_settings.anthropicBaseUrl` → `process.env.ANTHROPIC_BASE_URL` → SDK 默认。非空时 ClaudeCodeAdapter 改用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` env 注入（详见 Spec 01 §agents）。
+- Codex：只使用 `agent.apiBaseUrl` → SDK 默认，不读 CC Switch / `~/.codex/config.toml` / 全局 Codex base URL。非空时必须是 Codex/Responses 兼容 endpoint；DeepSeek 等 Chat Completions-only endpoint 会在运行前被拒绝。
+- Custom：当前各 provider 使用 adapter 内置默认 base URL；DeepSeek / 火山方舟这类 OpenAI Chat Completions 兼容 endpoint 应走 CustomAgentAdapter。
 
 **优化点**：`buildAdapterInput` 只在 `agent.apiKey` 为空（或 Claude Code agent 的 `apiBaseUrl` 也为空）时才查 `app_settings`，避免每次构造 input 都打 DB。
 
 **Adapter 视角**：
 - **ClaudeCodeAdapter**：把 `input.apiKey` 通过 `options.env.ANTHROPIC_API_KEY` 传 SDK 子进程；为空时落到第 4 层 OAuth
+- **CodexAdapter**：把 `input.apiKey` 通过 SDK `apiKey` 注入 `CODEX_API_KEY`；默认使用 AgentHub 隔离的 `CODEX_HOME`，不读取用户本机 `~/.codex`。`baseUrl` 对应 Codex runtime 的 `openai_base_url`，要求后端支持 `/responses`
 - **CustomAgentAdapter**：`input.apiKey` 直接传 `new OpenAI({ apiKey })`；为空时 OpenAI SDK 自己抛 401，由 adapter 在 stream 顶层 catch 后 emit error event
 - **MockAdapter**：忽略
 
@@ -401,7 +406,6 @@ signal.addEventListener('abort', () => controller.abort(), { once: true })
 
 ### 不做 / 推迟
 
-- Codex adapter（独立 P1）
 - Subagent 独立 child run（MVP 同流够用）
 - MCP server 配置 UI
 - Skills / Plugins / Worktree SDK 高级特性
@@ -411,48 +415,50 @@ signal.addEventListener('abort', () => controller.abort(), { once: true })
 
 ---
 
-## CodexAdapter（TODO）
+## CodexAdapter
 
-设计预案。**优先封装 OpenAI 官方 Codex SDK，不把 `spawn('codex')` 当作主路径。**
+源文件：`src/server/adapters/codex-adapter.ts`
+
+封装 OpenAI 官方 `@openai/codex-sdk`，不手写 `spawn('codex')`。SDK 内部会使用 npm 依赖里的 `@openai/codex` runtime 并输出结构化 JSONL 事件；Adapter 只消费 SDK 的 `runStreamed()` 事件，不要求用户额外全局安装 Codex CLI。
+
+CodexAdapter 不是「任意 OpenAI-compatible Chat Completions」入口。Codex SDK 的 `baseUrl` 最终传给 Codex runtime 的 `openai_base_url`，runtime 会连接 Responses/Codex 所需的 `/responses` 端点（含 WebSocket 流）。DeepSeek 官方 endpoint 当前没有 `/responses`，因此 `https://api.deepseek.com` / `https://api.deepseek.com/v1` 必须走 `CustomAgentAdapter`，不能走 CodexAdapter。
 
 官方 Codex SDK 形态：
-- TypeScript：`@openai/codex-sdk`，服务端 Node.js 18+ 使用；支持 `Codex().startThread()` / `resumeThread(threadId)` / `thread.run(prompt)`。
+- TypeScript：`@openai/codex-sdk`，服务端 Node.js 18+ 使用；支持 `Codex().startThread()` / `resumeThread(threadId)` / `thread.runStreamed(prompt)`。
 - Python：`openai-codex`，通过本地 Codex app-server / JSON-RPC 控制 Codex。AgentHub 是 Next.js/Node 服务端，除非后续有明确理由，不走 Python SDK。
 
 ```typescript
 import { Codex } from '@openai/codex-sdk'
 
-const codex = new Codex()
+const codex = new Codex({
+  apiKey: input.apiKey ?? undefined,
+  baseUrl: input.apiBaseUrl ?? undefined,
+  config: { developer_instructions: input.systemPrompt },
+})
 const thread = cachedThreadId
-  ? codex.resumeThread(cachedThreadId)
-  : codex.startThread()
+  ? codex.resumeThread(cachedThreadId, threadOptions)
+  : codex.startThread(threadOptions)
 
-const result = await thread.run(input.prompt)
-// 将 SDK run / item / usage 结果翻译为 StreamEvent
+const { events } = await thread.runStreamed(input.prompt, { signal })
+// 将 SDK thread / turn / item / usage 事件翻译为 StreamEvent
 ```
 
 ### 接入原则
 
-1. **SDK first**：CodexAdapter 首选 `@openai/codex-sdk`，因为它是应用内集成 Codex 的官方程序化接口，比 `codex exec` 这类非交互 CLI 模式更适合 AgentHub adapter。
-2. **线程续接**：按 `conversationId + agentId` 缓存 Codex threadId；撤回 / 编辑重发 / 重新生成 / 删除会话时清理对应 thread，模式参考 `ClaudeCodeAdapter` 的 session 缓存。
-3. **Workspace 与 sandbox**：Codex 的 cwd / sandbox 配置必须落到 AgentHub effective cwd（`local` → `boundPath`，`sandbox` → `rootPath`）。默认只允许 workspace-write 级别；不要为普通对话启用 full-access / danger-full-access。
-4. **审批与安全**：如果 Codex SDK 暴露工具审批 / patch 审批 / sandbox hook，必须桥到 AgentHub 现有 `pendingWrites`、路径校验和命令黑名单；如果 SDK 暂时不能桥接写入审批，Review 模式下不要开放自动写盘。
-5. **事件翻译**：把 Codex SDK 的 run / item / text / reasoning / command / patch / usage 事件翻译成 Spec 02 的 `StreamEvent`。若 SDK 暂时只给最终结果，MVP 可以先输出一个 text part，但要保留后续细粒度翻译的边界。
-6. **CLI 只是 fallback**：`codex exec --json` 或 `codex mcp-server` 可以作为临时 fallback、自动化脚本或 Agents SDK/MCP 集成参考，但不能再写成“Codex 没有 SDK，只能 spawn CLI”。如果走 fallback，必须在实现说明里写清楚缺失的 SDK 能力和事件/审批损失。
+1. **SDK first**：CodexAdapter 使用 `@openai/codex-sdk`。`codex exec --json` 或 `codex mcp-server` 只作为自动化 / MCP 参考，不是主路径。
+2. **线程续接**：按 `conversationId + agentId` 缓存 Codex threadId；撤回 / 编辑重发 / 重新生成 / 删除会话 / context compact 时清理对应 thread，模式参考 `ClaudeCodeAdapter` 的 session 缓存。
+3. **运行时环境隔离**：Codex 子进程使用 AgentHub 管理的 `CODEX_HOME=<dataDir>/codex-home` 和 `CODEX_SQLITE_HOME=<dataDir>/codex-home`。继承 PATH / HOME / 代理等普通环境，但剥离外部 `CODEX_*`（保留 `CODEX_CA_CERTIFICATE`），避免 CC Switch 或用户 `~/.codex/config.toml` 影响 AgentHub 调试。
+4. **Base URL 兼容性**：`apiBaseUrl` 只接受 Codex/Responses 兼容 endpoint。运行前拦截已知不支持的 DeepSeek host；如果运行时出现 `/responses` 404 / Not Found，也归因为协议不兼容并提示用户改用 Custom adapter。
+5. **Workspace 与 sandbox**：`workingDirectory = AdapterInput.workspacePath`，`skipGitRepoCheck=true`（sandbox workspace 可能不是 git repo）。Review 模式用 `sandboxMode='read-only'`；Auto 模式用 `sandboxMode='workspace-write'`。不启用 `danger-full-access`。
+6. **审批与安全**：当前 TypeScript SDK 没有 Claude `canUseTool` 等价 hook，所以 Review 模式不允许自动写盘。Auto 模式下由 Codex 自己的 workspace-write sandbox 限制边界；`approvalPolicy='never'`、`networkAccessEnabled=false`、`webSearchMode='disabled'`，避免产生 AgentHub 无法接管的交互式审批请求。
+7. **事件翻译**：SDK 的 `thread.started` 缓存 threadId；`agent_message` → text part；`reasoning` / `todo_list` → thinking part；`command_execution` / `file_change` / `mcp_tool_call` / `web_search` → tool call/result；`turn.completed.usage` → `message.usage` + `run.usage`。
+8. **图片附件**：`kind='image'` 的 attachment 通过 SDK `local_image` 输入传给 Codex。普通文件附件暂不直传；需要文件内容时让 Codex 在 workspace 里读取，或后续通过 AgentHub MCP 工具扩展。
 
-### CLI fallback 形态（非首选）
+### CLI fallback（当前不实现）
 
-仅当 TypeScript SDK 缺少实现必需能力时，才考虑：
+CodexAdapter 当前必须走 `@openai/codex-sdk`。如果后续 SDK 缺少实现必需能力，才另写补充 spec 评估 CLI fallback；不能把 CLI spawn 作为默认 adapter 设计。
 
-```typescript
-const proc = spawn('codex', ['exec', '--json', '--sandbox', 'workspace-write', input.prompt], {
-  cwd: effectiveCwd,
-  signal,
-})
-// 读 stdout JSONL → 翻译 thread.started / turn.started / item.* / turn.completed usage
-```
-
-**注意**：Codex 接入细节会随官方 SDK 变化迭代。如果只是想先验证 OpenAI 模型文本能力，可以继续用 `CustomAgentAdapter` + OpenAI SDK + `gpt-5-codex` 类模型起 demo；这不是 CodexAdapter 的最终集成路线。
+**后续增强**：如果 Codex SDK 暴露可拦截的 patch / exec approval hook，再把 Review 模式桥到 AgentHub `pendingWrites` 和命令黑名单。否则可做 shadow workspace：Codex 在临时副本里写，run 结束后把 diff 转成 `pendingWrites` 给用户审批。
 
 ---
 
@@ -472,7 +478,7 @@ class AgentRegistry {
 }
 ```
 
-当前注册的 adapter：`mock`、`custom`、`claude-code`。`codex` 在 `AdapterName` 联合类型里有，但 registry 里**没注册**，新建 agent 选 Codex 会报错。
+当前注册的 adapter：`mock`、`custom`、`claude-code`、`codex`。
 
 ---
 

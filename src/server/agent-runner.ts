@@ -1015,7 +1015,7 @@ async function buildAdapterInput(
     }
   }
 
-  // 跨 run 对话历史（仅 CustomAgentAdapter 消费；ClaudeCode 走 SDK session resume）。
+  // 跨 run 对话历史（仅 CustomAgentAdapter 消费；ClaudeCode / Codex 走 SDK session resume）。
   // 按模型 contextWindow 算出 historyBudget = totalContext - outputReserve - (system+currentUser 估算) - 安全 margin。
   // 失败回退到空数组，让 agent 退化到「无历史」模式而不是整个 run 崩。详见 specs/13-conversation-context.md。
   let history: ChatCompletionMessageParam[] = []
@@ -1048,7 +1048,7 @@ async function buildAdapterInput(
   }
 
   let effectivePrompt = prompt
-  if (agent.adapterName === 'claude-code' && !args.overridePrompt) {
+  if ((agent.adapterName === 'claude-code' || agent.adapterName === 'codex') && !args.overridePrompt) {
     effectivePrompt = await prefixPromptWithContextSummary(args.conversationId, prompt).catch((err) => {
       console.warn('[agent-runner] prefixPromptWithContextSummary failed; continuing without summary', err)
       return prompt
@@ -1078,21 +1078,36 @@ async function buildAdapterInput(
   }
 }
 
-/** 按 agent 的 adapter/provider 选对应字段。Claude Code 走 anthropic，custom 按 modelProvider 走。 */
+/** 按 agent 的 adapter/provider 选对应字段。Claude Code 走 anthropic，Codex 走 openai，custom 按 modelProvider 走。 */
 function pickSettingsKey(
   settings: Awaited<ReturnType<typeof getAppSettings>>,
   agent: AgentRow,
 ): string | null {
-  if (agent.adapterName === 'claude-code') return settings.anthropicApiKey
+  if (agent.adapterName === 'claude-code') {
+    return (
+      settings.anthropicApiKey ??
+      process.env.ANTHROPIC_AUTH_TOKEN ??
+      process.env.ANTHROPIC_API_KEY ??
+      null
+    )
+  }
+  if (agent.adapterName === 'codex') {
+    return (
+      settings.openaiApiKey ??
+      process.env.CODEX_API_KEY ??
+      process.env.OPENAI_API_KEY ??
+      null
+    )
+  }
   switch (agent.modelProvider) {
     case 'anthropic':
-      return settings.anthropicApiKey
+      return settings.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? null
     case 'openai':
-      return settings.openaiApiKey
+      return settings.openaiApiKey ?? process.env.OPENAI_API_KEY ?? null
     case 'deepseek':
-      return settings.deepseekApiKey
+      return settings.deepseekApiKey ?? process.env.DEEPSEEK_API_KEY ?? null
     case 'volcano-ark':
-      return settings.arkApiKey
+      return settings.arkApiKey ?? process.env.ARK_API_KEY ?? null
     default:
       return null
   }

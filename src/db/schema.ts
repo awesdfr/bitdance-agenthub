@@ -22,15 +22,16 @@ export const agents = sqliteTable('agents', {
   modelProvider: text('model_provider').$type<ModelProvider>(),
   modelId: text('model_id'),
   /**
-   * 该 agent 单独的 API key。优先级高于 env var。
-   * NULL 表示走 env（DEEPSEEK_API_KEY / OPENAI_API_KEY / ARK_API_KEY / ANTHROPIC_API_KEY）。
+   * 该 agent 单独的 API key。优先级高于 app_settings / env var。
+   * Codex adapter 会把最终 key 注入隔离 CODEX_HOME 下的 SDK runtime。
    */
   apiKey: text('api_key'),
 
   /**
-   * 该 agent 单独的 API base URL（第三方 endpoint，如 anyrouter）。
-   * NULL 表示走 SDK 默认 endpoint（Claude Code → api.anthropic.com）。
-   * 配合 apiKey 一起用：base URL 非空时，apiKey 作为 AUTH_TOKEN 传给 SDK。
+   * 该 agent 单独的 API base URL。
+   * NULL 表示走 adapter 默认 endpoint；Claude Code 还可走 app_settings.anthropicBaseUrl。
+   * 配合 apiKey 一起用：base URL 非空时，SDK adapter 会把 apiKey 作为对应 token 传入。
+   * Codex 只支持 Codex/Responses 兼容 endpoint，Chat Completions-only provider 需走 custom。
    */
   apiBaseUrl: text('api_base_url'),
 

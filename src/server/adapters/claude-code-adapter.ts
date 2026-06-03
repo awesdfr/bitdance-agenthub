@@ -13,13 +13,13 @@ import type { WorkspaceRow } from '@/db/schema'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
 import { pendingWrites } from '@/server/pending-writes'
-import { IS_WINDOWS } from '@/server/platform'
 import { findBannedPattern } from '@/server/security'
 import { toolRegistry } from '@/server/tools/registry'
 import type { ToolContext } from '@/server/tools/types'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 import type { StreamEvent } from '@/shared/types'
 
+import { buildChildProcessEnv, createAdapterEvent, createAdapterSessionStore } from './adapter-utils'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
@@ -44,14 +44,7 @@ import type { AdapterInput, AgentPlatformAdapter } from './types'
  * HMR-safe singleton。dev server 重启会丢失 —— 但 SDK 本身持久化到磁盘 (~/.claude
  * sessions)，所以即使我们丢了 id，SDK 数据还在；只是接下来的会话变成新 session。
  */
-const sessionsGlobal = globalThis as unknown as {
-  __agenthubClaudeSessions?: Map<string, string>
-}
-const claudeSessions: Map<string, string> =
-  sessionsGlobal.__agenthubClaudeSessions ?? new Map()
-if (!sessionsGlobal.__agenthubClaudeSessions) {
-  sessionsGlobal.__agenthubClaudeSessions = claudeSessions
-}
+const claudeSessions = createAdapterSessionStore('claude-code')
 
 /** 公开 API：清掉某个 conversation 的 session（删除 / 重新生成 / 撤回 / 编辑 时调用）。 */
 export function clearClaudeCodeSession(conversationId: string): void {
@@ -72,11 +65,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
   async *stream(input: AdapterInput, signal: AbortSignal): AsyncIterable<StreamEvent> {
     const messageId = newMessageId()
-    const baseEvent = <T extends Record<string, unknown>>(body: T) => ({
-      ...body,
-      conversationId: input.conversationId,
-      timestamp: Date.now(),
-    })
+    const baseEvent = createAdapterEvent(input.conversationId)
 
     yield baseEvent({
       type: 'message.start' as const,
@@ -462,11 +451,7 @@ function buildSdkEnv(
   apiKey: string | null,
   apiBaseUrl: string | null,
 ): Record<string, string | undefined> {
-  const base: Record<string, string | undefined> = { ...process.env }
-  // Windows 上 Claude Code SDK 内部可能查 $HOME 而非 %USERPROFILE%，兜底一下。
-  if (IS_WINDOWS && !base.HOME) {
-    base.HOME = base.USERPROFILE
-  }
+  const base: Record<string, string | undefined> = buildChildProcessEnv()
   if (apiBaseUrl) {
     return {
       ...base,

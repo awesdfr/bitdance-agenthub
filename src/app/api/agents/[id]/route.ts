@@ -13,8 +13,9 @@ const PatchBody = z
     description: z.string().min(1).max(280).optional(),
     capabilities: z.array(z.string()).optional(),
     systemPrompt: z.string().min(1).optional(),
+    adapterName: z.enum(['custom', 'claude-code', 'codex']).optional(),
     modelProvider: z.enum(['anthropic', 'openai', 'deepseek', 'volcano-ark']).optional(),
-    modelId: z.string().min(1).optional(),
+    modelId: z.union([z.string().min(1), z.null()]).optional(),
     toolNames: z.array(z.string()).optional(),
     supportsVision: z.boolean().optional(),
     // null 表示清除，空字符串当 null 处理
