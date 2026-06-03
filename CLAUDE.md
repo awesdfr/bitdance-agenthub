@@ -278,12 +278,14 @@ Key 来源按优先级（详见 `src/server/settings-service.ts` 与 `src/server
 - `12-desktop-electron.md` — 桌面版（Electron 打包 DMG / EXE，进程模型 / 路径迁移）
 - `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 
-### `skills/`（可复用开发任务模板，后续按需添加）
+### `skills/`（可复用开发任务模板）
 
-- 「新增一个 Adapter」 — 步骤化指南
-- 「新增一个工具」 — 步骤化指南
-- 「新增一种 MessagePart 类型」 — 步骤化指南
-- 「新增一种 Artifact 类型」 — 步骤化指南
+几类「会反复做」的扩展任务,各一份步骤化指南(附 file:line + 抄哪个现成例子),目录说明见 `skills/README.md`。
+
+- `add-adapter.md` — 新增一个 Adapter（接入新 agent 平台）
+- `add-tool.md` — 新增一个工具（LLM 可调用的 function）
+- `add-message-part.md` — 新增一种 MessagePart 类型
+- `add-artifact-type.md` — 新增一种 Artifact 类型
 
 ---
 
