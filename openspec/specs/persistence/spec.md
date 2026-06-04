@@ -48,3 +48,8 @@ Global API settings MUST be stored in the single-row `app_settings` table and SH
 - **WHEN** the settings API receives the key
 - **THEN** it normalizes empty strings to null
 - **AND** stores the value in SQLite.
+
+#### Scenario: User saves external deployment publishing settings
+- **WHEN** the settings API receives `deployment_publish_enabled`, `deployment_publish_dir`, or `deployment_public_base_url`
+- **THEN** it normalizes empty strings to null
+- **AND** stores the values in the single `app_settings` row.

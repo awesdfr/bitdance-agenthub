@@ -33,11 +33,16 @@ The UI MUST render artifact previews in a dedicated panel and render chat artifa
 
 ### Requirement: Preview URLs SHALL be one-click actions
 
-For `web_app` artifacts and ready deployment status parts, the UI MUST provide open and copy actions for the preview URL.
+For `web_app` artifacts and ready deployment status parts, the UI MUST provide open and copy actions for the preview URL. Deployment cards SHOULD distinguish local previews from externally published static deployments.
 
 #### Scenario: Deployment card is ready
 - **WHEN** a `deploy_status` part has `status='ready'`
 - **THEN** the chat renders a deployment card with open and copy controls.
+
+#### Scenario: Deployment card has external publish metadata
+- **WHEN** a `deploy_status` part has `deploymentType='external_static'`
+- **THEN** the card labels it as an external static publish
+- **AND** shows the local preview fallback when available.
 
 ### Requirement: Agent builder SHALL expose adapter-specific fields
 

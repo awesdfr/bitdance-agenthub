@@ -69,7 +69,7 @@ export const toolRegistry = buildRegistry()
 | 名称 | 用途 | 副作用 | 谁该装备 |
 |---|---|---|---|
 | `write_artifact` | 创建产物 | 写 DB | 任何产出代码 / 文档 / 网页的 agent |
-| `deploy_artifact` | 为 web_app 生成本地静态发布状态 | 写 `.agenthub-data/deployments`；返回稳定 preview path 与下载路径 | 前端 / web app 产出 agent |
+| `deploy_artifact` | 为 web_app 生成部署发布状态 | 写 `.agenthub-data/deployments`；可选发布到用户配置的外部静态目录；返回 preview path 与下载路径 | 前端 / web app 产出 agent |
 | `read_artifact` | 读已有产物的完整内容 | 读 DB | 跨任务复用产物的 agent（Orchestrator 派的子 agent 常用） |
 | `read_attachment` | 读用户上传附件 | 读文件系统 | 处理用户文档 / 文本附件的 agent |
 | `plan_tasks` | Orchestrator 拆解子任务 | 无（输出端工具） | **仅 Orchestrator** |
@@ -104,9 +104,11 @@ export const toolRegistry = buildRegistry()
 
 **作用域**：只能部署当前会话的 artifact。只有 `web_app` 返回 `status:'ready'`；缺失、非 web artifact 或不安全文件路径返回 `status:'failed'` 的部署记录，供 UI 显示失败原因。
 
-**返回值**：`DeployStatusRecord`，其中 `previewPath` 对新部署指向稳定 `/deployments/:deploymentId`。记录可带 `deploymentType:'local_static'`、`sourceDownloadPath`、`containerDownloadPath`、`summaryInstruction`。`summaryInstruction` 明确要求 Agent 不要把相对 `previewPath` 改写成公网域名或自造完整 URL；面向用户时应提示点击部署卡片按钮或原样引用 `previewPath`。Adapter 在 tool_result 后 emit `deploy.status`，AgentRunner 注入 `deploy_status` part。
+**返回值**：`DeployStatusRecord`。无外部发布配置时，`previewPath` 指向稳定 `/deployments/:deploymentId`，记录带 `deploymentType:'local_static'`、`sourceDownloadPath`、`containerDownloadPath`、`summaryInstruction`。如果 `app_settings.deployment_publish_enabled=true` 且配置了 `deployment_publish_dir` / `deployment_public_base_url`，工具会把公开静态文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并返回 `deploymentType:'external_static'`、`previewPath:<publicUrl>`、`publicUrl`、`publishPath`、`localPreviewPath`。Adapter 在 tool_result 后 emit `deploy.status`，AgentRunner 注入 `deploy_status` part。
 
 **本地发布目录**：`src/server/deployment-service.ts` 把 `web_app` 写入 `.agenthub-data/deployments/dep_xxx/`，对外根目录保存可运行静态文件，私有 `.agenthub/source` 保存原始 source 供源码包下载。发布路由拒绝 `.agenthub` 私有目录与路径逃逸。
+
+**外部静态发布目录**：`deployment_publish_dir` 必须是绝对路径且不能是文件系统根目录。发布时只删除 / 覆盖 `<publishDir>/<deploymentId>` 子目录，且复制公开文件时不会带上 `.agenthub` 私有目录。`deployment_public_base_url` 是用户已有静态服务的公开根 URL，AgentHub 只负责写文件，不启动托管服务。
 
 ### read_artifact
 

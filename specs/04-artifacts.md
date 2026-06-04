@@ -160,7 +160,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `GET /api/artifacts/:id/preview` 只服务 `web_app` artifact，返回 `text/html`，并设置 CSP sandbox / `nosniff` / `no-store`。前端 artifact 卡与 ArtifactPreviewPanel 顶部直接使用该实时预览路径。
 
-`deploy_artifact` 不做外部托管，但会生成本地静态发布目录：
+`deploy_artifact` 始终会生成本地静态发布目录：
 
 ```
 .agenthub-data/deployments/dep_xxx/
@@ -170,7 +170,7 @@ store.previewArtifactId → ArtifactPreviewPanel
   .agenthub/source/**         # 原始 artifact source，用于源码包下载
 ```
 
-成功返回的 `DeployStatusRecord.previewPath` 指向稳定 `/deployments/:id`，并提供源码包与容器包下载路径：
+无外部发布配置时，成功返回的 `DeployStatusRecord.previewPath` 指向稳定 `/deployments/:id`，并提供源码包与容器包下载路径：
 
 ```typescript
 {
@@ -180,8 +180,12 @@ store.previewArtifactId → ArtifactPreviewPanel
   version: number,
   previewPath: '/deployments/dep_xxx',
   status: 'ready' | 'failed',
-  deploymentType?: 'local_static',
+  deploymentType?: 'local_static' | 'external_static',
   deploymentPath?: '/deployments/dep_xxx',
+  localPreviewPath?: '/deployments/dep_xxx',
+  publicUrl?: 'https://example.com/apps/dep_xxx/',
+  publishPath?: 'D:\\sites\\agenthub\\dep_xxx',
+  publishTargetType?: 'static_directory',
   sourceDownloadPath?: '/api/deployments/dep_xxx/download/source',
   containerDownloadPath?: '/api/deployments/dep_xxx/download/container',
   summaryInstruction?: string,
@@ -190,7 +194,9 @@ store.previewArtifactId → ArtifactPreviewPanel
 }
 ```
 
-`summaryInstruction` 只给 Agent 看，用于约束最终文字总结：`previewPath` 是当前 AgentHub 实例下的相对路径，Agent 不得把它改写成公网域名或自造完整 URL。UI 展示仍以结构化部署卡片为准。
+若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。
+
+`summaryInstruction` 只给 Agent 看，用于约束最终文字总结：本地发布时不得自造公网域名；外部发布时只能引用结构化返回的 `previewPath` / `publicUrl`，不得改写成其它 URL。UI 展示仍以结构化部署卡片为准。
 
 `GET /deployments/:id/[[...path]]` 只从该 deployment 目录读文件，拒绝访问 `.agenthub` 私有目录和路径逃逸。HTML 响应继续设置 CSP `sandbox allow-scripts` / `nosniff` / `no-store`。
 

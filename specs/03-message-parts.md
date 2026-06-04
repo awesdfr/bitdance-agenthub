@@ -121,7 +121,7 @@ Agent 的主要文字输出。content 是 markdown 文本，前端用 `react-mar
 { type: 'deploy_status', deployment: DeployStatusRecord }
 ```
 
-展示一次 web_app 部署状态。`status='ready'` 时卡片提供打开 / 复制预览 URL；本地静态发布记录还提供源码包 / 容器包下载；`status='failed'` 时展示失败原因。
+展示一次 web_app 部署状态。`status='ready'` 时卡片提供打开 / 复制预览 URL；本地静态发布记录还提供源码包 / 容器包下载；外部静态发布记录显示公开 URL 与本地回退路径；`status='failed'` 时展示失败原因。
 
 **注入路径**：Adapter 在 `deploy_artifact` 成功返回部署记录后 emit `deploy.status`，AgentRunner 在当前 message 末尾 push `deploy_status` 并补发 `part.start`。
 

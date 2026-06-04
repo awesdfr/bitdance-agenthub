@@ -50,12 +50,19 @@ Claude Code and Codex SDK adapters MUST document their built-in tool ownership a
 
 ### Requirement: Web app artifacts SHALL be deployable to preview URLs
 
-AgentHub MUST provide a `deploy_artifact` tool that accepts a web app artifact id and returns a deployment status record with a preview path.
+AgentHub MUST provide a `deploy_artifact` tool that accepts a web app artifact id and returns a deployment status record with a preview path. The tool MUST create a local static deployment and SHOULD additionally publish it to a configured external static directory.
 
 #### Scenario: Agent deploys a web app artifact
 - **WHEN** `deploy_artifact` receives a valid `web_app` artifact id
 - **THEN** it returns a ready deployment record
-- **AND** the record points at the artifact preview route.
+- **AND** the record points at the local deployment preview route when no external publish target is configured.
+
+#### Scenario: Agent deploys with external static publishing configured
+- **WHEN** `deployment_publish_enabled` is true
+- **AND** `deployment_publish_dir` and `deployment_public_base_url` are set
+- **THEN** the tool publishes public deployment files to the configured directory
+- **AND** returns the public URL as the primary preview path
+- **AND** includes a local preview fallback.
 
 #### Scenario: Agent deploys a non-web artifact
 - **WHEN** `deploy_artifact` receives a document, image, or missing artifact id

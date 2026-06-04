@@ -238,6 +238,9 @@ app_settings {
   ark_api_key         text                // 火山方舟 provider
   companion_mode      text NOT NULL       // 'off' | 'lan' | 'tailnet'，默认 'off'
   mobile_device_token text                // 移动端 P0 设备 token；后续替换为 device_sessions
+  deployment_publish_enabled int NOT NULL // boolean，默认 false
+  deployment_publish_dir     text         // 外部静态发布目录，绝对路径
+  deployment_public_base_url text         // 外部静态服务公开根 URL
   updated_at          int  NOT NULL
 }
 ```
@@ -248,6 +251,7 @@ app_settings {
 - 所有字段可空。空 / 空串归一为 `NULL`（`settings-service.normalize` 处理）
 - 与 `agents.api_key` / `agents.api_base_url` 不冲突：per-agent 字段优先级最高，本表是「全局兜底」
 - **不**外键关联 agents（provider 与 agent 是多对多关系，agent 通过 `model_provider` / `adapter_name` 选 key）
+- `deployment_publish_enabled=true` 只有在 `deployment_publish_dir` 与 `deployment_public_base_url` 均非空时才会让 `deploy_artifact` 尝试外部静态发布；否则仍只生成本地静态部署。
 
 **Key 解析优先级**（详见 Spec 05「API key fallback」与 `agent-runner.ts:buildAdapterInput`）：
 
