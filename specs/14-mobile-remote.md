@@ -287,7 +287,7 @@ POST /api/mobile/runs/:id/abort
 POST /api/mobile/pending-writes/:id/approve
 POST /api/mobile/pending-writes/:id/reject
 POST /api/mobile/pending-questions/:id/answer
-GET  /api/mobile/artifacts/:id
+GET  /api/mobile/artifacts/:id        # 返回移动端安全裁剪后的 artifact content，用于 App 内预览
 GET  /api/mobile/artifacts/:id/export
 ```
 
@@ -324,9 +324,11 @@ Tab 4: 设置
 触控原则：
 
 - 不依赖 hover。消息操作用长按菜单或显式更多按钮。
+- 连续的 `tool_use` / `tool_result` 在消息流里默认合并为一个紧凑工具活动块；多次工具调用默认折叠，只显示数量、工具分布和完成 / 失败 / 进行中状态，点开再看单项状态。
+- 进入会话详情时自动滚动到最新消息；后续新消息到达时，如果用户仍在底部附近则继续跟随底部，用户主动上滑阅读历史时不强制拉回。
 - 审批按钮必须大且明确，拒绝和批准视觉区分。
 - Auto 写入模式只能查看，不建议移动端切换；如要切换必须二次确认。
-- web_app artifact 默认用预览；源码视图可折叠或只读。
+- artifact_ref 在消息里渲染为可点击产物卡片，点开后用底部 sheet 预览；web_app 默认用 `sandbox="allow-scripts"` iframe，源码视图只读；document 用 Markdown 只读渲染；image 等比预览。
 - `deploy_status` message part 在 mobile DTO 中降级为 inline chip，显示 ready/failed、标题、版本和失败原因；移动端不执行桌面工具，只展示桌面端生成的 previewPath。
 - 长文本和 diff 要支持横向滚动、行号、复制。
 
@@ -388,7 +390,7 @@ Tab 4: 设置
 | 阶段 | 内容 | 产出 |
 |---|---|---|
 | P0 | Capacitor App 骨架；桌面 companion mode；Tailscale/LAN base URL 配对；device token；snapshot + events；会话查看；发送消息；审批 fs_write；回答 ask_user | 手机安装 App 后能连接桌面 AgentHub，观察状态并完成关键审批/反馈 |
-| P1 | Orchestrator 状态页增强；artifact 预览优化；QR 配对体验；iOS/Android 打包脚本；Tailnet HTTPS 文档 | 接近日常可用 |
+| P1 | Orchestrator 状态页增强；artifact 预览/版本/导出体验优化；QR 配对体验；iOS/Android 打包脚本；Tailnet HTTPS 文档 | 接近日常可用 |
 | P2 | 推送通知、本机通知 badge、更多文件浏览能力、Capacitor secure storage 插件 | 增强体验，按需求讨论 |
 
 ---

@@ -33,8 +33,8 @@ export type MobileMessagePart =
   | { type: 'text'; content: string }
   | { type: 'code'; language: string; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'tool_use'; toolName: string }
-  | { type: 'tool_result'; isError: boolean }
+  | { type: 'tool_use'; callId: string; toolName: string }
+  | { type: 'tool_result'; callId: string; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
   | {
       type: 'deploy_status'
@@ -45,6 +45,61 @@ export type MobileMessagePart =
       error?: string
     }
   | { type: 'attachment'; fileName: string; kind: 'image' | 'file' }
+
+export type MobileArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image'
+
+export type MobileArtifactContent =
+  | {
+      type: 'web_app'
+      files: Record<string, string>
+      entry: string
+    }
+  | {
+      type: 'code_file'
+      workspacePath: string
+      language: string
+      sizeBytes: number
+      checksum: string
+    }
+  | {
+      type: 'diff'
+      targetArtifactId: string
+      hunks: Array<{
+        oldStart: number
+        oldLines: number
+        newStart: number
+        newLines: number
+        lines: string[]
+      }>
+      applied: boolean
+    }
+  | {
+      type: 'document'
+      format: 'markdown'
+      content: string
+    }
+  | {
+      type: 'image'
+      url: string
+      alt: string
+      width?: number
+      height?: number
+    }
+
+export interface MobileArtifactSummary {
+  id: string
+  type: MobileArtifactType
+  title: string
+  version: number
+  createdAt: number
+}
+
+export interface MobileArtifact extends MobileArtifactSummary {
+  conversationId: string
+  content: MobileArtifactContent
+  parentArtifactId?: string
+  createdByAgentId: string
+}
 
 export interface MobileMessage {
   id: string
@@ -64,6 +119,7 @@ export interface MobileConversationDetail {
     updatedAt: number
   }
   messages: MobileMessage[]
+  artifacts: MobileArtifactSummary[]
   runningRuns: MobileRun[]
   pendingWrites: MobilePendingWrite[]
   pendingQuestions: MobilePendingQuestion[]

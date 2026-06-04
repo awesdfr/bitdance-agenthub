@@ -1,6 +1,7 @@
 import type {
   ConnectionConfig,
   MobileAskUserAnswers,
+  MobileArtifact,
   MobileConversationDetail,
   MobileSnapshot,
 } from '../types'
@@ -8,6 +9,7 @@ import type {
 export interface MobileApiClient {
   getSnapshot(): Promise<MobileSnapshot>
   getConversation(id: string): Promise<MobileConversationDetail>
+  getArtifact(id: string): Promise<MobileArtifact>
   sendMessage(id: string, content: string): Promise<void>
   decidePendingWrite(id: string, action: 'approve' | 'reject'): Promise<void>
   answerPendingQuestion(id: string, answers: MobileAskUserAnswers): Promise<void>
@@ -48,6 +50,10 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
   return {
     getSnapshot: () => request<MobileSnapshot>('/api/mobile/snapshot'),
     getConversation: (id) => request<MobileConversationDetail>(`/api/mobile/conversations/${id}`),
+    getArtifact: async (id) => {
+      const result = await request<{ artifact: MobileArtifact }>(`/api/mobile/artifacts/${id}`)
+      return result.artifact
+    },
     sendMessage: async (id, content) => {
       await request<{ messageId: string; runIds: string[] }>(
         `/api/mobile/conversations/${id}/messages`,

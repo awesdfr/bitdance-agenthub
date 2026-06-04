@@ -1,13 +1,17 @@
-import { isValidElement, useState, type ReactNode } from 'react'
+import { isValidElement, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
-  Bot,
+  ArrowDown,
   Brain,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CircleAlert,
+  Clock3,
   Code2,
   FileText,
   Image as ImageIcon,
+  Layers,
   Paperclip,
   Rocket,
   Send,
@@ -17,8 +21,12 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { AvatarBadge, avatarInitials } from '../lib/avatar'
+import { formatTime } from '../lib/format'
+import { ConversationRow } from './ConversationRow'
 import type {
   MobileAgent,
+  MobileArtifactSummary,
   MobileConversationDetail,
   MobileMessage,
   MobileMessagePart,
@@ -32,6 +40,7 @@ export function ConversationsScreen({
   detail,
   selectedConversationId,
   onOpenConversation,
+  onOpenArtifact,
   onSendMessage,
 }: {
   connected: boolean
@@ -40,10 +49,72 @@ export function ConversationsScreen({
   detail: MobileConversationDetail | null
   selectedConversationId: string | null
   onOpenConversation: (id: string) => void
+  onOpenArtifact: (id: string) => void
   onSendMessage: (content: string) => void
 }) {
   const [draft, setDraft] = useState('')
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const lastAutoScrolledConversationId = useRef<string | null>(null)
   const agentById = new Map((snapshot?.agents ?? []).map((agent) => [agent.id, agent]))
+  const artifactById = new Map((detail?.artifacts ?? []).map((artifact) => [artifact.id, artifact]))
+  const detailConversationId = detail?.conversation.id ?? null
+  const scrollSignature = useMemo(() => buildConversationScrollSignature(detail), [detail])
+
+  useEffect(() => {
+    if (!selectedConversationId || !detailConversationId || selectedConversationId !== detailConversationId) return
+
+    const isNewConversation = lastAutoScrolledConversationId.current !== detailConversationId
+    lastAutoScrolledConversationId.current = detailConversationId
+    if (!isNewConversation && !isNearWindowBottom()) return
+
+    const frame = window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [detailConversationId, scrollSignature, selectedConversationId])
+
+  useEffect(() => {
+    if (!selectedConversationId) return
+
+    function handleScroll() {
+      setShowScrollButton(!isNearWindowBottom(160))
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    handleScroll()
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [selectedConversationId, scrollSignature])
+
+  function submitDraft() {
+    const content = draft.trim()
+    if (!content) return
+    onSendMessage(content)
+    setDraft('')
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value)
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+    }
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submitDraft()
+    }
+  }
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }
 
   if (!connected) {
     return <div className="empty-state">先在设置中配对桌面端。</div>
@@ -51,7 +122,7 @@ export function ConversationsScreen({
 
   if (selectedConversationId) {
     return (
-      <div className="screen-stack">
+      <div className="screen-stack conversation-screen">
         {detail ? (
           <>
             <section className="message-list">
@@ -60,7 +131,9 @@ export function ConversationsScreen({
                   <MessageCard
                     key={message.id}
                     agent={message.agentId ? agentById.get(message.agentId) : undefined}
+                    artifactById={artifactById}
                     message={message}
+                    onOpenArtifact={onOpenArtifact}
                   />
                 ))
               ) : (
@@ -68,26 +141,31 @@ export function ConversationsScreen({
               )}
             </section>
 
+            {showScrollButton && (
+              <button type="button" className="scroll-to-bottom" aria-label="回到底部" onClick={scrollToBottom}>
+                <ArrowDown className="button-icon" aria-hidden="true" />
+              </button>
+            )}
             <form
               className="composer"
               onSubmit={(event) => {
                 event.preventDefault()
-                const content = draft.trim()
-                if (!content) return
-                onSendMessage(content)
-                setDraft('')
+                submitDraft()
               }}
             >
               <textarea
+                ref={textareaRef}
                 value={draft}
                 rows={1}
-                placeholder="输入意见或追问..."
-                onChange={(event) => setDraft(event.target.value)}
+                placeholder="输入意见或追问…"
+                onChange={(event) => handleDraftChange(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
               />
               <button type="submit" className="primary-action icon-action" aria-label="发送" disabled={!draft.trim()}>
                 <Send className="button-icon" aria-hidden="true" />
               </button>
             </form>
+            <div ref={bottomRef} className="conversation-bottom-anchor" aria-hidden="true" />
           </>
         ) : (
           <div className="empty-state">{loading ? '加载会话中...' : '会话详情暂不可用。'}</div>
@@ -97,39 +175,14 @@ export function ConversationsScreen({
   }
 
   return (
-    <section className="card-list">
+    <section className="list-section">
       <h2 className="section-title">会话</h2>
       {snapshot && snapshot.conversations.length > 0 ? (
-        snapshot.conversations.map((conv) => (
-          <button
-            key={conv.id}
-            type="button"
-            className="list-card conversation-button"
-            onClick={() => onOpenConversation(conv.id)}
-          >
-            <AvatarBadge
-              className="conversation-avatar"
-              label={conversationAvatarLabel(conv.title, conv.mode)}
-              toneKey={conv.id}
-            />
-            <div className="conversation-main">
-              <div>
-                <h3>{conv.title}</h3>
-                <p>
-                  {conv.mode === 'group' ? '群聊' : '单聊'} · {formatTime(conv.updatedAt)}
-                </p>
-              </div>
-              {(conv.runningRunCount > 0 || conv.pendingWriteCount > 0 || conv.pendingQuestionCount > 0) && (
-                <div className="conversation-badges">
-                  {conv.runningRunCount > 0 && <span className="mini-pill">运行 {conv.runningRunCount}</span>}
-                  {conv.pendingWriteCount > 0 && <span className="mini-pill">审批 {conv.pendingWriteCount}</span>}
-                  {conv.pendingQuestionCount > 0 && <span className="mini-pill">提问 {conv.pendingQuestionCount}</span>}
-                </div>
-              )}
-            </div>
-            <ChevronRight className="chevron-icon" aria-hidden="true" />
-          </button>
-        ))
+        <div className="group-card">
+          {snapshot.conversations.map((conv) => (
+            <ConversationRow key={conv.id} conv={conv} onOpen={onOpenConversation} />
+          ))}
+        </div>
       ) : (
         <div className="empty-state">数据同步中</div>
       )}
@@ -137,10 +190,20 @@ export function ConversationsScreen({
   )
 }
 
-function MessageCard({ message, agent }: { message: MobileMessage; agent?: MobileAgent }) {
+function MessageCard({
+  message,
+  agent,
+  artifactById,
+  onOpenArtifact,
+}: {
+  message: MobileMessage
+  agent?: MobileAgent
+  artifactById: Map<string, MobileArtifactSummary>
+  onOpenArtifact: (id: string) => void
+}) {
   const isUser = message.role === 'user'
   const displayName = isUser ? '你' : agent?.name ?? message.agentId ?? roleLabel(message.role)
-  const avatar = avatarInitials(displayName, message.role)
+  const avatar = isUser ? 'ME' : message.role === 'system' ? 'SY' : avatarInitials(displayName)
   const toneKey = isUser ? 'mobile-user' : agent?.id ?? message.agentId ?? message.role
 
   return (
@@ -152,19 +215,97 @@ function MessageCard({ message, agent }: { message: MobileMessage; agent?: Mobil
           <time>{formatTime(message.createdAt)}</time>
         </div>
         <div className="message-bubble">
-          <div className="message-parts">
-            {message.parts.map((part, index) => (
-              <MessagePartView key={`${message.id}-${index}`} part={part} />
-            ))}
-          </div>
+          <MessagePartsView artifactById={artifactById} message={message} onOpenArtifact={onOpenArtifact} />
         </div>
+        <MessageStatus status={message.status} />
       </div>
       {isUser && <AvatarBadge className="message-avatar user-avatar" label={avatar} toneKey={toneKey} />}
     </article>
   )
 }
 
-function MessagePartView({ part }: { part: MobileMessagePart }) {
+function MessageStatus({ status }: { status: MobileMessage['status'] }) {
+  if (status === 'streaming') {
+    return (
+      <span className="msg-status">
+        正在生成
+        <span className="typing-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="msg-status error">
+        <CircleAlert className="inline-icon" aria-hidden="true" />
+        出错
+      </span>
+    )
+  }
+  if (status === 'aborted') {
+    return <span className="msg-status aborted">已中止</span>
+  }
+  return null
+}
+
+type MobileToolUsePart = Extract<MobileMessagePart, { type: 'tool_use' }>
+type MobileToolResultPart = Extract<MobileMessagePart, { type: 'tool_result' }>
+type ToolActivityState = 'running' | 'success' | 'error'
+
+type MessageRenderItem =
+  | { kind: 'part'; index: number; part: MobileMessagePart }
+  | {
+      kind: 'tool_activity'
+      index: number
+      tools: Array<{ index: number; part: MobileToolUsePart; completion?: MobileToolResultPart }>
+      unmatchedResults: Array<{ index: number; part: MobileToolResultPart }>
+    }
+
+function MessagePartsView({
+  message,
+  artifactById,
+  onOpenArtifact,
+}: {
+  message: MobileMessage
+  artifactById: Map<string, MobileArtifactSummary>
+  onOpenArtifact: (id: string) => void
+}) {
+  const items = useMemo(() => createMessageRenderItems(message.parts), [message.parts])
+
+  return (
+    <div className="message-parts">
+      {items.map((item) =>
+        item.kind === 'tool_activity' ? (
+          <ToolActivityBlock
+            key={`${message.id}-tool-${item.index}`}
+            tools={item.tools}
+            unmatchedResults={item.unmatchedResults}
+          />
+        ) : (
+          <MessagePartView
+            key={`${message.id}-${item.index}`}
+            artifact={item.part.type === 'artifact_ref' ? artifactById.get(item.part.artifactId) : undefined}
+            part={item.part}
+            onOpenArtifact={onOpenArtifact}
+          />
+        ),
+      )}
+    </div>
+  )
+}
+
+function MessagePartView({
+  part,
+  artifact,
+  onOpenArtifact,
+}: {
+  part: MobileMessagePart
+  artifact?: MobileArtifactSummary
+  onOpenArtifact: (id: string) => void
+}) {
   switch (part.type) {
     case 'text':
       return <MarkdownText content={part.content} />
@@ -183,25 +324,20 @@ function MessagePartView({ part }: { part: MobileMessagePart }) {
     case 'code':
       return <CodeBlock code={part.content} language={part.language} />
     case 'tool_use':
-      return (
-        <span className="inline-chip">
-          <Wrench className="inline-icon" aria-hidden="true" />
-          调用工具：{part.toolName}
-        </span>
-      )
     case 'tool_result':
-      return (
-        <span className="inline-chip">
-          <Bot className="inline-icon" aria-hidden="true" />
-          {part.isError ? '工具执行失败' : '工具执行完成'}
-        </span>
-      )
+      return null
     case 'artifact_ref':
       return (
-        <span className="inline-chip">
-          <FileText className="inline-icon" aria-hidden="true" />
-          产物：{part.artifactId}
-        </span>
+        <button type="button" className="artifact-ref-card" onClick={() => onOpenArtifact(part.artifactId)}>
+          <ArtifactIcon type={artifact?.type} />
+          <span className="artifact-ref-main">
+            <span>{artifact?.title ?? '产物'}</span>
+            <small>
+              {artifact ? `${artifact.type} · v${artifact.version}` : part.artifactId} · 点击预览
+            </small>
+          </span>
+          <ChevronRight className="chevron-icon" aria-hidden="true" />
+        </button>
       )
     case 'deploy_status':
       return (
@@ -228,6 +364,83 @@ function MessagePartView({ part }: { part: MobileMessagePart }) {
         </span>
       )
   }
+}
+
+function ToolActivityBlock({
+  tools,
+  unmatchedResults,
+}: {
+  tools: Array<{ index: number; part: MobileToolUsePart; completion?: MobileToolResultPart }>
+  unmatchedResults: Array<{ index: number; part: MobileToolResultPart }>
+}) {
+  const runningCount = tools.filter((tool) => !tool.completion).length
+  const errorCount =
+    tools.filter((tool) => tool.completion?.isError).length +
+    unmatchedResults.filter((result) => result.part.isError).length
+  const state: ToolActivityState = runningCount > 0 ? 'running' : errorCount > 0 ? 'error' : 'success'
+  const distribution = formatToolDistribution(tools.map((tool) => tool.part.toolName))
+  const title = tools.length > 1 ? `工具调用 × ${tools.length}` : tools[0]?.part.toolName ?? '工具结果'
+  const statusText = formatToolActivityStatus(state, runningCount, errorCount, tools.length)
+  const shouldCollapse = tools.length > 1 || unmatchedResults.length > 0
+
+  if (!shouldCollapse) {
+    return (
+      <div className={`tool-activity ${state}`}>
+        <div className="tool-activity-row">
+          <ToolStateIcon state={state} />
+          <span className="tool-activity-title">
+            <Wrench className="inline-icon" aria-hidden="true" />
+            {title}
+          </span>
+          <span className="tool-activity-status">{statusText}</span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <details className={`tool-activity ${state}`}>
+      <summary className="tool-activity-row">
+        <ToolStateIcon state={state} />
+        <span className="tool-activity-title">
+          <Wrench className="inline-icon" aria-hidden="true" />
+          {title}
+        </span>
+        {distribution && <span className="tool-activity-meta">{distribution}</span>}
+        <span className="tool-activity-status">{statusText}</span>
+        <ChevronDown className="tool-activity-chevron" aria-hidden="true" />
+      </summary>
+      <div className="tool-activity-list">
+        {tools.map((tool) => (
+          <div key={tool.index} className="tool-activity-item">
+            <ToolStateIcon state={tool.completion ? (tool.completion.isError ? 'error' : 'success') : 'running'} />
+            <code>{tool.part.toolName}</code>
+            <span>{tool.completion ? (tool.completion.isError ? '失败' : '完成') : '调用中'}</span>
+          </div>
+        ))}
+        {unmatchedResults.map((result) => (
+          <div key={result.index} className="tool-activity-item">
+            <ToolStateIcon state={result.part.isError ? 'error' : 'success'} />
+            <code>result</code>
+            <span>{result.part.isError ? '失败' : '完成'}</span>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function ToolStateIcon({ state }: { state: ToolActivityState }) {
+  if (state === 'running') return <Clock3 className="tool-state-icon" aria-hidden="true" />
+  if (state === 'error') return <CircleAlert className="tool-state-icon" aria-hidden="true" />
+  return <CheckCircle2 className="tool-state-icon" aria-hidden="true" />
+}
+
+function ArtifactIcon({ type }: { type?: string }) {
+  if (type === 'document') return <FileText className="artifact-ref-icon" aria-hidden="true" />
+  if (type === 'image') return <ImageIcon className="artifact-ref-icon" aria-hidden="true" />
+  if (type === 'web_app') return <Layers className="artifact-ref-icon" aria-hidden="true" />
+  return <Code2 className="artifact-ref-icon" aria-hidden="true" />
 }
 
 function MarkdownText({ content, muted = false }: { content: string; muted?: boolean }) {
@@ -305,39 +518,119 @@ function reactNodeToText(node: ReactNode): string {
   return ''
 }
 
-function AvatarBadge({
-  label,
-  toneKey,
-  className,
-}: {
-  label: string
-  toneKey: string
-  className?: string
-}) {
-  return <div className={`${className ?? ''} avatar-tone-${hashTone(toneKey)}`}>{label}</div>
-}
+function createMessageRenderItems(parts: MobileMessagePart[]): MessageRenderItem[] {
+  const items: MessageRenderItem[] = []
+  let toolBlock: Array<{ index: number; part: MobileToolUsePart | MobileToolResultPart }> = []
 
-function conversationAvatarLabel(title: string, mode: 'single' | 'group'): string {
-  const fallback = mode === 'group' ? 'GR' : 'DM'
-  return avatarInitials(title, undefined, fallback)
-}
-
-function avatarInitials(name: string, role?: MobileMessage['role'], fallback = 'AG'): string {
-  if (role === 'user') return 'ME'
-  if (role === 'system') return 'SY'
-
-  const normalized = name.trim()
-  if (!normalized) return fallback
-
-  const asciiWords = normalized.match(/[a-zA-Z0-9]+/g)
-  if (asciiWords && asciiWords.length > 0) {
-    const first = asciiWords[0]?.[0] ?? ''
-    const second = asciiWords.length > 1 ? asciiWords[1]?.[0] : asciiWords[0]?.[1]
-    return `${first}${second ?? ''}`.toUpperCase()
+  function flushToolBlock() {
+    if (toolBlock.length === 0) return
+    items.push(createToolActivityItem(toolBlock))
+    toolBlock = []
   }
 
-  const cjkChars = Array.from(normalized).filter((char) => /\p{Letter}|\p{Number}/u.test(char))
-  return cjkChars.slice(0, 2).join('').toUpperCase() || fallback
+  parts.forEach((part, index) => {
+    if (part.type === 'tool_use' || part.type === 'tool_result') {
+      toolBlock.push({ index, part })
+      return
+    }
+
+    flushToolBlock()
+    items.push({ kind: 'part', index, part })
+  })
+
+  flushToolBlock()
+  return items
+}
+
+function createToolActivityItem(
+  toolBlock: Array<{ index: number; part: MobileToolUsePart | MobileToolResultPart }>,
+): MessageRenderItem {
+  const resultByCallId = new Map<string, MobileToolResultPart>()
+  const toolCallIds = new Set<string>()
+
+  for (const item of toolBlock) {
+    if (item.part.type === 'tool_use') toolCallIds.add(item.part.callId)
+    if (item.part.type === 'tool_result') resultByCallId.set(item.part.callId, item.part)
+  }
+
+  return {
+    kind: 'tool_activity',
+    index: toolBlock[0]?.index ?? 0,
+    tools: toolBlock
+      .filter((item): item is { index: number; part: MobileToolUsePart } => item.part.type === 'tool_use')
+      .map((item) => ({
+        index: item.index,
+        part: item.part,
+        completion: resultByCallId.get(item.part.callId),
+      })),
+    unmatchedResults: toolBlock.filter(
+      (item): item is { index: number; part: MobileToolResultPart } =>
+        item.part.type === 'tool_result' && !toolCallIds.has(item.part.callId),
+    ),
+  }
+}
+
+function formatToolDistribution(toolNames: string[]): string {
+  if (toolNames.length <= 1) return ''
+
+  const counts = new Map<string, number>()
+  for (const name of toolNames) {
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+
+  return Array.from(counts.entries())
+    .map(([name, count]) => (count > 1 ? `${name}×${count}` : name))
+    .join(' · ')
+}
+
+function formatToolActivityStatus(
+  state: ToolActivityState,
+  runningCount: number,
+  errorCount: number,
+  totalCount: number,
+): string {
+  if (state === 'running') return runningCount > 1 ? `${runningCount} 进行中` : '进行中'
+  if (state === 'error') return errorCount > 1 ? `${errorCount} 失败` : '失败'
+  return totalCount > 1 ? '全部完成' : '完成'
+}
+
+function buildConversationScrollSignature(detail: MobileConversationDetail | null): string {
+  if (!detail) return ''
+
+  const lastMessage = detail.messages.at(-1)
+  if (!lastMessage) return `${detail.conversation.id}:empty`
+
+  return [
+    detail.conversation.id,
+    detail.messages.length,
+    lastMessage.id,
+    lastMessage.status,
+    lastMessage.parts.map(toMessagePartScrollKey).join('|'),
+  ].join(':')
+}
+
+function toMessagePartScrollKey(part: MobileMessagePart): string {
+  switch (part.type) {
+    case 'text':
+    case 'code':
+    case 'thinking':
+      return `${part.type}:${part.content.length}`
+    case 'tool_use':
+      return `${part.type}:${part.callId}:${part.toolName}`
+    case 'tool_result':
+      return `${part.type}:${part.callId}:${part.isError ? 'error' : 'ok'}`
+    case 'artifact_ref':
+      return `${part.type}:${part.artifactId}`
+    case 'deploy_status':
+      return `${part.type}:${part.status}:${part.previewPath}:${part.error ?? ''}`
+    case 'attachment':
+      return `${part.type}:${part.kind}:${part.fileName}`
+  }
+}
+
+function isNearWindowBottom(threshold = 420): boolean {
+  const scrollPosition = window.scrollY + window.innerHeight
+  return document.documentElement.scrollHeight - scrollPosition <= threshold
 }
 
 function roleLabel(role: MobileMessage['role']): string {
@@ -349,21 +642,4 @@ function roleLabel(role: MobileMessage['role']): string {
     case 'system':
       return '系统'
   }
-}
-
-function hashTone(key: string): number {
-  let hash = 0
-  for (const char of key) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  }
-  return hash % 7
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }

@@ -1,4 +1,4 @@
-import { and, desc, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { AgentRunRow, ConversationWithMeta } from '@/db/schema'
@@ -6,7 +6,7 @@ import { listAgentsOrdered } from '@/server/agent-service'
 import { listConversations, listMessages, sendMessage } from '@/server/conversation-service'
 import { pendingQuestions } from '@/server/pending-questions'
 import { pendingWrites } from '@/server/pending-writes'
-import type { MessagePart, PendingQuestion, PendingWrite } from '@/shared/types'
+import type { ArtifactContent, ArtifactType, MessagePart, PendingQuestion, PendingWrite } from '@/shared/types'
 
 import packageJson from '../../package.json'
 
@@ -40,8 +40,8 @@ export type MobileMessagePart =
   | { type: 'text'; content: string }
   | { type: 'code'; language: string; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'tool_use'; toolName: string }
-  | { type: 'tool_result'; isError: boolean }
+  | { type: 'tool_use'; callId: string; toolName: string }
+  | { type: 'tool_result'; callId: string; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
   | {
       type: 'deploy_status'
@@ -52,6 +52,21 @@ export type MobileMessagePart =
       error?: string
     }
   | { type: 'attachment'; fileName: string; kind: 'image' | 'file' }
+
+export interface MobileArtifactSummary {
+  id: string
+  type: ArtifactType
+  title: string
+  version: number
+  createdAt: number
+}
+
+export interface MobileArtifact extends MobileArtifactSummary {
+  conversationId: string
+  content: ArtifactContent
+  parentArtifactId?: string
+  createdByAgentId: string
+}
 
 export interface MobileMessage {
   id: string
@@ -71,6 +86,7 @@ export interface MobileConversationDetail {
     updatedAt: number
   }
   messages: MobileMessage[]
+  artifacts: MobileArtifactSummary[]
   runningRuns: MobileRun[]
   pendingWrites: MobilePendingWrite[]
   pendingQuestions: MobilePendingQuestion[]
@@ -164,6 +180,7 @@ export async function getMobileConversationDetail(
     listMessages(conversationId),
     listActiveRuns([conversationId]),
   ])
+  const artifacts = await listMobileArtifactSummaries(extractArtifactIds(messages.flatMap((message) => message.parts)))
   const writes = pendingWrites.listByConversation(conversationId)
   const questions = pendingQuestions.listByConversation(conversationId)
 
@@ -183,9 +200,29 @@ export async function getMobileConversationDetail(
       status: message.status,
       createdAt: message.createdAt,
     })),
+    artifacts,
     runningRuns: runningRuns.map(toMobileRun),
     pendingWrites: writes.map(toMobilePendingWrite),
     pendingQuestions: questions.map(toMobilePendingQuestion),
+  }
+}
+
+export async function getMobileArtifact(artifactId: string): Promise<MobileArtifact> {
+  const artifact = await db.query.artifacts.findFirst({
+    where: eq(schema.artifacts.id, artifactId),
+  })
+  if (!artifact) throw new Error(`Artifact not found: ${artifactId}`)
+
+  return {
+    id: artifact.id,
+    conversationId: artifact.conversationId,
+    type: artifact.type,
+    title: artifact.title,
+    content: artifact.content as ArtifactContent,
+    version: artifact.version,
+    parentArtifactId: artifact.parentArtifactId ?? undefined,
+    createdByAgentId: artifact.createdByAgentId,
+    createdAt: artifact.createdAt,
   }
 }
 
@@ -268,9 +305,9 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
     case 'thinking':
       return { type: 'thinking', content: part.content }
     case 'tool_use':
-      return { type: 'tool_use', toolName: part.toolName }
+      return { type: 'tool_use', callId: part.callId, toolName: part.toolName }
     case 'tool_result':
-      return { type: 'tool_result', isError: part.isError }
+      return { type: 'tool_result', callId: part.callId, isError: part.isError }
     case 'artifact_ref':
       return { type: 'artifact_ref', artifactId: part.artifactId }
     case 'deploy_status':
@@ -287,6 +324,31 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
     case 'file_attachment':
       return { type: 'attachment', fileName: part.fileName, kind: 'file' }
   }
+}
+
+function extractArtifactIds(parts: MessagePart[]): string[] {
+  return Array.from(
+    new Set(
+      parts.flatMap((part) => (part.type === 'artifact_ref' ? [part.artifactId] : [])),
+    ),
+  )
+}
+
+async function listMobileArtifactSummaries(artifactIds: string[]): Promise<MobileArtifactSummary[]> {
+  if (artifactIds.length === 0) return []
+  const rows = await db.query.artifacts.findMany({
+    where: inArray(schema.artifacts.id, artifactIds),
+  })
+  const order = new Map(artifactIds.map((id, index) => [id, index]))
+  return rows
+    .map((artifact) => ({
+      id: artifact.id,
+      type: artifact.type,
+      title: artifact.title,
+      version: artifact.version,
+      createdAt: artifact.createdAt,
+    }))
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
 }
 
 function toMobilePendingWrite(write: PendingWrite): MobilePendingWrite {

@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import { Check, FileText, MessageCircleQuestion, Send, X } from 'lucide-react'
 
+import { computeLineDiff } from '../lib/diff'
+import { formatTime } from '../lib/format'
 import type { MobileAskUserAnswers, MobilePendingQuestion, MobileSnapshot } from '../types'
+import { DiffView } from './DiffView'
+
+const FREE_OTHER = '__other__'
 
 export function ApprovalsScreen({
   connected,
@@ -42,15 +47,9 @@ export function ApprovalsScreen({
                 </p>
               </div>
               <details className="content-preview">
-                <summary>查看内容</summary>
-                {write.oldContent !== null && (
-                  <>
-                    <div className="preview-label">原内容</div>
-                    <pre>{write.oldContent}</pre>
-                  </>
-                )}
-                <div className="preview-label">新内容</div>
-                <pre>{write.newContent}</pre>
+                <summary>查看改动</summary>
+                <div className="preview-label">{write.oldContent === null ? '新建内容' : '改动对比'}</div>
+                <DiffView lines={computeLineDiff(write.oldContent ?? '', write.newContent)} />
               </details>
               <div className="approval-actions">
                 <button
@@ -89,7 +88,9 @@ export function ApprovalsScreen({
             const draft = drafts[item.id] ?? emptyAnswers(item)
             const canSubmit = item.questions.every((question) => {
               const answer = draft[question.question]
-              return answer && answer.selectedLabels.length > 0
+              if (!answer) return false
+              const labels = answer.selectedLabels.filter((label) => label !== FREE_OTHER)
+              return labels.length > 0 || !!answer.freeformNote?.trim()
             })
 
             return (
@@ -99,42 +100,89 @@ export function ApprovalsScreen({
                   <p>{item.questions[0]?.question ?? 'Agent 正在等待用户选择。'}</p>
                 </div>
 
-                {item.questions.map((question) => (
-                  <div key={question.question} className="question-block">
-                    <div className="question-title">{question.header}</div>
-                    <p>{question.question}</p>
-                    <div className="option-grid">
-                      {question.options.map((option) => {
-                        const selected = draft[question.question]?.selectedLabels.includes(option.label)
-                        return (
-                          <button
-                            key={option.label}
-                            type="button"
-                            className={selected ? 'option-button selected' : 'option-button'}
-                            onClick={() =>
-                              setDrafts((prev) => ({
-                                ...prev,
-                                [item.id]: toggleOption(draft, question.question, option.label, !!question.multiSelect),
-                              }))
-                            }
-                          >
-                            <span>
-                              {selected && <Check className="option-icon" aria-hidden="true" />}
-                              {option.label}
-                            </span>
-                            {option.description && <small>{option.description}</small>}
-                          </button>
-                        )
-                      })}
+                {item.questions.map((question) => {
+                  const answer = draft[question.question]
+                  const otherSelected = answer?.selectedLabels.includes(FREE_OTHER) ?? false
+                  return (
+                    <div key={question.question} className="question-block">
+                      <div className="question-title">{question.header}</div>
+                      <p>{question.question}</p>
+                      <div className="option-grid">
+                        {question.options.map((option) => {
+                          const selected = answer?.selectedLabels.includes(option.label) ?? false
+                          return (
+                            <button
+                              key={option.label}
+                              type="button"
+                              className={selected ? 'option-button selected' : 'option-button'}
+                              onClick={() =>
+                                setDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: toggleOption(
+                                    prev[item.id] ?? emptyAnswers(item),
+                                    question.question,
+                                    option.label,
+                                    !!question.multiSelect,
+                                  ),
+                                }))
+                              }
+                            >
+                              <span>
+                                {selected && <Check className="option-icon" aria-hidden="true" />}
+                                {option.label}
+                              </span>
+                              {option.description && <small>{option.description}</small>}
+                            </button>
+                          )
+                        })}
+                        <button
+                          type="button"
+                          className={otherSelected ? 'option-button other selected' : 'option-button other'}
+                          onClick={() =>
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [item.id]: toggleOption(
+                                prev[item.id] ?? emptyAnswers(item),
+                                question.question,
+                                FREE_OTHER,
+                                !!question.multiSelect,
+                              ),
+                            }))
+                          }
+                        >
+                          <span>
+                            {otherSelected && <Check className="option-icon" aria-hidden="true" />}
+                            其他（自由填写）
+                          </span>
+                          <small>选项以外的答案，在下方补充说明</small>
+                        </button>
+                      </div>
+                      {otherSelected && (
+                        <textarea
+                          className="freeform-input"
+                          value={answer?.freeformNote ?? ''}
+                          placeholder="写点说明，Agent 会基于这段文字继续"
+                          onChange={(event) =>
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [item.id]: setFreeformNote(
+                                prev[item.id] ?? emptyAnswers(item),
+                                question.question,
+                                event.target.value,
+                              ),
+                            }))
+                          }
+                        />
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
 
                 <button
                   type="button"
                   className="primary-action full"
                   disabled={!canSubmit || busyId === item.id}
-                  onClick={() => onQuestionAnswer(item.id, draft)}
+                  onClick={() => onQuestionAnswer(item.id, buildAnswers(item, draft))}
                 >
                   <Send className="button-icon" aria-hidden="true" />
                   {busyId === item.id ? '提交中' : '提交回答'}
@@ -152,7 +200,7 @@ export function ApprovalsScreen({
 
 function emptyAnswers(item: MobilePendingQuestion): MobileAskUserAnswers {
   return Object.fromEntries(
-    item.questions.map((question) => [question.question, { selectedLabels: [] }]),
+    item.questions.map((question) => [question.question, { selectedLabels: [], freeformNote: '' }]),
   )
 }
 
@@ -168,7 +216,9 @@ function toggleOption(
     ? exists
       ? answer.selectedLabels.filter((item) => item !== label)
       : [...answer.selectedLabels, label]
-    : [label]
+    : exists
+      ? []
+      : [label]
 
   return {
     ...current,
@@ -179,11 +229,24 @@ function toggleOption(
   }
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function setFreeformNote(
+  current: MobileAskUserAnswers,
+  question: string,
+  note: string,
+): MobileAskUserAnswers {
+  const answer = current[question] ?? { selectedLabels: [] }
+  return { ...current, [question]: { ...answer, freeformNote: note } }
+}
+
+/** Map the FREE_OTHER sentinel back to the "其他" label while keeping the freeform note. */
+function buildAnswers(item: MobilePendingQuestion, draft: MobileAskUserAnswers): MobileAskUserAnswers {
+  const out: MobileAskUserAnswers = {}
+  for (const question of item.questions) {
+    const answer = draft[question.question] ?? { selectedLabels: [] }
+    out[question.question] = {
+      selectedLabels: answer.selectedLabels.map((label) => (label === FREE_OTHER ? '其他' : label)),
+      freeformNote: answer.freeformNote,
+    }
+  }
+  return out
 }
