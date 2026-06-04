@@ -20,6 +20,7 @@ import {
   renderConversationSummaryBlock,
 } from './context-compaction-service'
 import { buildHistoryFor } from './conversation-context'
+import { parseDispatchPlanToolArgs, validateDispatchPlan } from './dispatch-plan'
 import { eventBus } from './event-bus'
 import { newRunId } from './ids'
 import { getAppSettings } from './settings-service'
@@ -379,131 +380,6 @@ async function executeOrchestratorRun(
   allOutputMessageIds.push(...aggRun.outputMessageIds)
 
   return { artifactIds: allArtifactIds, outputMessageIds: allOutputMessageIds }
-}
-
-function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
-  if (!isRecord(args) || !Array.isArray(args.tasks)) {
-    throw new Error('Invalid dispatch plan: plan_tasks args must include a tasks array')
-  }
-
-  return args.tasks.map((raw, index) => {
-    if (!isRecord(raw)) {
-      throw new Error(`Invalid dispatch plan: task at index ${index} must be an object`)
-    }
-    const id = readNonEmptyString(raw.id, `task at index ${index} id`)
-    const agentId = readNonEmptyString(raw.agentId, `task "${id}" agentId`)
-    const task = readNonEmptyString(raw.task, `task "${id}" instruction`)
-
-    let dependsOn: string[] | undefined
-    if (raw.dependsOn !== undefined) {
-      if (!Array.isArray(raw.dependsOn)) {
-        throw new Error(`Invalid dispatch plan: task "${id}" dependsOn must be an array`)
-      }
-      dependsOn = raw.dependsOn.map((dep, depIndex) =>
-        readNonEmptyString(dep, `task "${id}" dependsOn[${depIndex}]`),
-      )
-    }
-
-    const item: DispatchPlanItem = { id, agentId, task }
-    if (dependsOn && dependsOn.length > 0) item.dependsOn = dependsOn
-    return item
-  })
-}
-
-function validateDispatchPlan(
-  plan: DispatchPlanItem[],
-  availableAgents: AgentRow[],
-  orchestratorAgentId: string,
-): void {
-  if (plan.length === 0) {
-    throw new Error('Invalid dispatch plan: tasks must not be empty')
-  }
-
-  const availableAgentIds = new Set(availableAgents.map((a) => a.id))
-  const taskIds = new Set<string>()
-  const duplicateTaskIds = new Set<string>()
-
-  for (const task of plan) {
-    if (taskIds.has(task.id)) duplicateTaskIds.add(task.id)
-    taskIds.add(task.id)
-  }
-  if (duplicateTaskIds.size > 0) {
-    throw new Error(
-      `Invalid dispatch plan: duplicate task id(s): ${[...duplicateTaskIds].join(', ')}`,
-    )
-  }
-
-  for (const task of plan) {
-    if (task.agentId === orchestratorAgentId) {
-      throw new Error(
-        `Invalid dispatch plan: task "${task.id}" dispatches to the orchestrator itself, which would recurse`,
-      )
-    }
-    if (!availableAgentIds.has(task.agentId)) {
-      throw new Error(
-        `Invalid dispatch plan: task "${task.id}" references unavailable agentId "${task.agentId}"`,
-      )
-    }
-
-    const depIds = new Set<string>()
-    for (const dep of task.dependsOn ?? []) {
-      if (dep === task.id) {
-        throw new Error(`Invalid dispatch plan: task "${task.id}" cannot depend on itself`)
-      }
-      if (depIds.has(dep)) {
-        throw new Error(
-          `Invalid dispatch plan: task "${task.id}" lists duplicate dependency "${dep}"`,
-        )
-      }
-      depIds.add(dep)
-      if (!taskIds.has(dep)) {
-        throw new Error(
-          `Invalid dispatch plan: task "${task.id}" depends on unknown task "${dep}"`,
-        )
-      }
-    }
-  }
-
-  assertAcyclicDispatchPlan(plan)
-}
-
-function assertAcyclicDispatchPlan(plan: DispatchPlanItem[]): void {
-  const byId = new Map(plan.map((task) => [task.id, task]))
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-  const stack: string[] = []
-
-  const visit = (taskId: string) => {
-    if (visited.has(taskId)) return
-    if (visiting.has(taskId)) {
-      const cycleStart = stack.indexOf(taskId)
-      const cycle = [...stack.slice(cycleStart), taskId]
-      throw new Error(`Invalid dispatch plan: circular dependency ${cycle.join(' -> ')}`)
-    }
-
-    const task = byId.get(taskId)
-    if (!task) return
-
-    visiting.add(taskId)
-    stack.push(taskId)
-    for (const dep of task.dependsOn ?? []) visit(dep)
-    stack.pop()
-    visiting.delete(taskId)
-    visited.add(taskId)
-  }
-
-  for (const task of plan) visit(task.id)
-}
-
-function readNonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`Invalid dispatch plan: ${label} must be a non-empty string`)
-  }
-  return value
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 // ─── DAG 调度 ──────────────────────────────────────────────
@@ -1196,9 +1072,21 @@ function buildOrchestratorPlanPrompt(baseSystemPrompt: string, otherAgents: Agen
     '',
     '## 拆解原则',
     '- 充分利用每个 Agent 的 capabilities，不要把任务派给不合适的人。',
-    '- 能并行的不写 dependsOn；有依赖的明确写 dependsOn。',
-    '- 每个子任务必须独立可执行（被分派的 Agent 看不到完整群聊上下文）。',
+    '- 每个子任务必须独立可执行（被分派的 Agent 看不到完整群聊上下文，必要上下文要写进 task）。',
     '- 你只能调用 plan_tasks 工具，不要直接给用户输出最终答案。',
+    '',
+    '## 依赖关系（执行顺序的唯一来源，务必读完）',
+    '- 系统【只】按每个任务的 dependsOn 决定顺序：dependsOn 为空的任务会【同时并发】启动。',
+    '- 若任务 B 需要任务 A 的产物 / 结论 / 输出，你【必须】在 B 的 dependsOn 里写上 A 的 id。',
+    '- 在 task 文本里写「先做 A」「基于上一步」之类【没有任何效果】——执行顺序只认 dependsOn 字段。',
+    '- 只有彼此真正无关、可同时进行的任务才留空 dependsOn；拿不准时倾向加依赖（串行更安全）。',
+    '',
+    '示例（设计 → 前端 → 审查，逐级依赖；agentId 用上面可用列表里的真实 id）：',
+    'tasks: [',
+    '  { "id": "t1", "agentId": "<设计师 id>", "task": "产出 UI 设计稿" },',
+    '  { "id": "t2", "agentId": "<前端 id>", "task": "按设计稿实现页面", "dependsOn": ["t1"] },',
+    '  { "id": "t3", "agentId": "<Reviewer id>", "task": "审查 t2 的实现", "dependsOn": ["t2"] }',
+    ']',
   ].join('\n')
 }
 

@@ -68,7 +68,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 全局 API Key 设置面板 | ✅ | app_settings 单行表 · 三层 key 优先级 |
 | 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建,配对通信待打通 |
 | 斜杠命令菜单 | 🚧 | 进行中(未提交),见附录 |
-| 测试覆盖 | ❌ | 待补 |
+| 测试覆盖 | 🟡 | Vitest 覆盖 security / workspace-utils / dispatch-plan 核心纯函数；UI/E2E 待补 |
 
 ---
 
@@ -175,7 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - LLM Pin 的前端入口（schema `pinnedMessageIds` + agent-runner 已就绪,缺 UI;当前 ☆ 仅导航书签,独立于 LLM Pin）
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
 - 移动端伴随 App 配对通信打通
-- 测试覆盖
+- UI/E2E 测试覆盖
 
 ### ⚠️ 关键约定（动手前必看）
 - 改实体字段 → 同步 `specs/01`;改事件 → `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）。
@@ -184,4 +184,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-06-03 · 基线 commit `b60c4f8`（feat: add manual context compaction）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-06-04 · 已补核心纯函数 Vitest 覆盖。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
