@@ -3,7 +3,10 @@ import { Code2, Download, Eye, FileCode2, FileText, Image as ImageIcon, Layers, 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { classifyHunkLine, type DiffLine } from '../lib/diff'
+import { formatTime } from '../lib/format'
 import type { MobileArtifact, MobileArtifactContent } from '../types'
+import { DiffView } from './DiffView'
 
 export function ArtifactPreviewSheet({
   artifact,
@@ -152,13 +155,23 @@ function CodeFileArtifact({ content }: { content: Extract<MobileArtifactContent,
 function DiffArtifact({ content }: { content: Extract<MobileArtifactContent, { type: 'diff' }> }) {
   return (
     <div className="artifact-source-view">
-      <pre>
-        {content.hunks
-          .flatMap((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...hunk.lines])
-          .join('\n')}
-      </pre>
+      <DiffView lines={hunksToDiffLines(content.hunks)} />
     </div>
   )
+}
+
+function hunksToDiffLines(hunks: Extract<MobileArtifactContent, { type: 'diff' }>['hunks']): DiffLine[] {
+  const lines: DiffLine[] = []
+  for (const hunk of hunks) {
+    lines.push({
+      kind: 'hunk',
+      text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+    })
+    for (const raw of hunk.lines) {
+      lines.push({ kind: classifyHunkLine(raw), text: raw.replace(/^[+\- ]/, '') })
+    }
+  }
+  return lines
 }
 
 function SegmentedButton({
@@ -211,13 +224,4 @@ function buildIframeHtml(files: Record<string, string>, entry: string): string {
     '</body>',
     '</html>',
   ].join('\n')
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }

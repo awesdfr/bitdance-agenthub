@@ -1,5 +1,6 @@
-import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
+  ArrowDown,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -18,6 +19,9 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { AvatarBadge, avatarInitials } from '../lib/avatar'
+import { formatTime } from '../lib/format'
+import { ConversationRow } from './ConversationRow'
 import type {
   MobileAgent,
   MobileArtifactSummary,
@@ -47,6 +51,8 @@ export function ConversationsScreen({
   onSendMessage: (content: string) => void
 }) {
   const [draft, setDraft] = useState('')
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const lastAutoScrolledConversationId = useRef<string | null>(null)
   const agentById = new Map((snapshot?.agents ?? []).map((agent) => [agent.id, agent]))
@@ -68,23 +74,55 @@ export function ConversationsScreen({
     return () => window.cancelAnimationFrame(frame)
   }, [detailConversationId, scrollSignature, selectedConversationId])
 
+  useEffect(() => {
+    if (!selectedConversationId) return
+
+    function handleScroll() {
+      setShowScrollButton(!isNearWindowBottom(160))
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    handleScroll()
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [selectedConversationId, scrollSignature])
+
+  function submitDraft() {
+    const content = draft.trim()
+    if (!content) return
+    onSendMessage(content)
+    setDraft('')
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value)
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+    }
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submitDraft()
+    }
+  }
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }
+
   if (!connected) {
     return <div className="empty-state">先在设置中配对桌面端。</div>
   }
 
   if (selectedConversationId) {
     return (
-      <div className="screen-stack">
+      <div className="screen-stack conversation-screen">
         {detail ? (
           <>
-            <section className="conversation-header-card">
-              <div>
-                <p className="eyebrow">{detail.conversation.mode === 'group' ? 'Group Chat' : 'Direct Chat'}</p>
-                <h1>{detail.conversation.title}</h1>
-              </div>
-              <span className="count-pill">{detail.messages.length} 条消息</span>
-            </section>
-
             <section className="message-list">
               {detail.messages.length > 0 ? (
                 detail.messages.map((message) => (
@@ -101,21 +139,25 @@ export function ConversationsScreen({
               )}
             </section>
 
+            {showScrollButton && (
+              <button type="button" className="scroll-to-bottom" aria-label="回到底部" onClick={scrollToBottom}>
+                <ArrowDown className="button-icon" aria-hidden="true" />
+              </button>
+            )}
             <form
               className="composer"
               onSubmit={(event) => {
                 event.preventDefault()
-                const content = draft.trim()
-                if (!content) return
-                onSendMessage(content)
-                setDraft('')
+                submitDraft()
               }}
             >
               <textarea
+                ref={textareaRef}
                 value={draft}
                 rows={1}
-                placeholder="输入意见或追问..."
-                onChange={(event) => setDraft(event.target.value)}
+                placeholder="输入意见或追问…"
+                onChange={(event) => handleDraftChange(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
               />
               <button type="submit" className="primary-action icon-action" aria-label="发送" disabled={!draft.trim()}>
                 <Send className="button-icon" aria-hidden="true" />
@@ -131,39 +173,14 @@ export function ConversationsScreen({
   }
 
   return (
-    <section className="card-list">
+    <section className="list-section">
       <h2 className="section-title">会话</h2>
       {snapshot && snapshot.conversations.length > 0 ? (
-        snapshot.conversations.map((conv) => (
-          <button
-            key={conv.id}
-            type="button"
-            className="list-card conversation-button"
-            onClick={() => onOpenConversation(conv.id)}
-          >
-            <AvatarBadge
-              className="conversation-avatar"
-              label={conversationAvatarLabel(conv.title, conv.mode)}
-              toneKey={conv.id}
-            />
-            <div className="conversation-main">
-              <div>
-                <h3>{conv.title}</h3>
-                <p>
-                  {conv.mode === 'group' ? '群聊' : '单聊'} · {formatTime(conv.updatedAt)}
-                </p>
-              </div>
-              {(conv.runningRunCount > 0 || conv.pendingWriteCount > 0 || conv.pendingQuestionCount > 0) && (
-                <div className="conversation-badges">
-                  {conv.runningRunCount > 0 && <span className="mini-pill">运行 {conv.runningRunCount}</span>}
-                  {conv.pendingWriteCount > 0 && <span className="mini-pill">审批 {conv.pendingWriteCount}</span>}
-                  {conv.pendingQuestionCount > 0 && <span className="mini-pill">提问 {conv.pendingQuestionCount}</span>}
-                </div>
-              )}
-            </div>
-            <ChevronRight className="chevron-icon" aria-hidden="true" />
-          </button>
-        ))
+        <div className="group-card">
+          {snapshot.conversations.map((conv) => (
+            <ConversationRow key={conv.id} conv={conv} onOpen={onOpenConversation} />
+          ))}
+        </div>
       ) : (
         <div className="empty-state">数据同步中</div>
       )}
@@ -184,7 +201,7 @@ function MessageCard({
 }) {
   const isUser = message.role === 'user'
   const displayName = isUser ? '你' : agent?.name ?? message.agentId ?? roleLabel(message.role)
-  const avatar = avatarInitials(displayName, message.role)
+  const avatar = isUser ? 'ME' : message.role === 'system' ? 'SY' : avatarInitials(displayName)
   const toneKey = isUser ? 'mobile-user' : agent?.id ?? message.agentId ?? message.role
 
   return (
@@ -198,10 +215,38 @@ function MessageCard({
         <div className="message-bubble">
           <MessagePartsView artifactById={artifactById} message={message} onOpenArtifact={onOpenArtifact} />
         </div>
+        <MessageStatus status={message.status} />
       </div>
       {isUser && <AvatarBadge className="message-avatar user-avatar" label={avatar} toneKey={toneKey} />}
     </article>
   )
+}
+
+function MessageStatus({ status }: { status: MobileMessage['status'] }) {
+  if (status === 'streaming') {
+    return (
+      <span className="msg-status">
+        正在生成
+        <span className="typing-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="msg-status error">
+        <CircleAlert className="inline-icon" aria-hidden="true" />
+        出错
+      </span>
+    )
+  }
+  if (status === 'aborted') {
+    return <span className="msg-status aborted">已中止</span>
+  }
+  return null
 }
 
 type MobileToolUsePart = Extract<MobileMessagePart, { type: 'tool_use' }>
@@ -571,41 +616,6 @@ function isNearWindowBottom(threshold = 420): boolean {
   return document.documentElement.scrollHeight - scrollPosition <= threshold
 }
 
-function AvatarBadge({
-  label,
-  toneKey,
-  className,
-}: {
-  label: string
-  toneKey: string
-  className?: string
-}) {
-  return <div className={`${className ?? ''} avatar-tone-${hashTone(toneKey)}`}>{label}</div>
-}
-
-function conversationAvatarLabel(title: string, mode: 'single' | 'group'): string {
-  const fallback = mode === 'group' ? 'GR' : 'DM'
-  return avatarInitials(title, undefined, fallback)
-}
-
-function avatarInitials(name: string, role?: MobileMessage['role'], fallback = 'AG'): string {
-  if (role === 'user') return 'ME'
-  if (role === 'system') return 'SY'
-
-  const normalized = name.trim()
-  if (!normalized) return fallback
-
-  const asciiWords = normalized.match(/[a-zA-Z0-9]+/g)
-  if (asciiWords && asciiWords.length > 0) {
-    const first = asciiWords[0]?.[0] ?? ''
-    const second = asciiWords.length > 1 ? asciiWords[1]?.[0] : asciiWords[0]?.[1]
-    return `${first}${second ?? ''}`.toUpperCase()
-  }
-
-  const cjkChars = Array.from(normalized).filter((char) => /\p{Letter}|\p{Number}/u.test(char))
-  return cjkChars.slice(0, 2).join('').toUpperCase() || fallback
-}
-
 function roleLabel(role: MobileMessage['role']): string {
   switch (role) {
     case 'user':
@@ -615,21 +625,4 @@ function roleLabel(role: MobileMessage['role']): string {
     case 'system':
       return '系统'
   }
-}
-
-function hashTone(key: string): number {
-  let hash = 0
-  for (const char of key) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  }
-  return hash % 7
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }

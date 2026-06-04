@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Home, Menu, Settings, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ChevronLeft, Home, Loader2, Menu, RefreshCw, Settings, X } from 'lucide-react'
 
 import { createMobileApiClient } from './api/client'
 import { ApprovalsScreen } from './screens/ApprovalsScreen'
@@ -7,6 +7,7 @@ import { ArtifactPreviewSheet } from './screens/ArtifactPreviewSheet'
 import { ConversationsScreen } from './screens/ConversationsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { StatusScreen } from './screens/StatusScreen'
+import { usePullToRefresh } from './lib/usePullToRefresh'
 import { loadConnection, loadRecentHosts, rememberRecentHost, saveConnection } from './storage/connection'
 import type {
   ConnectionConfig,
@@ -37,6 +38,7 @@ export function App() {
   const [loading, setLoading] = useState(false)
   const [operationId, setOperationId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
 
   const api = useMemo(() => createMobileApiClient(connection), [connection])
   const configured = !!normalizeBaseUrl(connection.baseUrl) && !!connection.deviceToken.trim()
@@ -48,6 +50,7 @@ export function App() {
       setSnapshot(next)
       setLastSuccessfulConnection(connectionFingerprint)
       setRecentHosts(rememberRecentHost(connection.baseUrl))
+      setLastSyncedAt(Date.now())
       setError(null)
     },
     [connection.baseUrl, connectionFingerprint],
@@ -171,6 +174,12 @@ export function App() {
     setDrawerOpen(false)
   }
 
+  function backToList() {
+    setSelectedConversationId(null)
+    setConversationDetail(null)
+    closeArtifactPreview()
+  }
+
   function openSettings() {
     setActiveView('settings')
     setSelectedConversationId(null)
@@ -219,6 +228,10 @@ export function App() {
     setArtifactLoadingId(null)
   }
 
+  usePullToRefresh(() => {
+    void refreshSnapshot()
+  }, configured && !selectedConversationId && activeView === 'home')
+
   const hasPending = !!snapshot && (snapshot.pendingWrites.length > 0 || snapshot.pendingQuestions.length > 0)
 
   const content = selectedConversationId ? (
@@ -247,10 +260,9 @@ export function App() {
       <div className="screen-stack">
         <StatusScreen
           connected={connectionOk}
-          loading={loading}
           error={error}
           snapshot={snapshot}
-          onRefresh={() => void refreshSnapshot()}
+          lastSyncedAt={lastSyncedAt}
           onOpenSettings={openSettings}
           onOpenConversation={(id) => void openConversation(id)}
         />
@@ -270,16 +282,52 @@ export function App() {
       </div>
     )
 
+  const inConversation = !!selectedConversationId
+  const navTitle = inConversation
+    ? conversationDetail?.conversation.title ?? '会话'
+    : activeView === 'settings'
+      ? '设置'
+      : '主页'
+
+  let navRight: ReactNode = <span className="nav-bar-spacer" aria-hidden="true" />
+  if (!inConversation && activeView === 'home') {
+    if (!configured) {
+      navRight = (
+        <button type="button" className="nav-bar-button" aria-label="设置" onClick={openSettings}>
+          <Settings className="chrome-icon" aria-hidden="true" />
+        </button>
+      )
+    } else if (error && !loading) {
+      navRight = (
+        <span className="nav-bar-reconnect">
+          <Loader2 className="inline-icon" aria-hidden="true" />
+          重连
+        </span>
+      )
+    } else {
+      navRight = (
+        <button type="button" className="nav-bar-button" aria-label="刷新" onClick={() => void refreshSnapshot()}>
+          <RefreshCw className="chrome-icon" aria-hidden="true" />
+        </button>
+      )
+    }
+  }
+
   return (
     <main className="app-shell">
-      <button
-        type="button"
-        className="chrome-button floating-menu-button"
-        aria-label="打开侧边栏"
-        onClick={() => setDrawerOpen(true)}
-      >
-        <Menu className="chrome-icon" aria-hidden="true" />
-      </button>
+      <nav className="nav-bar">
+        {inConversation ? (
+          <button type="button" className="nav-bar-button" aria-label="返回会话列表" onClick={backToList}>
+            <ChevronLeft className="chrome-icon" aria-hidden="true" />
+          </button>
+        ) : (
+          <button type="button" className="nav-bar-button" aria-label="打开侧边栏" onClick={() => setDrawerOpen(true)}>
+            <Menu className="chrome-icon" aria-hidden="true" />
+          </button>
+        )}
+        <div className="nav-bar-title">{navTitle}</div>
+        {navRight}
+      </nav>
 
       <div className="screen-frame">{content}</div>
 
