@@ -138,7 +138,16 @@ const planTasksTool: ToolDef = {
 
 **校验分层**：
 - `plan_tasks` handler 只做参数形状校验（`tasks` 是否为数组、字段是否存在），返回 ack 给 LLM。
-- AgentRunner 在发布 `dispatch.plan` 与进入 EXECUTE 前必须做语义校验；失败时不发布 `dispatch.plan`，当前 Orchestrator run 以 `failed` 结束，并把明确错误写入 `run.end.error` / 错误消息。
+- AgentRunner 在发布 `dispatch.plan` 与进入 EXECUTE 前必须先编译 plan，再做语义校验；失败时不发布 `dispatch.plan`，当前 Orchestrator run 以 `failed` 结束，并把明确错误写入 `run.end.error` / 错误消息。
+
+**plan 编译**：
+- `dependsOn` 仍是唯一执行顺序契约，但 Orchestrator 的 LLM 可能把依赖写进 task 文本而漏写字段。
+- AgentRunner 必须在校验前运行确定性的 `compileDispatchPlan`：
+  - 保留显式 `dependsOn`
+  - 仅从同一 plan 中排在当前任务之前的任务推断缺失依赖
+  - 识别 `t1 产物`、`读取 PRD`、`基于 UI 设计`、`审查前端实现`、`上游产物` 等高置信依赖信号
+  - 审查 / 验收类任务默认依赖前面所有产物型任务
+- `dispatch.plan` 事件发布编译后的 plan，而不是原始 LLM 输出。
 
 语义校验规则：
 - `tasks` 非空
@@ -215,7 +224,7 @@ const planTasksTool: ToolDef = {
 **lazy load**：子 Agent 需要某个产物详情时，调用 `read_artifact(id)` 工具按需获取。
 
 **artifact 注入**：
-- `upstream_artifacts`：来自当前任务 `dependsOn` 上游结果，按 artifact id 去重后全部列出。
+- `upstream_artifacts`：来自当前任务 `dependsOn` 的传递闭包上游结果，按 artifact id 去重后全部列出。例：`t4 -> t3 -> t2 -> t1` 时，t4 能看到 t1/t2/t3 的产物摘要。
 - `existing_artifacts`：来自当前会话其它产物，排除 `upstream_artifacts` 中已经列过的 id，只保留最近 N 个（默认 5，按 `createdAt desc`），避免长会话把所有产物重复塞给每个子 agent。
 - 两者都只列 `id` / `type` / `title`，不内联 artifact 内容；需要全文时走 `read_artifact(id)`。
 
@@ -239,7 +248,7 @@ Orchestrator 子任务执行使用 AgentRunner 模块级全局信号量，默认
 
 ## DAG 调度算法
 
-`executePlan` 只接收已通过语义校验的 plan；缺失依赖、重复 id、自依赖、循环依赖等坏 plan 应在进入本阶段前给出清晰错误。
+`executePlan` 只接收已编译并通过语义校验的 plan；缺失依赖、重复 id、自依赖、循环依赖等坏 plan 应在进入本阶段前给出清晰错误。
 
 ```typescript
 async function executePlan(
@@ -331,6 +340,11 @@ async function runSubTask(
   TaskResult.status = 'aborted'
   dispatch.end.status = 'aborted'
 
+某任务文本 / 类型明确要求产出 artifact，但 child run complete 后 artifactIds 为空:
+  TaskResult.status = 'failed'
+  error 记录「任务需要产物但未产出」
+  下游按依赖失败规则 skipped
+
 某任务的任一 dependsOn 上游不是 complete:
   不启动该任务，不创建 child AgentRun
   TaskResult.status = 'skipped'
@@ -370,7 +384,7 @@ Orchestrator 据此生成聚合消息。
    - ToolExecutor 执行 plan_tasks handler（实际只是确认）
    - 发 tool.result
 7. AgentRunner 在 tool.call 是 plan_tasks 时，
-   解析 args.tasks → 做 plan 语义校验 → 转发为 dispatch.plan 事件
+   解析 args.tasks → 编译缺失依赖 → 做 plan 语义校验 → 转发编译后的 dispatch.plan 事件
    并接管控制，进入 Stage 2；若校验失败则当前 run 失败并报告明确错误
 8. AgentRunner.executePlan(...):
    for each wave:
