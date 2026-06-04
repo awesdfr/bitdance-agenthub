@@ -481,6 +481,21 @@ export async function fetchArtifactVersions(artifactId: string): Promise<Artifac
   return versions
 }
 
+/** 以 artifactId 为父，提交编辑后的内容为新版本（version+1）；返回新产物行。 */
+export async function createArtifactVersion(
+  artifactId: string,
+  body: { content: unknown; title?: string },
+): Promise<ArtifactRow> {
+  const { artifact } = await json<{ artifact: ArtifactRow }>(
+    fetch(`/api/artifacts/${artifactId}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return artifact
+}
+
 export async function deleteArtifact(artifactId: string): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/artifacts/${artifactId}`, { method: 'DELETE' }),

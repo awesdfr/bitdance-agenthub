@@ -216,23 +216,18 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 ---
 
-## 版本链（TODO）
+## 版本链 + 二次编辑（已实现）
 
-字段已就绪：`artifacts.parent_artifact_id` + `version` 列。
+字段：`artifacts.parent_artifact_id` + `version`。新版本 = **新行**，`parentArtifactId` 指向父，`version = parent.version + 1`（不原地改）。
 
-事件类型已定义：`StreamEvent 'artifact.update'`（`types.ts:109`）—— payload `{ artifactId, patch: Partial<ArtifactContent> }`。
+**两条写新版本的路径**，共用 `buildArtifactContent`（`src/server/artifact-content.ts`）做内容校验/规整（单一来源）：
 
-前端 reducer 已就绪：`app-store.ts:391-396` 接 `artifact.update`，浅合并 patch。
+1. **Agent 驱动**：`write_artifact` 工具传 `parentArtifactId`（由 LLM 决定）→ Adapter 在 `tool.result` 后发 `artifact.create`，Runner 注入 `artifact_ref` part。
+2. **用户驱动**：在 `ArtifactPreviewPanel` 里用 CodeMirror 编辑 →「提交为新版本」→ `POST /api/artifacts/:id/versions` → `artifact-service.createArtifactVersion(parentId, content, title?)`（继承父的 `conversationId` / `type` / `createdByAgentId`）→ 前端 `upsertArtifact` + `openArtifactPreview(newId)` 切到新版本。可编辑范围：**web_app（多文件）/ document（markdown）**；image / code_file / diff 不可编辑。
 
-**缺什么**：
-- 没有「写新版本」的工具（`write_artifact` 总是写 v1）
-- Adapter 也没有 emit `artifact.update` 的路径
-- UI 没有「编辑产物 → 提交新版本」的入口
+**版本链读取**：`GET /api/artifacts/:id/versions` 从 root BFS 收集整条链，按 `version` 升序；`ArtifactPreviewPanel` 顶部「历史」切换条据此渲染。
 
-要实装版本链，需要：
-1. 新增 `update_artifact` 工具（或扩展 write_artifact 接受 `parentArtifactId`）
-2. Adapter 在工具结果后 emit `artifact.update` 或 `artifact.create`（新 id 但 parentArtifactId 指向旧）
-3. 前端 ArtifactPreviewPanel 加「历史版本」侧边栏
+注：`StreamEvent 'artifact.update'`（浅合并 patch）类型 + reducer 仍在，但版本链走「新行 + `artifact.create`」而非原地 patch；`artifact.update` 保留给未来「原地更新」场景。
 
 ---
 

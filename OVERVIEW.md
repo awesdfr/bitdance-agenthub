@@ -59,7 +59,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 |
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
-| Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL) / document(md) / image · 版本链 v1↔v2 · 选区改写 · 导出 |
+| Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL) / document(md) / image · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
 | Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 Bash 黑名单 |
 | Token 计量 | ✅ | per-run/per-message · cache 命中率 · 全局分析 Tab |
 | 跨 run 对话记忆 | ✅ | 历史序列化注入 · token 预算 · 群聊跨 agent 可见 · 手动压缩 |

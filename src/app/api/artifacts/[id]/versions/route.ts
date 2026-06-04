@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
+import { createArtifactVersion } from '@/server/artifact-service'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -54,4 +56,29 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
   collected.sort((a, b) => a.version - b.version)
   return NextResponse.json({ versions: collected })
+}
+
+const PostBody = z.object({
+  content: z.unknown(),
+  title: z.string().optional(),
+})
+
+/**
+ * POST /api/artifacts/:id/versions
+ *
+ * 用户在产物面板编辑后「提交为新版本」。以 :id 为父创建 version+1 的新产物行,返回新行。
+ * 内容经 createArtifactVersion → buildArtifactContent 校验(与 write_artifact 同一来源)。
+ */
+export async function POST(req: Request, ctx: RouteContext) {
+  const { id } = await ctx.params
+  const parsed = PostBody.safeParse(await req.json().catch(() => null))
+  if (!parsed.success) {
+    return NextResponse.json({ error: `Invalid body: ${parsed.error.message}` }, { status: 400 })
+  }
+
+  const result = await createArtifactVersion(id, parsed.data.content, parsed.data.title)
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
+  }
+  return NextResponse.json({ artifact: result.artifact })
 }
