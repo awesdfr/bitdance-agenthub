@@ -195,7 +195,7 @@ app/page.tsx
     ├── <Sidebar />               ── 对话/产物库/Agents/分析 四 tab 切换
     │   ├── <ThemeToggle />
     │   ├── <NewConversationDialog />
-    │   ├── <ConversationItem />  ── 单条会话 + hover 重命名/删除
+    │   ├── <ConversationItem />  ── 单条会话 + hover 置顶/归档/重命名/删除
     │   ├── <ArtifactLibrary />
     │   ├── <AgentLibrary />
     │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code' / 'codex'）；SDK adapter 模式下隐藏 provider/工具集，Codex 使用 AgentHub 隔离 CODEX_HOME
