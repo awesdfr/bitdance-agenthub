@@ -224,7 +224,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 ### ppt
 
-`SlideDeckView`（`artifact-preview-panel.tsx`）：从 slides JSON 渲染分页幻灯片（◀▶ 翻页 + 页码 + 全屏）；`layout: 'title' | 'section'` 用主色背景居中大标题，内容页冷白背景 + 顶部色条 + 主色标题 + 分割线 + 正文要点。**预览与 pptx 导出同源消费 `resolvePptTheme`**（`src/shared/ppt-theme.ts`：把完整视觉 token 填默认后用于背景/主色/正文/字体/字号），反映设计的整套配色而非单一主色。要点纯文本（非 markdown，与导出一致）。「编辑 JSON」视图用 CodeMirror 改 slides JSON → 提交新版本。
+`SlideDeckView`（`artifact-preview-panel.tsx`）：从 slides JSON 渲染分页幻灯片（◀▶ 翻页 + 页码 + 全屏）；`layout: 'title' | 'section'` 用主色背景居中大标题，内容页冷白背景 + 顶部色条 + 主色标题 + 分割线 + **要点卡片化**（每要点一张 surface 卡片条，按 `detectBulletTone` 启发式着色 + 图标：▲ 正面墨绿 / ▼ 警示深红 / ▪ 中性主色）。**预览与 pptx 导出同源消费 `resolvePptTheme`**（`src/shared/ppt-theme.ts`：把完整视觉 token 填默认后用于背景/主色/正文/字体/字号），反映设计的整套配色而非单一主色。要点纯文本（非 markdown，与导出一致）。「编辑 JSON」视图用 CodeMirror 改 slides JSON → 提交新版本。
 
 **导出真 .pptx**：`GET /api/artifacts/:id/export` 的 ppt 分支调 `src/server/ppt-export.ts` 的 `slidesToPptxBuffer`，用 `pptxgenjs`（动态 import；next.config `serverExternalPackages` 已登记）把 slides JSON 转成 Office 可打开的 .pptx 二进制。预览近似、导出为交付物（浏览器难像素级预览 pptx）。content 不含图片字段（规避 base64 入 DB JSON 列）。
 
