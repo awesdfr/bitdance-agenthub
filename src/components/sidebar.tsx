@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentLibrary } from '@/components/agent-library'
 import { AgentAvatar } from '@/components/agent-avatar'
+import { GlobalSearchTrigger } from '@/components/global-search-trigger'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { NewConversationDialog } from '@/components/new-conversation-dialog'
 import { SettingsButton } from '@/components/settings-dialog'
@@ -217,28 +218,33 @@ export function Sidebar() {
 
           {/* Search box (only when not collapsed) */}
           {!collapsed && conversations.length > 0 && (
-            <div className="shrink-0 px-3 pt-2 pb-2">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="搜索会话…"
-                  className="w-full rounded-md border bg-background py-1.5 pl-7 pr-7 text-xs outline-none transition focus:border-foreground/30"
-                />
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    title="清除"
-                  >
-                    <X className="size-3" />
-                  </button>
-                )}
+            <>
+              <div className="shrink-0 flex items-center gap-2 px-3 pt-2 pb-1">
+                <GlobalSearchTrigger />
               </div>
-            </div>
+              <div className="shrink-0 px-3 pb-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="搜索会话…"
+                    className="w-full rounded-md border bg-background py-1.5 pl-7 pr-7 text-xs outline-none transition focus:border-foreground/30"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch('')}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="清除"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
           )}
 
           {/* Conversation list */}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 
+import { GlobalSearch } from '@/components/global-search'
 import { StreamProvider } from '@/components/stream-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 
@@ -36,6 +37,7 @@ export default function RootLayout({
         <ThemeProvider>
           <StreamProvider>{children}</StreamProvider>
         </ThemeProvider>
+        <GlobalSearch />
       </body>
     </html>
   )
