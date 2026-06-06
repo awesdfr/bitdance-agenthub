@@ -38,4 +38,4 @@ if (!globalForDb.sqlite) {
 }
 
 export const db = drizzle(sqlite, { schema })
-export { schema }
+export { schema, sqlite }

@@ -6,9 +6,8 @@
  * 执行：tsx src/db/migrate-add-message-search.ts
  */
 import type Database from 'better-sqlite3'
-import { sql } from 'drizzle-orm'
 
-import { db as defaultDb } from './client'
+import { sqlite as defaultSqlite } from './client'
 
 const STATEMENTS: string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, tokenize='trigram')`,
@@ -49,7 +48,7 @@ const STATEMENTS: string[] = [
      FROM messages m`,
 ]
 
-export function runMessageSearchMigration(target: Database.Database = defaultDb as unknown as Database.Database) {
+export function runMessageSearchMigration(target: Database.Database = defaultSqlite) {
   for (const stmt of STATEMENTS) {
     target.exec(stmt)
   }
