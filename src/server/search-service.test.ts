@@ -113,4 +113,24 @@ describe('searchMessages (FTS5 path)', () => {
     expect(r.hits).toEqual([])
     expect(r.error).toBe('INVALID_QUERY')
   })
+
+  it('LIKE fallback matches short Chinese query', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [
+      { type: 'text', content: '模型切换问题' },
+    ])
+    const r = await searchMessages({ query: '模型', fallback: 'like', db: db as any })
+    expect(r.total).toBe(1)
+    // LIKE path snippet has no <mark>
+    expect(r.hits[0].snippetHtml).not.toContain('<mark>')
+  })
+
+  it('LIKE fallback filters by conversationId', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [{ type: 'text', content: '共同' }])
+    insertMessage(db, 'm2', 'c2', 'user', [{ type: 'text', content: '共同' }])
+    const r = await searchMessages({
+      query: '共同', fallback: 'like', conversationId: 'c2', db: db as any,
+    })
+    expect(r.total).toBe(1)
+    expect(r.hits[0].conversationId).toBe('c2')
+  })
 })

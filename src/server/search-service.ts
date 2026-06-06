@@ -22,28 +22,7 @@ export interface SearchResult {
   error?: 'INVALID_QUERY'
 }
 
-/**
- * Wrap an FTS5 search term in double quotes to force phrase matching.
- *
- * Why: FTS5 interprets a hyphen as a column-restricted query separator
- * (e.g. 'render-pipeline' becomes "no such column: pipeline"). Quoting
- * makes FTS5 treat the whole string as a literal phrase.
- *
- * Conditions for quoting:
- * - Must contain a hyphen (the problem we're solving)
- * - Must NOT end with * (prefix search — quoting breaks it)
- * - Must NOT contain ( (FTS5 syntax — quoting hides the error we need to catch)
- *
- * All other queries pass through unquoted so FTS5 can error on them.
- */
-function maybeQuote(s: string): string {
-  if (s.endsWith('*')) return s
-  if (s.includes('(')) return s
-  if (s.includes('-')) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
-
-function rowToHit(row: {
+type HitRow = {
   messageId: string
   conversationId: string
   conversationTitle: string
@@ -53,32 +32,49 @@ function rowToHit(row: {
   agentAvatar: string | null
   createdAt: number
   snippetHtml: string
-}): SearchHit {
+}
+
+function rowToHit(row: HitRow): SearchHit {
   return { ...row }
 }
 
+/**
+ * Conditional FTS5 quoting:
+ * - ends with `*` → pass through (FTS5 prefix matching)
+ * - contains `(` → pass through (let FTS5 raise a syntax error we surface as INVALID_QUERY)
+ * - contains `-` → wrap in double quotes (otherwise FTS5 reads it as a column-restricted query)
+ * - else → pass through
+ */
+function maybeQuote(s: string): string {
+  if (s.endsWith('*')) return s
+  if (s.includes('(')) return s
+  if (s.includes('-')) return `"${s.replace(/"/g, '""')}"`
+  return s
+}
+
 export async function searchMessages(opts: SearchOptions): Promise<SearchResult> {
-  const start = Date.now()
   const trimmed = opts.query.trim()
-  if (!trimmed) {
-    return { hits: [], total: 0, tookMs: 0 }
-  }
+  if (!trimmed) return { hits: [], total: 0, tookMs: 0 }
 
   const target = (opts.db ?? (defaultDb as unknown as Database.Database))
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100)
   const offset = Math.max(opts.offset ?? 0, 0)
 
-  const ftsQuery = maybeQuote(trimmed)
-  const params: unknown[] = [
-    ftsQuery,
-    opts.conversationId ?? null,
-    opts.conversationId ?? null,
-    opts.role ?? null,
-    opts.role ?? null,
-    limit,
-    offset,
-  ]
+  if (opts.fallback === 'like') {
+    return runLikePath(target, trimmed, limit, offset, opts)
+  }
+  return runFtsPath(target, trimmed, limit, offset, opts)
+}
 
+function runFtsPath(
+  target: Database.Database,
+  q: string,
+  limit: number,
+  offset: number,
+  opts: SearchOptions,
+): SearchResult {
+  const start = Date.now()
+  const ftsQuery = maybeQuote(q)
   const stmt = target.prepare(`
     SELECT
       m.id AS messageId,
@@ -100,20 +96,21 @@ export async function searchMessages(opts: SearchOptions): Promise<SearchResult>
     ORDER BY bm25(messages_fts)
     LIMIT ? OFFSET ?
   `)
-
-  let rows: ReturnType<typeof stmt.all>
+  let rows: HitRow[]
   try {
-    rows = stmt.all(...params) as any
+    rows = stmt.all(
+      ftsQuery,
+      opts.conversationId ?? null, opts.conversationId ?? null,
+      opts.role ?? null, opts.role ?? null,
+      limit, offset,
+    ) as HitRow[]
   } catch (err) {
-    // FTS5 syntax errors come as SqliteError with message starting with "fts5:"
-    if (err instanceof Error && /fts5/.test(err.message)) {
+       if (err instanceof Error && (/(?:fts5|SQLITE_ERROR)/.test(err.message))) {
       return { hits: [], total: 0, tookMs: 0, error: 'INVALID_QUERY' }
     }
     throw err
   }
 
-  // total = count of all matching rows (without limit/offset); only run
-  // a separate count if the page was actually filled (i.e. more might exist).
   let total = rows.length
   if (rows.length === limit) {
     const countRow = target.prepare(`
@@ -130,11 +127,44 @@ export async function searchMessages(opts: SearchOptions): Promise<SearchResult>
     total = countRow.n
   }
 
-  return {
-    hits: (rows as any[]).map(rowToHit),
-    total,
-    tookMs: Date.now() - start,
-  }
+  return { hits: rows.map(rowToHit), total, tookMs: Date.now() - start }
+}
+
+function runLikePath(
+  target: Database.Database,
+  q: string,
+  limit: number,
+  offset: number,
+  opts: SearchOptions,
+): SearchResult {
+  const start = Date.now()
+  const rows = target.prepare(`
+    SELECT
+      m.id AS messageId,
+      m.conversation_id AS conversationId,
+      m.role AS role,
+      m.agent_id AS agentId,
+      m.created_at AS createdAt,
+      substr(m.parts, max(1, instr(m.parts, ?) - 30), 80) AS snippetHtml,
+      c.title AS conversationTitle,
+      a.name AS agentName,
+      a.avatar AS agentAvatar
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    LEFT JOIN agents a   ON a.id = m.agent_id
+    WHERE m.parts LIKE '%' || ? || '%'
+      AND (? IS NULL OR m.conversation_id = ?)
+      AND (? IS NULL OR m.role = ?)
+    ORDER BY m.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(
+    q, q,
+    opts.conversationId ?? null, opts.conversationId ?? null,
+    opts.role ?? null, opts.role ?? null,
+    limit, offset,
+  ) as HitRow[]
+
+  return { hits: rows.map(rowToHit), total: rows.length, tookMs: Date.now() - start }
 }
 
 export async function countSearchMatches(query: string): Promise<number> {
