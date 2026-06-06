@@ -157,6 +157,8 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   return (
     <div
       id={`message-${message.id}`}
+      data-role={message.role}
+      data-status={message.status}
       className={cn(
         'group flex items-start gap-3 rounded-lg animate-in fade-in slide-in-from-bottom-1',
         isUser && 'flex-row-reverse',

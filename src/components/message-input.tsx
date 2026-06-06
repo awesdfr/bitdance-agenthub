@@ -909,6 +909,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       <div className="flex items-center gap-2">
         <Textarea
           ref={textareaRef}
+          data-testid="composer-input"
           value={content}
           onChange={handleChange}
           onSelect={handleSelect}
@@ -979,6 +980,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
             size="icon"
             variant="destructive"
             title="中止全部"
+            data-testid="composer-abort"
           >
             <Square className="size-4 fill-current" />
           </Button>
@@ -988,6 +990,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
             disabled={(!content.trim() && pending.length === 0) || sending}
             size="icon"
             title="发送 (Enter)"
+            data-testid="composer-send"
           >
             <Send className="size-4" />
           </Button>

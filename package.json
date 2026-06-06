@@ -10,6 +10,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "node scripts/ensure-node-sqlite.mjs && playwright test",
+    "e2e:ui": "node scripts/ensure-node-sqlite.mjs && playwright test --ui",
     "typecheck": "tsc --noEmit",
     "db:generate": "node scripts/run-electron-node.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:push": "node scripts/run-electron-node.mjs node_modules/drizzle-kit/bin.cjs push --force",
@@ -65,6 +67,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",

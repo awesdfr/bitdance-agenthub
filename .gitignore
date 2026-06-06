@@ -44,8 +44,13 @@ next-env.d.ts
 
 # AgentHub runtime data
 /.agenthub-data/
+/.agenthub-data-e2e/
 /.tmp/
 /drizzle/
+
+# Playwright
+/playwright-report/
+/test-results/
 
 # Electron build outputs
 /dist-electron/
