@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_PPT_THEME, resolvePptTheme } from './ppt-theme'
+import { DEFAULT_PPT_THEME, detectBulletTone, resolvePptTheme } from './ppt-theme'
 
 describe('resolvePptTheme', () => {
   it('fills all tokens with defaults when theme is undefined', () => {
@@ -24,5 +24,24 @@ describe('resolvePptTheme', () => {
 
   it('prefers new fields over legacy', () => {
     expect(resolvePptTheme({ primary: 'AAAAAA', primaryColor: 'BBBBBB' }).primary).toBe('AAAAAA')
+  })
+})
+
+describe('detectBulletTone', () => {
+  it('negative wins on warning/risk/churn (even with +N)', () => {
+    expect(detectBulletTone('⚠ Sales cycle +6 days, slower pipeline')).toBe('negative')
+    expect(detectBulletTone('SMB churn uptick 4.2% → 5.8%')).toBe('negative')
+    expect(detectBulletTone('风险：交付延迟')).toBe('negative')
+  })
+
+  it('positive on growth / improved / +N% / 🏆', () => {
+    expect(detectBulletTone('Revenue +22% YoY')).toBe('positive')
+    expect(detectBulletTone('NPS improved 42 → 51')).toBe('positive')
+    expect(detectBulletTone('🏆 Closed $1.2M enterprise deal')).toBe('positive')
+  })
+
+  it('neutral when no signal', () => {
+    expect(detectBulletTone('Gross margin held steady at 74%')).toBe('neutral')
+    expect(detectBulletTone('Agenda · Q&A')).toBe('neutral')
   })
 })

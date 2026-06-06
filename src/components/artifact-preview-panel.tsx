@@ -16,7 +16,7 @@ import { createArtifactVersion, fetchArtifactVersions, workspaceReadFile, worksp
 import { artifactPreviewPath } from '@/lib/artifact-preview'
 import { normalizeLang } from '@/lib/highlighter'
 import { cn } from '@/lib/utils'
-import { resolvePptTheme } from '@/shared/ppt-theme'
+import { detectBulletTone, resolvePptTheme } from '@/shared/ppt-theme'
 import type { ArtifactContent, DiffHunk, PptSlide, PptTheme } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
@@ -628,19 +628,34 @@ function SlideView({
                 </h2>
               )}
               {slide.bullets && slide.bullets.length > 0 && (
-                <ul className="space-y-2.5">
-                  {slide.bullets.map((b, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-2.5 text-[15px] leading-relaxed"
-                      style={{ color: hx(t.textBody) }}
-                    >
-                      <span className="mt-0.5 select-none" style={{ color: hx(t.primary) }}>
-                        ▪
-                      </span>
-                      <span>{b}</span>
-                    </li>
-                  ))}
+                <ul className="space-y-2">
+                  {slide.bullets.map((b, i) => {
+                    const tone = detectBulletTone(b)
+                    const toneColor =
+                      tone === 'positive'
+                        ? hx(t.accentPositive)
+                        : tone === 'negative'
+                          ? hx(t.accentNegative)
+                          : hx(t.primary)
+                    const icon = tone === 'positive' ? '▲' : tone === 'negative' ? '▼' : '▪'
+                    return (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2.5 rounded-md px-3 py-2 text-[15px] leading-relaxed"
+                        style={{
+                          background: hx(t.background),
+                          border: `1px solid ${hx(t.divider)}`,
+                          borderLeft: `3px solid ${toneColor}`,
+                          color: hx(t.textBody),
+                        }}
+                      >
+                        <span className="mt-0.5 select-none text-xs" style={{ color: toneColor }}>
+                          {icon}
+                        </span>
+                        <span>{b}</span>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>

@@ -48,3 +48,22 @@ export function resolvePptTheme(theme?: PptTheme): ResolvedPptTheme {
     fontBody: t.fontBody?.trim() || t.fontFace?.trim() || d.fontBody,
   }
 }
+
+export type BulletTone = 'positive' | 'negative' | 'neutral'
+
+// 负面信号：下降箭头 / 警示 emoji / 风险类词
+const NEGATIVE_SIGNAL =
+  /[↓⬇⚠❌📉🔴]|风险|警示|下降|下滑|流失|延迟|未达|低于|亏损|超支|瓶颈|缩水|churn|risk|delay|drop|decline|miss|\blag\b/i
+// 正面信号：上升箭头 / 增益 emoji / 增长类词 / +N
+const POSITIVE_SIGNAL =
+  /[↑⬆📈🟢✅🏆🚀💰]|增长|提升|改善|超额|超过|达成|领先|盈利|节省|降本|上升|新高|\+\s?\d|improv|growth|exceed|gain|surpass|\bup\b/i
+
+/**
+ * 从要点文本启发式判断语义色调。**负面优先**：明确的风险/警示信号（⚠ / churn / 风险…）
+ * 即使同时含 +N 也判 negative；其余有正面信号判 positive；都没有判 neutral。
+ */
+export function detectBulletTone(text: string): BulletTone {
+  if (NEGATIVE_SIGNAL.test(text)) return 'negative'
+  if (POSITIVE_SIGNAL.test(text)) return 'positive'
+  return 'neutral'
+}

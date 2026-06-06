@@ -1,4 +1,4 @@
-import { resolvePptTheme } from '@/shared/ppt-theme'
+import { detectBulletTone, resolvePptTheme } from '@/shared/ppt-theme'
 import type { ArtifactContent } from '@/shared/types'
 
 type PptContent = Extract<ArtifactContent, { type: 'ppt' }>
@@ -88,21 +88,39 @@ export async function slidesToPptxBuffer(
         })
       }
       if (s.bullets && s.bullets.length > 0) {
-        slide.addText(
-          s.bullets.map((text) => ({ text, options: { bullet: true } })),
-          {
-            x: 0.7,
-            y: 1.7,
-            w: 8.6,
-            h: 4.3,
-            fontSize: 17,
-            color: t.textBody,
-            fontFace: t.fontBody,
-            valign: 'top',
-            lineSpacingMultiple: 1.3,
-            paraSpaceAfter: 8,
-          },
-        )
+        // 每个要点一张卡片行（surface 底 + 细边框），tone 图标着色：▲正面墨绿 / ▼警示深红 / •中性
+        const n = s.bullets.length
+        const top = 1.7
+        const avail = 3.9
+        const gap = 0.12
+        const cardH = Math.min(0.72, (avail - gap * (n - 1)) / n)
+        s.bullets.forEach((text, i) => {
+          const tone = detectBulletTone(text)
+          const toneColor =
+            tone === 'positive'
+              ? t.accentPositive
+              : tone === 'negative'
+                ? t.accentNegative
+                : t.primary
+          const icon = tone === 'positive' ? '▲  ' : tone === 'negative' ? '▼  ' : '•  '
+          slide.addText(
+            [
+              { text: icon, options: { color: toneColor, bold: true } },
+              { text, options: { color: t.textBody } },
+            ],
+            {
+              x: 0.7,
+              y: top + i * (cardH + gap),
+              w: 8.6,
+              h: cardH,
+              fontSize: 14,
+              fontFace: t.fontBody,
+              valign: 'middle',
+              fill: { color: t.surface },
+              line: { color: t.divider, width: 0.5 },
+            },
+          )
+        })
       }
     }
 
