@@ -2,6 +2,7 @@ import { isValidElement, useEffect, useMemo, useRef, useState, type KeyboardEven
 import {
   ArrowDown,
   Brain,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -13,9 +14,13 @@ import {
   Image as ImageIcon,
   Layers,
   Paperclip,
+  Pencil,
   Rocket,
+  RotateCcw,
   Send,
+  Trash2,
   Wrench,
+  X,
   XCircle,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -42,6 +47,10 @@ export function ConversationsScreen({
   onOpenConversation,
   onOpenArtifact,
   onSendMessage,
+  onWithdrawMessage,
+  onEditMessage,
+  onRegenerate,
+  busy,
 }: {
   connected: boolean
   loading: boolean
@@ -51,6 +60,10 @@ export function ConversationsScreen({
   onOpenConversation: (id: string) => void
   onOpenArtifact: (id: string) => void
   onSendMessage: (content: string) => void
+  onWithdrawMessage: (messageId: string) => void
+  onEditMessage: (messageId: string, content: string) => void
+  onRegenerate: () => void
+  busy: boolean
 }) {
   const [draft, setDraft] = useState('')
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -61,6 +74,17 @@ export function ConversationsScreen({
   const artifactById = new Map((detail?.artifacts ?? []).map((artifact) => [artifact.id, artifact]))
   const detailConversationId = detail?.conversation.id ?? null
   const scrollSignature = useMemo(() => buildConversationScrollSignature(detail), [detail])
+
+  // 最新可操作消息：撤回/编辑只对最新 user 消息、重新生成只对最新非流式 agent 消息（后端只允许操作最新）
+  const msgs = detail?.messages ?? []
+  let latestUserMessageId: string | null = null
+  let latestAgentMessageId: string | null = null
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (!latestUserMessageId && m.role === 'user') latestUserMessageId = m.id
+    if (!latestAgentMessageId && m.role === 'agent' && m.status !== 'streaming') latestAgentMessageId = m.id
+    if (latestUserMessageId && latestAgentMessageId) break
+  }
 
   useEffect(() => {
     if (!selectedConversationId || !detailConversationId || selectedConversationId !== detailConversationId) return
@@ -134,6 +158,12 @@ export function ConversationsScreen({
                     artifactById={artifactById}
                     message={message}
                     onOpenArtifact={onOpenArtifact}
+                    isLatestUser={message.id === latestUserMessageId}
+                    isLatestAgent={message.id === latestAgentMessageId}
+                    busy={busy}
+                    onWithdraw={onWithdrawMessage}
+                    onEdit={onEditMessage}
+                    onRegenerate={onRegenerate}
                   />
                 ))
               ) : (
@@ -195,16 +225,45 @@ function MessageCard({
   agent,
   artifactById,
   onOpenArtifact,
+  isLatestUser,
+  isLatestAgent,
+  busy,
+  onWithdraw,
+  onEdit,
+  onRegenerate,
 }: {
   message: MobileMessage
   agent?: MobileAgent
   artifactById: Map<string, MobileArtifactSummary>
   onOpenArtifact: (id: string) => void
+  isLatestUser: boolean
+  isLatestAgent: boolean
+  busy: boolean
+  onWithdraw: (messageId: string) => void
+  onEdit: (messageId: string, content: string) => void
+  onRegenerate: () => void
 }) {
   const isUser = message.role === 'user'
   const displayName = isUser ? '你' : agent?.name ?? message.agentId ?? roleLabel(message.role)
   const avatar = isUser ? 'ME' : message.role === 'system' ? 'SY' : avatarInitials(displayName)
   const toneKey = isUser ? 'mobile-user' : agent?.id ?? message.agentId ?? message.role
+
+  const [editing, setEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState('')
+  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false)
+
+  function startEdit() {
+    const part = message.parts.find((p) => p.type === 'text')
+    setEditDraft(part && part.type === 'text' ? part.content : '')
+    setConfirmingWithdraw(false)
+    setEditing(true)
+  }
+  function saveEdit() {
+    const next = editDraft.trim()
+    if (!next) return
+    onEdit(message.id, next)
+    setEditing(false)
+  }
 
   return (
     <article className={`message-row ${message.role}`}>
@@ -214,10 +273,75 @@ function MessageCard({
           <span>{displayName}</span>
           <time>{formatTime(message.createdAt)}</time>
         </div>
-        <div className="message-bubble">
-          <MessagePartsView artifactById={artifactById} message={message} onOpenArtifact={onOpenArtifact} />
-        </div>
+        {editing ? (
+          <div className="message-edit">
+            <textarea
+              className="message-edit-input"
+              value={editDraft}
+              autoFocus
+              rows={3}
+              onChange={(event) => setEditDraft(event.target.value)}
+            />
+            <div className="message-actions">
+              <button
+                type="button"
+                className="msg-action danger"
+                aria-label="保存并重发"
+                disabled={busy || !editDraft.trim()}
+                onClick={saveEdit}
+              >
+                <Check className="button-icon" aria-hidden="true" />
+              </button>
+              <button type="button" className="msg-action" aria-label="取消编辑" disabled={busy} onClick={() => setEditing(false)}>
+                <X className="button-icon" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="message-bubble">
+            <MessagePartsView artifactById={artifactById} message={message} onOpenArtifact={onOpenArtifact} />
+          </div>
+        )}
         <MessageStatus status={message.status} />
+        {!editing && (isLatestUser || isLatestAgent) && (
+          <div className="message-actions">
+            {isLatestUser && !confirmingWithdraw && (
+              <button type="button" className="msg-action" aria-label="编辑并重发" disabled={busy} onClick={startEdit}>
+                <Pencil className="button-icon" aria-hidden="true" />
+              </button>
+            )}
+            {isLatestUser && confirmingWithdraw ? (
+              <>
+                <button
+                  type="button"
+                  className="msg-action danger"
+                  aria-label="确认撤回"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmingWithdraw(false)
+                    onWithdraw(message.id)
+                  }}
+                >
+                  <Check className="button-icon" aria-hidden="true" />
+                </button>
+                <button type="button" className="msg-action" aria-label="取消撤回" disabled={busy} onClick={() => setConfirmingWithdraw(false)}>
+                  <X className="button-icon" aria-hidden="true" />
+                </button>
+              </>
+            ) : (
+              isLatestUser && (
+                <button type="button" className="msg-action" aria-label="撤回" disabled={busy} onClick={() => setConfirmingWithdraw(true)}>
+                  <Trash2 className="button-icon" aria-hidden="true" />
+                </button>
+              )
+            )}
+            {isLatestAgent && (
+              <button type="button" className="msg-action" aria-label="重新生成" disabled={busy} onClick={onRegenerate}>
+                <RotateCcw className="button-icon" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {isUser && <AvatarBadge className="message-avatar user-avatar" label={avatar} toneKey={toneKey} />}
     </article>

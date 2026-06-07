@@ -196,6 +196,30 @@ export function App() {
     })
   }
 
+  async function withdrawMessageFromMobile(messageId: string) {
+    if (!selectedConversationId) return
+    await runMobileAction(`withdraw-${messageId}`, async () => {
+      await api.withdrawMessage(selectedConversationId, messageId)
+      setConversationDetail(await api.getConversation(selectedConversationId))
+    })
+  }
+
+  async function editMessageFromMobile(messageId: string, content: string) {
+    if (!selectedConversationId) return
+    await runMobileAction(`edit-${messageId}`, async () => {
+      await api.editMessage(selectedConversationId, messageId, content)
+      setConversationDetail(await api.getConversation(selectedConversationId))
+    })
+  }
+
+  async function regenerateFromMobile() {
+    if (!selectedConversationId) return
+    await runMobileAction('regenerate', async () => {
+      await api.regenerate(selectedConversationId)
+      setConversationDetail(await api.getConversation(selectedConversationId))
+    })
+  }
+
   async function openArtifactPreview(artifactId: string) {
     if (!configured) {
       setError('请先在设置里填写桌面端地址和设备 token。')
@@ -244,6 +268,10 @@ export function App() {
         onOpenConversation={(id) => void openConversation(id)}
         onOpenArtifact={(id) => void openArtifactPreview(id)}
         onSendMessage={(content) => void sendMessageFromMobile(content)}
+        onWithdrawMessage={(messageId) => void withdrawMessageFromMobile(messageId)}
+        onEditMessage={(messageId, content) => void editMessageFromMobile(messageId, content)}
+        onRegenerate={() => void regenerateFromMobile()}
+        busy={operationId !== null}
       />
     ) : activeView === 'settings' ? (
       <SettingsScreen

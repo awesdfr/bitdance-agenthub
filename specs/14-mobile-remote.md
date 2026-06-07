@@ -41,6 +41,7 @@ Mobile App (Capacitor)
 - App 能审批 `fs_write.pending`：看 diff，批准或拒绝。
 - App 能处理 `ask_user.pending`：选择答案并提交。
 - App 能发送消息、@ Agent、引用消息或任务结果提出意见。
+- App 能对最新消息执行编辑重发 / 撤回 / 重新生成（行内图标按钮，仅出现在最新用户消息或最新非流式 agent 消息上；删除经 `message.removed` 广播给其它客户端）。
 - 状态实时同步：桌面端和手机端订阅同一批事件，最终状态一致。
 - 配对一次后长期可用，可在桌面端吊销设备。
 

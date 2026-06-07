@@ -11,6 +11,9 @@ export interface MobileApiClient {
   getConversation(id: string): Promise<MobileConversationDetail>
   getArtifact(id: string): Promise<MobileArtifact>
   sendMessage(id: string, content: string): Promise<void>
+  withdrawMessage(conversationId: string, messageId: string): Promise<void>
+  editMessage(conversationId: string, messageId: string, content: string): Promise<void>
+  regenerate(conversationId: string): Promise<void>
   decidePendingWrite(id: string, action: 'approve' | 'reject'): Promise<void>
   answerPendingQuestion(id: string, answers: MobileAskUserAnswers): Promise<void>
 }
@@ -74,6 +77,20 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
         method: 'POST',
         body: JSON.stringify({ answers }),
       })
+    },
+    withdrawMessage: async (conversationId, messageId) => {
+      await request(`/api/mobile/conversations/${conversationId}/messages/${messageId}/withdraw`, {
+        method: 'POST',
+      })
+    },
+    editMessage: async (conversationId, messageId, content) => {
+      await request(`/api/mobile/conversations/${conversationId}/messages/${messageId}/edit`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      })
+    },
+    regenerate: async (conversationId) => {
+      await request(`/api/mobile/conversations/${conversationId}/regenerate`, { method: 'POST' })
     },
   }
 }

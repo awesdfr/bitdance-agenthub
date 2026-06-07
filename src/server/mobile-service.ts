@@ -3,7 +3,14 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { db, schema } from '@/db/client'
 import type { AgentRunRow, ConversationWithMeta } from '@/db/schema'
 import { listAgentsOrdered } from '@/server/agent-service'
-import { listConversations, listMessages, sendMessage } from '@/server/conversation-service'
+import {
+  editAndResendLatestUserMessage,
+  listConversations,
+  listMessages,
+  regenerateLatestResponse,
+  sendMessage,
+  withdrawLatestUserMessage,
+} from '@/server/conversation-service'
 import { pendingQuestions } from '@/server/pending-questions'
 import { pendingWrites } from '@/server/pending-writes'
 import type {
@@ -242,6 +249,24 @@ export async function sendMobileMessage(args: {
     conversationId: args.conversationId,
     content: args.content,
   })
+}
+
+// 撤回 / 编辑 / 重新生成：复用桌面的服务函数（仅作用于最新可操作消息）。删除会经
+// message.removed 广播给其它客户端；移动端自身靠操作后 refetch 收敛。
+export async function withdrawMobileMessage(args: { conversationId: string; messageId: string }) {
+  return withdrawLatestUserMessage(args.conversationId, args.messageId)
+}
+
+export async function editMobileMessage(args: {
+  conversationId: string
+  messageId: string
+  content: string
+}) {
+  return editAndResendLatestUserMessage(args.conversationId, args.messageId, args.content)
+}
+
+export async function regenerateMobileResponse(args: { conversationId: string }) {
+  return regenerateLatestResponse(args.conversationId)
 }
 
 async function listActiveRuns(conversationIds: string[]): Promise<AgentRunRow[]> {
