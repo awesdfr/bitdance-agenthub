@@ -31,11 +31,15 @@ import {
   type RunFileWrites,
 } from './dispatch-file-writes'
 import {
+  buildReplanContext,
   collectDependencyClosure,
   compileDispatchPlan,
   parseDispatchPlanToolArgs,
+  shouldReplan,
   taskExpectsArtifact,
   validateDispatchPlan,
+  type ReplanConflictView,
+  type ReplanTaskView,
 } from './dispatch-plan'
 import { eventBus } from './event-bus'
 import { newRunId } from './ids'
@@ -162,6 +166,8 @@ class Semaphore {
 
 const SUB_AGENT_CONTEXT_RECENT_LIMIT = 5
 const MAX_CONCURRENT_SUB_AGENT_RUNS = 4
+/** Orchestrator 动态重规划上限：首轮 + 最多 (N-1) 轮补救（呼应 spec 06「不无限重试」）。 */
+const MAX_DISPATCH_ROUNDS = 2
 
 const activeRuns = new Map<string, AbortController>()
 const subAgentRunSemaphore = new Semaphore(MAX_CONCURRENT_SUB_AGENT_RUNS)
@@ -336,79 +342,101 @@ async function executeOrchestratorRun(
   const allOutputMessageIds: string[] = []
   const allOutputArtifacts: Record<string, string> = {}
 
-  // ─── Stage 1: PLAN ─────────────────────────────────────
-  const planSystemPrompt = buildOrchestratorPlanPrompt(agent.systemPrompt, otherAgents)
-  const planToolNames = ensureIncludes(agent.toolNames, 'plan_tasks')
+  // ─── Stage 1+2: PLAN → EXECUTE，失败/冲突时动态重规划补救（最多 MAX_DISPATCH_ROUNDS 轮）──
+  const mergedResults = new Map<string, DispatchTaskResult>()
+  const planItemsById = new Map<string, DispatchPlanItem>()
+  let lastConflicts: FileWriteConflict[] = []
 
-  const planRef: { value: DispatchPlanItem[] | null } = { value: null }
-
-  const planStream = agentRegistry
-    .getAdapter(agent)
-    .stream(
-      await buildAdapterInput(args, agent, runId, userPrompt, workspace, planToolNames, planSystemPrompt, attachments),
-      signal,
-    )
-
-  const planRun = await consumeStream(planStream, agent.id, runId, (event) => {
-    if (event.type === 'tool.call' && event.toolName === 'plan_tasks') {
-      const plan = parseDispatchPlanToolArgs(event.args)
-      planRef.value = plan
-      return {
-        stop: true,
-        result: { acknowledged: true, taskCount: plan.length },
-      }
-    }
-  })
-  allArtifactIds.push(...planRun.artifactIds)
-  allOutputMessageIds.push(...planRun.outputMessageIds)
-  Object.assign(allOutputArtifacts, planRun.outputArtifacts)
-
-  const rawPlan = planRef.value
-  if (!rawPlan) {
-    // 没拆出 plan：当作 Orchestrator 直接回答了用户，结束
-    return {
-      artifactIds: allArtifactIds,
-      outputMessageIds: allOutputMessageIds,
-      outputArtifacts: allOutputArtifacts,
-    }
-  }
-  const initialPlan = compileAndValidateDispatchPlan(rawPlan, otherAgents, agent.id)
-
-  const approvedPlan = await waitForDispatchPlanReview({
-    conversationId: args.conversationId,
-    agentId: agent.id,
-    runId,
-    plan: initialPlan,
-    availableAgents: otherAgents,
-    orchestratorAgentId: agent.id,
-    signal,
-  })
-  if (!approvedPlan) {
+  for (let round = 1; round <= MAX_DISPATCH_ROUNDS; round++) {
     if (signal.aborted) throw new Error('Orchestrator run aborted')
-    return {
-      artifactIds: allArtifactIds,
-      outputMessageIds: allOutputMessageIds,
-      outputArtifacts: allOutputArtifacts,
+
+    // 补救轮把上一轮的失败/冲突上下文喂回 Orchestrator，由它（LLM）决定补救 plan
+    const replanContext =
+      round === 1
+        ? null
+        : buildReplanContext(toReplanViews(planItemsById, mergedResults), toReplanConflicts(lastConflicts))
+
+    const { plan: initialPlan, planRun } = await runPlanStage(
+      args,
+      agent,
+      runId,
+      workspace,
+      userPrompt,
+      otherAgents,
+      round === 1 ? attachments : [],
+      signal,
+      replanContext,
+    )
+    allArtifactIds.push(...planRun.artifactIds)
+    allOutputMessageIds.push(...planRun.outputMessageIds)
+    Object.assign(allOutputArtifacts, planRun.outputArtifacts)
+
+    if (!initialPlan) {
+      // round 1: Orchestrator 没拆 plan = 直接回答了用户，结束
+      // round > 1: 它判断无需/无法补救，跳出进聚合
+      if (round === 1) {
+        return {
+          artifactIds: allArtifactIds,
+          outputMessageIds: allOutputMessageIds,
+          outputArtifacts: allOutputArtifacts,
+        }
+      }
+      break
     }
+
+    const approvedPlan = await waitForDispatchPlanReview({
+      conversationId: args.conversationId,
+      agentId: agent.id,
+      runId,
+      plan: initialPlan,
+      availableAgents: otherAgents,
+      orchestratorAgentId: agent.id,
+      signal,
+    })
+    if (!approvedPlan) {
+      if (signal.aborted) throw new Error('Orchestrator run aborted')
+      // 用户 reject：首轮直接返回；补救轮跳出，用已有结果聚合
+      if (round === 1) {
+        return {
+          artifactIds: allArtifactIds,
+          outputMessageIds: allOutputMessageIds,
+          outputArtifacts: allOutputArtifacts,
+        }
+      }
+      break
+    }
+
+    publish({
+      type: 'dispatch.plan',
+      conversationId: args.conversationId,
+      timestamp: Date.now(),
+      runId,
+      plan: approvedPlan,
+    })
+    for (const item of approvedPlan) planItemsById.set(item.id, item)
+
+    // ─── EXECUTE (DAG) ───
+    const { results, conflicts } = await executeDag(approvedPlan, {
+      parentRunId: runId,
+      conversationId: args.conversationId,
+      triggerMessageId: args.triggerMessageId,
+      signal,
+    })
+    for (const [taskId, r] of results) mergedResults.set(taskId, r)
+    lastConflicts = conflicts
+
+    // 本轮全 complete 且无冲突 → 收尾聚合；否则进下一轮补救（受 MAX_DISPATCH_ROUNDS 约束）
+    const roundViews = approvedPlan.map<ReplanTaskView>((t) => ({
+      taskId: t.id,
+      agentId: t.agentId,
+      status: results.get(t.id)?.status ?? 'skipped',
+      error: results.get(t.id)?.error,
+    }))
+    if (!shouldReplan(roundViews, toReplanConflicts(conflicts))) break
   }
 
-  publish({
-    type: 'dispatch.plan',
-    conversationId: args.conversationId,
-    timestamp: Date.now(),
-    runId,
-    plan: approvedPlan,
-  })
-
-  // ─── Stage 2: EXECUTE (DAG) ────────────────────────────
-  const { results: taskResults, conflicts: fileConflicts } = await executeDag(approvedPlan, {
-    parentRunId: runId,
-    conversationId: args.conversationId,
-    triggerMessageId: args.triggerMessageId,
-    signal,
-  })
-
-  for (const r of taskResults.values()) {
+  // 从合并后的最终结果收集产物/消息（按 taskId 合并，避免列陈旧/重复 artifact）
+  for (const r of mergedResults.values()) {
     allArtifactIds.push(...r.artifactIds)
     allOutputMessageIds.push(...r.outputMessageIds)
     Object.assign(allOutputArtifacts, r.outputArtifacts)
@@ -418,9 +446,9 @@ async function executeOrchestratorRun(
   const aggregateSystemPrompt = buildOrchestratorAggregatePrompt(agent.systemPrompt)
   const aggregateUserPrompt = await buildAggregatePrompt(
     userPrompt,
-    approvedPlan,
-    taskResults,
-    fileConflicts,
+    [...planItemsById.values()],
+    mergedResults,
+    lastConflicts,
     workspace,
   )
   // Aggregate 阶段不再带 plan_tasks 工具，避免重复拆解
@@ -453,6 +481,64 @@ async function executeOrchestratorRun(
     outputMessageIds: allOutputMessageIds,
     outputArtifacts: allOutputArtifacts,
   }
+}
+
+// ─── PLAN 阶段（首轮 + 补救轮共用）──────────────────────────
+async function runPlanStage(
+  args: RunArgs,
+  agent: AgentRow,
+  runId: string,
+  workspace: WorkspaceRow,
+  userPrompt: string,
+  otherAgents: AgentRow[],
+  attachments: AdapterAttachment[],
+  signal: AbortSignal,
+  replanContext: string | null,
+): Promise<{ plan: DispatchPlanItem[] | null; planRun: RunExecutionResult }> {
+  const planSystemPrompt = buildOrchestratorPlanPrompt(agent.systemPrompt, otherAgents)
+  const planToolNames = ensureIncludes(agent.toolNames, 'plan_tasks')
+  // 补救轮：把上一轮结果摘要拼到 prompt 前，原始请求仍保留供 Orchestrator 参考
+  const effectivePrompt = replanContext
+    ? `${replanContext}\n\n<original_request>\n${userPrompt}\n</original_request>`
+    : userPrompt
+
+  const planRef: { value: DispatchPlanItem[] | null } = { value: null }
+  const planStream = agentRegistry
+    .getAdapter(agent)
+    .stream(
+      await buildAdapterInput(args, agent, runId, effectivePrompt, workspace, planToolNames, planSystemPrompt, attachments),
+      signal,
+    )
+  const planRun = await consumeStream(planStream, agent.id, runId, (event) => {
+    if (event.type === 'tool.call' && event.toolName === 'plan_tasks') {
+      const plan = parseDispatchPlanToolArgs(event.args)
+      planRef.value = plan
+      return {
+        stop: true,
+        result: { acknowledged: true, taskCount: plan.length },
+      }
+    }
+  })
+  const raw = planRef.value
+  const plan = raw ? compileAndValidateDispatchPlan(raw, otherAgents, agent.id) : null
+  return { plan, planRun }
+}
+
+/** mergedResults + plan → 重规划视图（供 shouldReplan / buildReplanContext，纯数据，不泄露内部类型）。 */
+function toReplanViews(
+  planById: Map<string, DispatchPlanItem>,
+  results: Map<string, DispatchTaskResult>,
+): ReplanTaskView[] {
+  const views: ReplanTaskView[] = []
+  for (const [taskId, item] of planById) {
+    const r = results.get(taskId)
+    views.push({ taskId, agentId: item.agentId, status: r?.status ?? 'skipped', error: r?.error })
+  }
+  return views
+}
+
+function toReplanConflicts(conflicts: FileWriteConflict[]): ReplanConflictView[] {
+  return conflicts.map((c) => ({ path: c.path, taskIds: c.contributors.map((w) => w.taskId) }))
 }
 
 // ─── DAG 调度 ──────────────────────────────────────────────
