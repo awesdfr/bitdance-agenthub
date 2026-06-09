@@ -54,6 +54,79 @@ export const reportTaskResultTool: ToolDef = {
           },
         },
       },
+      filesChanged: {
+        type: 'array',
+        description:
+          'Workspace files changed or explicitly verified for this task. Required when target_paths are present.',
+        items: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Workspace-relative path when possible.',
+            },
+            action: {
+              type: 'string',
+              enum: ['created', 'modified', 'deleted', 'verified'],
+              description: 'How this path was handled.',
+            },
+          },
+        },
+      },
+      commandsRun: {
+        type: 'array',
+        description:
+          'Commands run to verify the task. Required when required_commands are present; include cwd and timedOut when relevant.',
+        items: {
+          type: 'object',
+          required: ['command', 'exitCode'],
+          properties: {
+            command: {
+              type: 'string',
+              description: 'Command exactly as run.',
+            },
+            exitCode: {
+              type: ['number', 'null'],
+              description: 'Process exit code, or null if no exit code was available.',
+            },
+            cwd: {
+              type: 'string',
+              description: 'Workspace-relative directory the command ran in, when relevant.',
+            },
+            timedOut: {
+              type: 'boolean',
+              description: 'Whether the command timed out.',
+            },
+            summary: {
+              type: 'string',
+              description: 'Short result summary.',
+            },
+          },
+        },
+      },
+      tests: {
+        type: 'array',
+        description: 'Test or verification commands and whether they passed.',
+        items: {
+          type: 'object',
+          required: ['command', 'passed'],
+          properties: {
+            command: {
+              type: 'string',
+              description: 'Test or verification command.',
+            },
+            passed: {
+              type: 'boolean',
+              description: 'Whether the test/verification passed.',
+            },
+            summary: {
+              type: 'string',
+              description: 'Short result summary.',
+            },
+          },
+        },
+      },
       blockers: {
         type: 'array',
         description: 'Concrete blockers when status is blocked or failed.',

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import type { RunToolEvidence } from '@/server/dispatch-run-evidence'
 import type { DispatchPlanItem, TaskResultReport } from '@/shared/types'
 
 export const REPORT_TASK_RESULT_TOOL_NAME = 'report_task_result'
@@ -13,6 +14,34 @@ export const ReportTaskResultArgsSchema = z.object({
         criterion: z.string().min(1),
         passed: z.boolean(),
         evidence: z.string().min(1),
+      }),
+    )
+    .optional(),
+  filesChanged: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        action: z.enum(['created', 'modified', 'deleted', 'verified']).optional(),
+      }),
+    )
+    .optional(),
+  commandsRun: z
+    .array(
+      z.object({
+        command: z.string().min(1),
+        exitCode: z.number().int().nullable(),
+        cwd: z.string().optional(),
+        timedOut: z.boolean().optional(),
+        summary: z.string().optional(),
+      }),
+    )
+    .optional(),
+  tests: z
+    .array(
+      z.object({
+        command: z.string().min(1),
+        passed: z.boolean(),
+        summary: z.string().optional(),
       }),
     )
     .optional(),
@@ -35,11 +64,36 @@ export function normalizeTaskResultReport(data: ParsedTaskResultReport): TaskRes
     }))
     .filter((result) => result.criterion && result.evidence)
   const blockers = data.blockers?.map((blocker) => blocker.trim()).filter(Boolean)
+  const filesChanged = data.filesChanged
+    ?.map((file) => ({
+      path: file.path.trim(),
+      ...(file.action ? { action: file.action } : {}),
+    }))
+    .filter((file) => file.path)
+  const commandsRun = data.commandsRun
+    ?.map((command) => ({
+      command: command.command.trim(),
+      exitCode: command.exitCode,
+      ...(command.cwd?.trim() ? { cwd: command.cwd.trim() } : {}),
+      ...(command.timedOut !== undefined ? { timedOut: command.timedOut } : {}),
+      ...(command.summary?.trim() ? { summary: command.summary.trim() } : {}),
+    }))
+    .filter((command) => command.command)
+  const tests = data.tests
+    ?.map((test) => ({
+      command: test.command.trim(),
+      passed: test.passed,
+      ...(test.summary?.trim() ? { summary: test.summary.trim() } : {}),
+    }))
+    .filter((test) => test.command)
 
   return {
     status: data.status,
     summary: data.summary.trim(),
     ...(acceptanceResults && acceptanceResults.length > 0 ? { acceptanceResults } : {}),
+    ...(filesChanged && filesChanged.length > 0 ? { filesChanged } : {}),
+    ...(commandsRun && commandsRun.length > 0 ? { commandsRun } : {}),
+    ...(tests && tests.length > 0 ? { tests } : {}),
     ...(blockers && blockers.length > 0 ? { blockers } : {}),
   }
 }
@@ -64,6 +118,7 @@ export function isTaskResultReportToolName(toolName: string): boolean {
 export function evaluateTaskResultReport(
   task: DispatchPlanItem,
   report: TaskResultReport | undefined,
+  evidence: RunToolEvidence = { fileWrites: [], commands: [] },
 ): TaskResultReportEvaluation {
   if (!report) {
     return {
@@ -76,6 +131,23 @@ export function evaluateTaskResultReport(
     return {
       ok: false,
       error: formatReportedNonCompletion(task.id, report),
+    }
+  }
+
+  const failedCommands = evidence.commands.filter(
+    (command, index) =>
+      !command.prepare &&
+      isFailedCommand(command) &&
+      !hasLaterSuccessfulCommand(command, index, evidence.commands),
+  )
+  if (failedCommands.length > 0) {
+    return {
+      ok: false,
+      error: `Task "${task.id}" has failed command evidence: ${failedCommands
+        .map((command) =>
+          `${command.command} (${command.isError ? command.error ?? 'tool error' : command.timedOut ? 'timed out' : `exit ${command.exitCode}`})`,
+        )
+        .join('; ')}`,
     }
   }
 
@@ -103,7 +175,139 @@ export function evaluateTaskResultReport(
     }
   }
 
+  const missingTargetPaths = (task.targetPaths ?? []).filter(
+    (targetPath) => !hasPathEvidence(targetPath, report, evidence),
+  )
+  if (missingTargetPaths.length > 0) {
+    return {
+      ok: false,
+      error: `Task "${task.id}" report is missing target path evidence: ${missingTargetPaths.join('; ')}`,
+    }
+  }
+
+  const missingCommands = (task.requiredCommands ?? []).filter(
+    (required) => !hasSuccessfulCommandEvidence(required.command, report, evidence),
+  )
+  if (missingCommands.length > 0) {
+    return {
+      ok: false,
+      error: `Task "${task.id}" report is missing successful command evidence: ${missingCommands
+        .map((required) => required.command)
+        .join('; ')}`,
+    }
+  }
+
+  const missingEvidence = (task.requiredEvidence ?? []).filter(
+    (required) => !evidenceMentions(required, report, evidence),
+  )
+  if (missingEvidence.length > 0) {
+    return {
+      ok: false,
+      error: `Task "${task.id}" report is missing required evidence: ${missingEvidence.join('; ')}`,
+    }
+  }
+
   return { ok: true }
+}
+
+function hasPathEvidence(
+  targetPath: string,
+  report: TaskResultReport,
+  evidence: RunToolEvidence,
+): boolean {
+  const candidates = [
+    ...(report.filesChanged ?? []).map((file) => file.path),
+    ...evidence.fileWrites.flatMap((file) => [file.path, file.absolutePath]),
+  ]
+  return candidates.some((candidate) => pathsMatch(targetPath, candidate))
+}
+
+function hasSuccessfulCommandEvidence(
+  requiredCommand: string,
+  report: TaskResultReport,
+  evidence: RunToolEvidence,
+): boolean {
+  const reported = report.commandsRun?.some(
+    (command) => commandsMatch(requiredCommand, command.command) && command.exitCode === 0,
+  )
+  const tested = report.tests?.some(
+    (test) => commandsMatch(requiredCommand, test.command) && test.passed,
+  )
+  const recorded = evidence.commands.some(
+    (command) =>
+      commandsMatch(requiredCommand, command.command) &&
+      !command.isError &&
+      !command.timedOut &&
+      command.exitCode === 0,
+  )
+  return Boolean(reported || tested || recorded)
+}
+
+function evidenceMentions(
+  required: string,
+  report: TaskResultReport,
+  evidence: RunToolEvidence,
+): boolean {
+  const haystack = [
+    report.summary,
+    ...(report.acceptanceResults ?? []).flatMap((result) => [result.criterion, result.evidence]),
+    ...(report.filesChanged ?? []).flatMap((file) => [file.path, file.action ?? '']),
+    ...(report.commandsRun ?? []).flatMap((command) => [command.command, command.summary ?? '']),
+    ...(report.tests ?? []).flatMap((test) => [test.command, test.summary ?? '']),
+    ...evidence.fileWrites.flatMap((file) => [file.path, file.absolutePath, String(file.bytes ?? '')]),
+    ...evidence.commands.flatMap((command) => [
+      command.command,
+      command.cwd,
+      String(command.exitCode ?? ''),
+      command.timedOut ? 'timedOut' : '',
+      command.isError ? 'isError' : '',
+      command.error ?? '',
+      command.exitCode === 0 && !command.timedOut && !command.isError ? 'exitCode=0' : '',
+    ]),
+  ]
+    .join('\n')
+    .toLowerCase()
+  return haystack.includes(required.toLowerCase())
+}
+
+function isFailedCommand(command: RunToolEvidence['commands'][number]): boolean {
+  return command.isError || command.timedOut || command.exitCode !== 0
+}
+
+function hasLaterSuccessfulCommand(
+  failed: RunToolEvidence['commands'][number],
+  failedIndex: number,
+  commands: RunToolEvidence['commands'],
+): boolean {
+  return commands
+    .slice(failedIndex + 1)
+    .some(
+      (command) =>
+        commandsMatch(failed.command, command.command) &&
+        !command.isError &&
+        !command.timedOut &&
+        command.exitCode === 0,
+    )
+}
+
+function pathsMatch(expected: string, actual: string): boolean {
+  const e = normalizePath(expected)
+  const a = normalizePath(actual)
+  return a === e || a.endsWith(`/${e}`) || a.startsWith(`${e}/`)
+}
+
+function commandsMatch(expected: string, actual: string): boolean {
+  const e = normalizeCommand(expected)
+  const a = normalizeCommand(actual)
+  return a === e || a.includes(e)
+}
+
+function normalizePath(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '').toLowerCase()
+}
+
+function normalizeCommand(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
 }
 
 function readTaskResultReportFromUnknown(

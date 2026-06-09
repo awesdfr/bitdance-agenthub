@@ -1,4 +1,9 @@
-import type { DispatchExpectedOutput, DispatchPlanItem, WritableArtifactType } from '@/shared/types'
+import type {
+  DispatchExpectedOutput,
+  DispatchPlanItem,
+  DispatchTaskKind,
+  WritableArtifactType,
+} from '@/shared/types'
 
 /**
  * Orchestrator 派发计划的解析 + 校验 + 环检测。
@@ -26,6 +31,14 @@ const WRITABLE_ARTIFACT_TYPES = new Set<WritableArtifactType>([
   'ppt',
   'diagram',
 ])
+const DISPATCH_TASK_KINDS = new Set<DispatchTaskKind>([
+  'code',
+  'test',
+  'review',
+  'design',
+  'doc',
+  'analysis',
+])
 
 export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
   if (!isRecord(args) || !Array.isArray(args.tasks)) {
@@ -39,6 +52,7 @@ export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
     const id = readNonEmptyString(raw.id, `task at index ${index} id`)
     const agentId = readNonEmptyString(raw.agentId, `task "${id}" agentId`)
     const task = readNonEmptyString(raw.task, `task "${id}" instruction`)
+    const taskKind = readOptionalTaskKind(raw.taskKind, `task "${id}" taskKind`)
 
     let dependsOn: string[] | undefined
     if (raw.dependsOn !== undefined) {
@@ -132,13 +146,87 @@ export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
       )
     }
 
+    let targetPaths: string[] | undefined
+    if (raw.targetPaths !== undefined) {
+      if (!Array.isArray(raw.targetPaths)) {
+        throw new Error(`Invalid dispatch plan: task "${id}" targetPaths must be an array`)
+      }
+      targetPaths = raw.targetPaths.map((targetPath, targetPathIndex) =>
+        readNonEmptyString(targetPath, `task "${id}" targetPaths[${targetPathIndex}]`),
+      )
+    }
+
+    let expectedWorkspaceChanges: string[] | undefined
+    if (raw.expectedWorkspaceChanges !== undefined) {
+      if (!Array.isArray(raw.expectedWorkspaceChanges)) {
+        throw new Error(
+          `Invalid dispatch plan: task "${id}" expectedWorkspaceChanges must be an array`,
+        )
+      }
+      expectedWorkspaceChanges = raw.expectedWorkspaceChanges.map((change, changeIndex) =>
+        readNonEmptyString(change, `task "${id}" expectedWorkspaceChanges[${changeIndex}]`),
+      )
+    }
+
+    let requiredCommands: DispatchPlanItem['requiredCommands']
+    if (raw.requiredCommands !== undefined) {
+      if (!Array.isArray(raw.requiredCommands)) {
+        throw new Error(`Invalid dispatch plan: task "${id}" requiredCommands must be an array`)
+      }
+      requiredCommands = raw.requiredCommands.map((command, commandIndex) => {
+        if (!isRecord(command)) {
+          throw new Error(
+            `Invalid dispatch plan: task "${id}" requiredCommands[${commandIndex}] must be an object`,
+          )
+        }
+        const description = readOptionalString(
+          command.description,
+          `task "${id}" requiredCommands[${commandIndex}].description`,
+        )
+        const cwd = readOptionalString(
+          command.cwd,
+          `task "${id}" requiredCommands[${commandIndex}].cwd`,
+        )
+        const timeoutMs = readOptionalPositiveInteger(
+          command.timeoutMs,
+          `task "${id}" requiredCommands[${commandIndex}].timeoutMs`,
+        )
+        return {
+          command: readNonEmptyString(
+            command.command,
+            `task "${id}" requiredCommands[${commandIndex}].command`,
+          ),
+          ...(description === undefined ? {} : { description }),
+          ...(cwd === undefined ? {} : { cwd }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        }
+      })
+    }
+
+    let requiredEvidence: string[] | undefined
+    if (raw.requiredEvidence !== undefined) {
+      if (!Array.isArray(raw.requiredEvidence)) {
+        throw new Error(`Invalid dispatch plan: task "${id}" requiredEvidence must be an array`)
+      }
+      requiredEvidence = raw.requiredEvidence.map((evidence, evidenceIndex) =>
+        readNonEmptyString(evidence, `task "${id}" requiredEvidence[${evidenceIndex}]`),
+      )
+    }
+
     const item: DispatchPlanItem = { id, agentId, task }
+    if (taskKind) item.taskKind = taskKind
     if (dependsOn && dependsOn.length > 0) item.dependsOn = dependsOn
     if (expectedOutputs && expectedOutputs.length > 0) item.expectedOutputs = expectedOutputs
     if (inputs && inputs.length > 0) item.inputs = inputs
     if (acceptanceCriteria && acceptanceCriteria.length > 0) {
       item.acceptanceCriteria = acceptanceCriteria
     }
+    if (targetPaths && targetPaths.length > 0) item.targetPaths = targetPaths
+    if (expectedWorkspaceChanges && expectedWorkspaceChanges.length > 0) {
+      item.expectedWorkspaceChanges = expectedWorkspaceChanges
+    }
+    if (requiredCommands && requiredCommands.length > 0) item.requiredCommands = requiredCommands
+    if (requiredEvidence && requiredEvidence.length > 0) item.requiredEvidence = requiredEvidence
     return item
   })
 }
@@ -455,6 +543,24 @@ function readOptionalBoolean(value: unknown, label: string): boolean | undefined
   return value
 }
 
+function readOptionalPositiveInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || typeof value !== 'number' || value <= 0) {
+    throw new Error(`Invalid dispatch plan: ${label} must be a positive integer`)
+  }
+  return value
+}
+
+function readOptionalTaskKind(value: unknown, label: string): DispatchTaskKind | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !DISPATCH_TASK_KINDS.has(value as DispatchTaskKind)) {
+    throw new Error(
+      `Invalid dispatch plan: ${label} must be one of ${[...DISPATCH_TASK_KINDS].join(', ')}`,
+    )
+  }
+  return value as DispatchTaskKind
+}
+
 function readWritableArtifactType(value: unknown, label: string): WritableArtifactType {
   if (typeof value !== 'string' || !WRITABLE_ARTIFACT_TYPES.has(value as WritableArtifactType)) {
     throw new Error(
@@ -520,7 +626,7 @@ export function buildReplanContext(
   }
   lines.push(
     '',
-    '上一轮存在未完成任务或写冲突。请**只为未完成 / 冲突的部分**输出补救 plan_tasks：可换更合适的 agent、把写同一文件的任务用 dependsOn 串行化、或把任务拆得更细。已 complete 的任务不要重做；补救任务需要基于已 complete 任务时，可以在 dependsOn / inputs 中引用上一轮的 task id，系统会把它当作已解析的外部依赖。若判断无需或无法补救，就不要调用 plan_tasks（直接进入总结）。',
+    '上一轮存在未完成任务或写冲突。请围绕 original_request 的原始目标输出补救 plan_tasks，只修复未完成 / 冲突 / 缺失证据的部分：可换更合适的 agent、把写同一文件的任务用 dependsOn 串行化、或把任务拆得更细。不要把实现任务缩小成静态审查、总结或解释；除非用户明确同意缩小范围，否则补救计划必须继续追踪原始目标的未完成验收。已 complete 的任务不要重做；补救任务需要基于已 complete 任务时，可以在 dependsOn / inputs 中引用上一轮的 task id，系统会把它当作已解析的外部依赖。若判断无需或无法补救，就不要调用 plan_tasks（直接进入总结）。',
   )
   return lines.join('\n')
 }

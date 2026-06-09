@@ -7,6 +7,7 @@ import { verifyInternalToolToken } from '@/server/internal-tool-auth'
 import { askUserTool } from '@/server/tools/ask-user'
 import { deployArtifactTool } from '@/server/tools/deploy-artifact'
 import { deployWorkspaceTool } from '@/server/tools/deploy-workspace'
+import { fsListTool } from '@/server/tools/fs-list'
 import { readArtifactTool } from '@/server/tools/read-artifact'
 import { reportTaskResultTool } from '@/server/tools/report-task-result'
 import type { ToolContext } from '@/server/tools/types'
@@ -22,6 +23,7 @@ const EXPOSED_TOOLS = {
   deploy_workspace: deployWorkspaceTool,
   ask_user: askUserTool,
   report_task_result: reportTaskResultTool,
+  fs_list: fsListTool,
 }
 
 const BodySchema = z.object({

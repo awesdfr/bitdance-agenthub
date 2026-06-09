@@ -49,6 +49,18 @@ server.registerTool(
 )
 
 server.registerTool(
+  'fs_list',
+  {
+    description:
+      'List files and directories inside the current AgentHub workspace. Prefer this before reading files when exploring project structure.',
+    inputSchema: {
+      path: z.string().optional().describe('Directory path. Omit or pass "" for the workspace root.'),
+    },
+  },
+  async (args) => callAgentHubTool('fs_list', args),
+)
+
+server.registerTool(
   'deploy_artifact',
   {
     description:
@@ -119,6 +131,34 @@ server.registerTool(
             criterion: z.string(),
             passed: z.boolean(),
             evidence: z.string(),
+          }),
+        )
+        .optional(),
+      filesChanged: z
+        .array(
+          z.object({
+            path: z.string(),
+            action: z.enum(['created', 'modified', 'deleted', 'verified']).optional(),
+          }),
+        )
+        .optional(),
+      commandsRun: z
+        .array(
+          z.object({
+            command: z.string(),
+            exitCode: z.number().int().nullable(),
+            cwd: z.string().optional(),
+            timedOut: z.boolean().optional(),
+            summary: z.string().optional(),
+          }),
+        )
+        .optional(),
+      tests: z
+        .array(
+          z.object({
+            command: z.string(),
+            passed: z.boolean(),
+            summary: z.string().optional(),
           }),
         )
         .optional(),

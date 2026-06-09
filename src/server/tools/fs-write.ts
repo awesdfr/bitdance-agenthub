@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
+import { recordRunFileWrite } from '@/server/dispatch-run-evidence'
 import { recordFileWrite } from '@/server/dispatch-file-writes'
 import {
   getWorkspaceForConversation,
@@ -65,6 +66,12 @@ export const fsWriteTool: ToolDef = {
       try {
         const result = writeFileInWorkspace(workspace, parsed.data.path, parsed.data.content)
         recordFileWrite(ctx.runId, result.absolutePath, parsed.data.content)
+        recordRunFileWrite(ctx.runId, {
+          path: parsed.data.path,
+          absolutePath: result.absolutePath,
+          bytes: result.bytes,
+          applied: 'auto',
+        })
         return { ok: true, value: { ...result, applied: 'auto' as const } }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -109,6 +116,12 @@ export const fsWriteTool: ToolDef = {
     }
 
     recordFileWrite(ctx.runId, absPath, parsed.data.content)
+    recordRunFileWrite(ctx.runId, {
+      path: parsed.data.path,
+      absolutePath: absPath,
+      bytes: Buffer.byteLength(parsed.data.content, 'utf8'),
+      applied: 'review',
+    })
 
     return {
       ok: true,

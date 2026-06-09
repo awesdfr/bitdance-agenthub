@@ -16,6 +16,7 @@ const TaskSchema = z.object({
   id: z.string().min(1),
   agentId: z.string().min(1),
   task: z.string().min(1),
+  taskKind: z.enum(['code', 'test', 'review', 'design', 'doc', 'analysis']).optional(),
   dependsOn: z.array(z.string()).optional(),
   expectedOutputs: z
     .array(
@@ -38,6 +39,19 @@ const TaskSchema = z.object({
     )
     .optional(),
   acceptanceCriteria: z.array(z.string().min(1)).optional(),
+  targetPaths: z.array(z.string().min(1)).optional(),
+  expectedWorkspaceChanges: z.array(z.string().min(1)).optional(),
+  requiredCommands: z
+    .array(
+      z.object({
+        command: z.string().min(1),
+        description: z.string().optional(),
+        cwd: z.string().min(1).optional(),
+        timeoutMs: z.number().int().positive().optional(),
+      }),
+    )
+    .optional(),
+  requiredEvidence: z.array(z.string().min(1)).optional(),
 })
 
 const ArgsSchema = z.object({
@@ -75,6 +89,12 @@ export const planTasksTool: ToolDef = {
             task: {
               type: 'string',
               description: 'Concrete, self-contained instruction for that agent. The agent will not see the full group history.',
+            },
+            taskKind: {
+              type: 'string',
+              enum: ['code', 'test', 'review', 'design', 'doc', 'analysis'],
+              description:
+                'Kind of work. Use code/test/review/design/doc/analysis to help AgentRunner apply evidence expectations.',
             },
             dependsOn: {
               type: 'array',
@@ -141,6 +161,54 @@ export const planTasksTool: ToolDef = {
               type: 'array',
               description:
                 'Concrete completion checks for this task. Use this for text-only/review/validation tasks instead of expectedOutputs. The child agent must report each item through report_task_result.acceptanceResults.',
+              items: { type: 'string' },
+            },
+            targetPaths: {
+              type: 'array',
+              description:
+                'Workspace file or directory paths this task is expected to inspect, create, or change. Use relative paths when possible.',
+              items: { type: 'string' },
+            },
+            expectedWorkspaceChanges: {
+              type: 'array',
+              description:
+                'Plain-language list of expected workspace changes. Required for non-trivial code tasks.',
+              items: { type: 'string' },
+            },
+            requiredCommands: {
+              type: 'array',
+              description:
+                'Commands that AgentHub must run successfully before accepting this task as complete, such as pnpm test or mvn compile. Use cwd instead of cd for subdirectories.',
+              items: {
+                type: 'object',
+                required: ['command'],
+                properties: {
+                  command: {
+                    type: 'string',
+                    description:
+                      'Exact command expected to run. Keep it focused on the verification step; use cwd for subdirectories.',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'Short reason this command verifies the task.',
+                  },
+                  cwd: {
+                    type: 'string',
+                    description:
+                      'Optional workspace-relative directory to run the command in, such as "frontend" or "backend".',
+                  },
+                  timeoutMs: {
+                    type: 'number',
+                    description:
+                      'Optional timeout in milliseconds. Use a larger value for dependency install or compilation.',
+                  },
+                },
+              },
+            },
+            requiredEvidence: {
+              type: 'array',
+              description:
+                'Evidence statements the child must provide in report_task_result before the task can complete.',
               items: { type: 'string' },
             },
           },

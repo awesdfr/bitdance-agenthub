@@ -96,6 +96,48 @@ describe('parseDispatchPlanToolArgs', () => {
     ])
   })
 
+  it('parses evidence contract fields', () => {
+    expect(
+      parseDispatchPlanToolArgs({
+        tasks: [
+          {
+            id: 't1',
+            agentId: 'ag_frontend',
+            task: 'Implement endpoint',
+            taskKind: 'code',
+            targetPaths: ['src/server/foo.ts'],
+            expectedWorkspaceChanges: ['Add foo handler'],
+            requiredCommands: [
+              {
+                command: 'pnpm test src/server/foo.test.ts',
+                cwd: 'frontend',
+                timeoutMs: 300000,
+              },
+            ],
+            requiredEvidence: ['测试命令 exitCode=0'],
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: 't1',
+        agentId: 'ag_frontend',
+        task: 'Implement endpoint',
+        taskKind: 'code',
+        targetPaths: ['src/server/foo.ts'],
+        expectedWorkspaceChanges: ['Add foo handler'],
+        requiredCommands: [
+          {
+            command: 'pnpm test src/server/foo.test.ts',
+            cwd: 'frontend',
+            timeoutMs: 300000,
+          },
+        ],
+        requiredEvidence: ['测试命令 exitCode=0'],
+      },
+    ])
+  })
+
   it('rejects malformed tool args', () => {
     expect(() => parseDispatchPlanToolArgs(null)).toThrow('tasks array')
     expect(() => parseDispatchPlanToolArgs({ tasks: ['bad'] })).toThrow(
@@ -109,6 +151,21 @@ describe('parseDispatchPlanToolArgs', () => {
     expect(() =>
       parseDispatchPlanToolArgs({ tasks: [{ id: 't1', agentId: 'ag_pm', task: 'x', dependsOn: [1] }] }),
     ).toThrow('dependsOn[0] must be a non-empty string')
+    expect(() =>
+      parseDispatchPlanToolArgs({ tasks: [{ id: 't1', agentId: 'ag_pm', task: 'x', taskKind: 'unknown' }] }),
+    ).toThrow('task "t1" taskKind must be one of')
+    expect(() =>
+      parseDispatchPlanToolArgs({
+        tasks: [
+          {
+            id: 't1',
+            agentId: 'ag_pm',
+            task: 'x',
+            requiredCommands: [{ command: 'pnpm build', timeoutMs: -1 }],
+          },
+        ],
+      }),
+    ).toThrow('requiredCommands[0].timeoutMs must be a positive integer')
   })
 })
 

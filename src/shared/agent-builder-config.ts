@@ -24,6 +24,7 @@ export const AVAILABLE_AGENT_TOOLS = [
   'read_artifact',
   'read_attachment',
   'ask_user',
+  'fs_list',
   'fs_read',
   'fs_write',
   'bash',
@@ -50,7 +51,7 @@ export const AGENT_TOOL_PRESETS: readonly AgentToolPreset[] = [
     id: 'local-code',
     label: '本地代码',
     desc: '读写 workspace 并运行命令',
-    tools: ['deploy_workspace', 'read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'fs_write', 'bash'],
+    tools: ['deploy_workspace', 'read_artifact', 'read_attachment', 'ask_user', 'fs_list', 'fs_read', 'fs_write', 'bash'],
   },
   {
     id: 'artifact',
@@ -62,7 +63,7 @@ export const AGENT_TOOL_PRESETS: readonly AgentToolPreset[] = [
     id: 'review',
     label: '审查验证',
     desc: '读取产物/文件并跑检查',
-    tools: ['read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'bash'],
+    tools: ['read_artifact', 'read_attachment', 'ask_user', 'fs_list', 'fs_read', 'bash'],
   },
 ]
 
@@ -75,6 +76,7 @@ export const AGENT_TOOL_META: Record<AgentToolName, { label: string; desc: strin
   read_artifact: { label: '读取产物', desc: '查看会话中已有产物的完整内容，便于在其基础上继续改' },
   read_attachment: { label: '读取附件', desc: '读取用户上传的文本 / 文件附件内容' },
   ask_user: { label: '结构化提问', desc: '让用户在明确选项中选择，用于范围、风格、平台等关键澄清' },
+  fs_list: { label: '列出文件', desc: '列出工作区内的目录和文件，用于安全探索项目结构' },
   fs_read: { label: '读取文件', desc: '读取工作区内的文件（源码 / 配置等），仅限沙箱目录' },
   fs_write: { label: '写入文件', desc: '在工作区内新建 / 修改文件；review 模式下需用户批准' },
   bash: { label: '执行命令', desc: '在工作区内运行命令行；受命令黑名单与沙箱目录约束' },

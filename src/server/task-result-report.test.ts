@@ -134,4 +134,175 @@ describe('evaluateTaskResultReport', () => {
         'Task "t1" did not satisfy acceptance criteria: Checks PRD alignment (The implementation missed the export workflow.)',
     })
   })
+
+  it('accepts complete reports with required file and command evidence', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({
+          targetPaths: ['src/server/foo.ts'],
+          requiredCommands: [{ command: 'pnpm test src/server/foo.test.ts' }],
+          requiredEvidence: ['测试命令 exitCode=0'],
+        }),
+        {
+          status: 'complete',
+          summary: 'Implemented foo. 测试命令 exitCode=0',
+          filesChanged: [{ path: 'src/server/foo.ts', action: 'modified' }],
+          commandsRun: [{ command: 'pnpm test src/server/foo.test.ts', exitCode: 0 }],
+        },
+        {
+          fileWrites: [
+            {
+              path: 'src/server/foo.ts',
+              absolutePath: 'E:/repo/src/server/foo.ts',
+              bytes: 123,
+              applied: 'auto',
+            },
+          ],
+          commands: [
+            {
+              command: 'pnpm test src/server/foo.test.ts',
+              cwd: 'E:/repo',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({ ok: true })
+  })
+
+  it('fails complete reports missing required file or command evidence', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({
+          targetPaths: ['src/server/foo.ts'],
+          requiredCommands: [{ command: 'pnpm test src/server/foo.test.ts' }],
+        }),
+        {
+          status: 'complete',
+          summary: 'Done.',
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Task "t1" report is missing target path evidence: src/server/foo.ts',
+    })
+
+    expect(
+      evaluateTaskResultReport(
+        task({
+          requiredCommands: [{ command: 'pnpm test src/server/foo.test.ts' }],
+        }),
+        {
+          status: 'complete',
+          summary: 'Done.',
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error:
+        'Task "t1" report is missing successful command evidence: pnpm test src/server/foo.test.ts',
+    })
+  })
+
+  it('fails complete reports when managed command evidence failed', () => {
+    expect(
+      evaluateTaskResultReport(
+        task(),
+        {
+          status: 'complete',
+          summary: 'Done.',
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'mvn compile',
+              cwd: 'E:/repo',
+              exitCode: 1,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Task "t1" has failed command evidence: mvn compile (exit 1)',
+    })
+  })
+
+  it('accepts when a failed managed command later succeeds', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ requiredCommands: [{ command: 'pnpm build', cwd: 'frontend' }] }),
+        {
+          status: 'complete',
+          summary: 'Build now passes.',
+          commandsRun: [{ command: 'pnpm build', exitCode: 0, cwd: 'frontend' }],
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'pnpm build',
+              cwd: 'E:/repo/frontend',
+              exitCode: 1,
+              timedOut: false,
+              isError: false,
+            },
+            {
+              command: 'pnpm build',
+              cwd: 'E:/repo/frontend',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({ ok: true })
+  })
+
+  it('does not let an earlier automatic prepare failure block later successful verification', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ requiredCommands: [{ command: 'pnpm build', cwd: 'frontend' }] }),
+        {
+          status: 'complete',
+          summary: 'Build passes after dependencies were prepared.',
+          commandsRun: [{ command: 'pnpm build', exitCode: 0, cwd: 'frontend' }],
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'pnpm install',
+              cwd: 'E:/repo/frontend',
+              exitCode: 1,
+              timedOut: false,
+              isError: false,
+              prepare: true,
+            },
+            {
+              command: 'pnpm build',
+              cwd: 'E:/repo/frontend',
+              exitCode: 1,
+              timedOut: false,
+              isError: true,
+              error: 'prepare command failed',
+            },
+            {
+              command: 'pnpm build',
+              cwd: 'E:/repo/frontend',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({ ok: true })
+  })
 })

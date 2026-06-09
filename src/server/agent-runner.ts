@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+
 import { and, desc, eq, gt, inArray } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
@@ -32,6 +35,12 @@ import {
   type RunFileWrites,
 } from './dispatch-file-writes'
 import {
+  clearRunToolEvidence,
+  getRunToolEvidence,
+  recordRunCommand,
+  type RunToolEvidence,
+} from './dispatch-run-evidence'
+import {
   buildReplanContext,
   buildReviseContext,
   collectDependencyClosure,
@@ -53,7 +62,8 @@ import {
   readTaskResultReportFromToolResult,
   REPORT_TASK_RESULT_TOOL_NAME,
 } from './task-result-report'
-import { getEffectiveCwd } from './workspace-utils'
+import { executeBashCommand } from './tools/bash'
+import { assertPathWithinWorkspace, getEffectiveCwd } from './workspace-utils'
 
 /**
  * AgentRunner — 执行一次 Agent 调用。
@@ -101,12 +111,31 @@ interface RunExecutionResult {
 
 interface DispatchTaskResult {
   runId: string | null
+  runIds?: string[]
   status: DispatchTaskEndStatus
   error?: string
   artifactIds: string[]
   outputMessageIds: string[]
   outputArtifacts: Record<string, string>
   taskReport?: TaskResultReport
+}
+
+interface ChildAttemptEvaluation {
+  rawResult: DispatchTaskResult
+  result: DispatchTaskResult
+  evidence: RunToolEvidence
+  verificationResults: VerificationCommandResult[]
+}
+
+interface VerificationCommandResult {
+  command: string
+  cwd?: string
+  exitCode: number | null
+  timedOut: boolean
+  ok: boolean
+  output?: string
+  error?: string
+  prepare?: boolean
 }
 
 interface BlockedDependency {
@@ -180,8 +209,19 @@ class Semaphore {
 const SUB_AGENT_CONTEXT_RECENT_LIMIT = 5
 const MAX_CONCURRENT_SUB_AGENT_RUNS = 4
 const ASK_USER_TOOL_NAME = 'ask_user'
+const ORCHESTRATOR_PLAN_ALLOWED_TOOLS = new Set([
+  'plan_tasks',
+  ASK_USER_TOOL_NAME,
+  'fs_list',
+  'fs_read',
+  'read_artifact',
+  'read_attachment',
+])
 /** Orchestrator 动态重规划上限：首轮 + 最多 (N-1) 轮补救（呼应 spec 06「不无限重试」）。 */
-const MAX_DISPATCH_ROUNDS = 2
+const MAX_DISPATCH_ROUNDS = 4
+const MAX_CHILD_TASK_ATTEMPTS = 4
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 5 * 60_000
+const DEFAULT_PREPARE_TIMEOUT_MS = 10 * 60_000
 
 const activeRuns = new Map<string, AbortController>()
 const subAgentRunSemaphore = new Semaphore(MAX_CONCURRENT_SUB_AGENT_RUNS)
@@ -552,7 +592,10 @@ async function runPlanStage(
 ): Promise<{ plan: DispatchPlanItem[] | null; planRun: RunExecutionResult }> {
   const planSystemPrompt = buildOrchestratorPlanPrompt(agent.systemPrompt, otherAgents, workspace)
   const planToolNames = ensureIncludes(
-    ensureIncludes(agent.toolNames, 'plan_tasks'),
+    ensureIncludes(
+      agent.toolNames.filter((name) => ORCHESTRATOR_PLAN_ALLOWED_TOOLS.has(name)),
+      'plan_tasks',
+    ),
     ASK_USER_TOOL_NAME,
   )
   // 补救轮：把上一轮结果摘要拼到 prompt 前，原始请求仍保留供 Orchestrator 参考
@@ -733,13 +776,13 @@ async function executeDag(
     if (ready.length > 1) {
       const runWrites: RunFileWrites[] = []
       for (let i = 0; i < ready.length; i++) {
-        const childRunId = wave[i].runId
-        if (!childRunId) continue
+        const childRunIds = getDispatchResultRunIds(wave[i])
+        if (childRunIds.length === 0) continue
         runWrites.push({
           taskId: ready[i].id,
           agentId: ready[i].agentId,
-          runId: childRunId,
-          writes: getFileWrites(childRunId),
+          runId: childRunIds[childRunIds.length - 1],
+          writes: mergeFileWrites(childRunIds),
         })
       }
       conflicts.push(...detectWaveConflicts(runWrites))
@@ -749,13 +792,31 @@ async function executeDag(
   // 释放本次 dispatch 各子 run 的写入记录（内存）
   for (const [taskId, r] of results) {
     if (!currentTaskIds.has(taskId)) continue
-    if (r.runId) clearFileWrites(r.runId)
+    for (const childRunId of getDispatchResultRunIds(r)) {
+      clearFileWrites(childRunId)
+      clearRunToolEvidence(childRunId)
+    }
   }
 
   return {
     results: new Map([...results].filter(([taskId]) => currentTaskIds.has(taskId))),
     conflicts,
   }
+}
+
+function getDispatchResultRunIds(result: DispatchTaskResult): string[] {
+  if (result.runIds && result.runIds.length > 0) return result.runIds
+  return result.runId ? [result.runId] : []
+}
+
+function mergeFileWrites(runIds: string[]): Map<string, string> {
+  const merged = new Map<string, string>()
+  for (const runId of runIds) {
+    for (const [path, hash] of getFileWrites(runId)) {
+      merged.set(path, hash)
+    }
+  }
+  return merged
 }
 
 async function runChildTask(
@@ -784,13 +845,7 @@ async function runChildTask(
   }
 
   try {
-    if (ctx.signal.aborted) {
-      const result = abortedBeforeStartTaskResult(task, 'Aborted before sub-agent run started')
-      publishDispatchEnd(ctx, task.id, result)
-      return result
-    }
-
-    const subPrompt = await buildSubAgentPrompt(
+    const basePrompt = await buildSubAgentPrompt(
       task,
       upstream,
       ctx.conversationId,
@@ -799,55 +854,129 @@ async function runChildTask(
       ctx.workspace,
     )
 
-    const { runId: childRunId, promise } = AgentRunner.run({
-      agentId: task.agentId,
-      conversationId: ctx.conversationId,
-      triggerMessageId: ctx.triggerMessageId,
-      parentRunId: ctx.parentRunId,
-      overridePrompt: subPrompt,
-      requireTaskReport: true,
-      parentSignal: ctx.signal,
-    })
+    let continuationContext: string | null = null
+    let lastEvaluation: ChildAttemptEvaluation | null = null
+    const aggregate: RunExecutionResult = emptyRunExecutionResult()
+    const aggregateEvidence: RunToolEvidence = { fileWrites: [], commands: [] }
+    const attemptRunIds: string[] = []
 
-    publish({
-      type: 'dispatch.start',
-      conversationId: ctx.conversationId,
-      timestamp: Date.now(),
-      parentRunId: ctx.parentRunId,
-      childRunId,
-      taskId: task.id,
-      agentId: task.agentId,
-    })
+    for (let attempt = 1; attempt <= MAX_CHILD_TASK_ATTEMPTS; attempt++) {
+      if (ctx.signal.aborted) {
+        const result = abortedBeforeStartTaskResult(task, 'Aborted before sub-agent run started')
+        publishDispatchEnd(ctx, task.id, result)
+        return mergeAttemptAggregate(result, aggregate)
+      }
 
-    const result = evaluateChildTaskResult(task, await promise)
+      const prompt = continuationContext
+        ? buildContinuationPrompt(basePrompt, task, attempt, continuationContext)
+        : basePrompt
+      const attemptEvaluation = await runChildTaskAttempt(task, prompt, ctx)
+      if (attemptEvaluation.rawResult.runId) attemptRunIds.push(attemptEvaluation.rawResult.runId)
+      mergeRunExecutionResult(aggregate, attemptEvaluation.rawResult)
+      mergeRunToolEvidence(aggregateEvidence, attemptEvaluation.evidence)
+      const evaluatedResult = evaluateChildTaskResult(
+        task,
+        attemptEvaluation.rawResult,
+        aggregateEvidence,
+      )
+      const currentEvaluation: ChildAttemptEvaluation = {
+        ...attemptEvaluation,
+        result: { ...evaluatedResult, runIds: [...attemptRunIds] },
+        evidence: cloneRunToolEvidence(aggregateEvidence),
+      }
+      lastEvaluation = currentEvaluation
 
-    publish({
-      type: 'dispatch.end',
-      conversationId: ctx.conversationId,
-      timestamp: Date.now(),
-      parentRunId: ctx.parentRunId,
-      childRunId,
-      taskId: task.id,
-      status: result.status,
-      error: result.error,
-    })
+      if (currentEvaluation.result.status === 'complete') {
+        publishDispatchEnd(ctx, task.id, currentEvaluation.result)
+        return mergeAttemptAggregate(currentEvaluation.result, aggregate)
+      }
 
-    return result
+      if (
+        currentEvaluation.result.status === 'aborted' ||
+        currentEvaluation.result.taskReport?.status === 'blocked'
+      ) {
+        publishDispatchEnd(ctx, task.id, currentEvaluation.result)
+        return mergeAttemptAggregate(currentEvaluation.result, aggregate)
+      }
+
+      continuationContext = buildTaskContinuationContext(
+        task,
+        currentEvaluation,
+        attempt,
+        MAX_CHILD_TASK_ATTEMPTS,
+      )
+    }
+
+    const result =
+      lastEvaluation?.result ??
+      abortedBeforeStartTaskResult(task, 'No child task attempt was executed')
+    const exhausted: DispatchTaskResult = {
+      ...result,
+      status: result.status === 'complete' ? 'complete' : 'failed',
+      error:
+        result.status === 'complete'
+          ? result.error
+          : `Task "${task.id}" did not satisfy completion gates after ${MAX_CHILD_TASK_ATTEMPTS} attempt(s). Last error: ${result.error ?? 'unknown error'}`,
+      runIds: [...attemptRunIds],
+    }
+    publishDispatchEnd(ctx, task.id, exhausted)
+
+    return mergeAttemptAggregate(exhausted, aggregate)
   } finally {
     release?.()
   }
 }
 
+async function runChildTaskAttempt(
+  task: DispatchPlanItem,
+  prompt: string,
+  ctx: DagContext,
+): Promise<ChildAttemptEvaluation> {
+  const { runId: childRunId, promise } = AgentRunner.run({
+    agentId: task.agentId,
+    conversationId: ctx.conversationId,
+    triggerMessageId: ctx.triggerMessageId,
+    parentRunId: ctx.parentRunId,
+    overridePrompt: prompt,
+    requireTaskReport: true,
+    parentSignal: ctx.signal,
+  })
+
+  publish({
+    type: 'dispatch.start',
+    conversationId: ctx.conversationId,
+    timestamp: Date.now(),
+    parentRunId: ctx.parentRunId,
+    childRunId,
+    taskId: task.id,
+    agentId: task.agentId,
+  })
+
+  const raw = await promise
+  const verificationResults =
+    raw.status === 'aborted'
+      ? []
+      : await runRequiredCommands(task, childRunId, ctx)
+  const evidence = getRunToolEvidence(childRunId)
+  const result = evaluateChildTaskResult(task, raw, evidence)
+  return { rawResult: raw, result, evidence, verificationResults }
+}
+
 function evaluateChildTaskResult(
   task: DispatchPlanItem,
   result: DispatchTaskResult,
+  evidence: RunToolEvidence = { fileWrites: [], commands: [] },
 ): DispatchTaskResult {
   if (result.status !== 'complete') {
     return result
   }
 
   const outputArtifacts = bindImplicitSingleOutput(task, result)
-  const reportEvaluation = evaluateTaskResultReport(task, result.taskReport)
+  const reportEvaluation = evaluateTaskResultReport(
+    task,
+    result.taskReport,
+    evidence,
+  )
   if (!reportEvaluation.ok) {
     return {
       ...result,
@@ -858,6 +987,270 @@ function evaluateChildTaskResult(
   }
 
   return { ...result, outputArtifacts }
+}
+
+function mergeRunExecutionResult(target: RunExecutionResult, source: RunExecutionResult): void {
+  target.artifactIds.push(...source.artifactIds)
+  target.outputMessageIds.push(...source.outputMessageIds)
+  Object.assign(target.outputArtifacts, source.outputArtifacts)
+  if (source.taskReport) target.taskReport = source.taskReport
+}
+
+function mergeRunToolEvidence(target: RunToolEvidence, source: RunToolEvidence): void {
+  target.fileWrites.push(...source.fileWrites)
+  target.commands.push(...source.commands)
+}
+
+function cloneRunToolEvidence(source: RunToolEvidence): RunToolEvidence {
+  return {
+    fileWrites: [...source.fileWrites],
+    commands: [...source.commands],
+  }
+}
+
+function mergeAttemptAggregate(
+  result: DispatchTaskResult,
+  aggregate: RunExecutionResult,
+): DispatchTaskResult {
+  return {
+    ...result,
+    runIds: result.runIds,
+    artifactIds: [...aggregate.artifactIds],
+    outputMessageIds: [...aggregate.outputMessageIds],
+    outputArtifacts: { ...aggregate.outputArtifacts, ...result.outputArtifacts },
+  }
+}
+
+async function runRequiredCommands(
+  task: DispatchPlanItem,
+  runId: string,
+  ctx: DagContext,
+): Promise<VerificationCommandResult[]> {
+  if (!task.requiredCommands || task.requiredCommands.length === 0) return []
+
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.conversationId, ctx.conversationId),
+  })
+  if (!workspace) {
+    return [
+      {
+        command: '(required commands)',
+        exitCode: null,
+        timedOut: false,
+        ok: false,
+        error: 'Workspace not found',
+      },
+    ]
+  }
+
+  const results: VerificationCommandResult[] = []
+  for (const required of task.requiredCommands) {
+    const expanded = expandRequiredCommand(required)
+    const commandResults: VerificationCommandResult[] = []
+
+    let prepare: { command: string; cwd?: string } | null
+    try {
+      prepare = expanded.commands.some((command) => /\b(?:pnpm|npm|yarn)\s+install\b/i.test(command))
+        ? null
+        : buildPrepareCommand(workspace, expanded.cwd)
+    } catch (err) {
+      const prepareResult: VerificationCommandResult = {
+        command: 'prepare workspace',
+        cwd: expanded.cwd,
+        exitCode: null,
+        timedOut: false,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        prepare: true,
+      }
+      results.push(prepareResult)
+      continue
+    }
+    if (prepare) {
+      const prepareResult = await runSupervisorCommand(
+        {
+          command: prepare.command,
+          cwd: prepare.cwd,
+          timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
+        },
+        task,
+        runId,
+        ctx,
+        true,
+      )
+      results.push(prepareResult)
+      commandResults.push(prepareResult)
+      if (!prepareResult.ok) continue
+    }
+
+    for (const command of expanded.commands) {
+      const commandResult = await runSupervisorCommand(
+        {
+          command,
+          cwd: expanded.cwd,
+          timeoutMs: required.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS,
+        },
+        task,
+        runId,
+        ctx,
+        false,
+      )
+      results.push(commandResult)
+      commandResults.push(commandResult)
+      if (!commandResult.ok) break
+    }
+
+    const failed = commandResults.find((result) => !result.ok)
+    const cwd = commandResults[0]?.cwd ?? required.cwd
+    recordRunCommand(runId, {
+      command: required.command,
+      cwd: cwd ?? getEffectiveCwd(workspace),
+      exitCode: failed ? (failed.exitCode ?? null) : 0,
+      timedOut: failed?.timedOut ?? false,
+      isError: Boolean(failed),
+      ...(failed?.error ? { error: failed.error } : {}),
+    })
+  }
+
+  return results
+}
+
+async function runSupervisorCommand(
+  command: { command: string; cwd?: string; timeoutMs?: number },
+  task: DispatchPlanItem,
+  runId: string,
+  ctx: DagContext,
+  prepare: boolean,
+): Promise<VerificationCommandResult> {
+  const result = await executeBashCommand(
+    { ...command, evidenceKind: prepare ? 'prepare' : 'verification' },
+    {
+      conversationId: ctx.conversationId,
+      workspacePath: '',
+      agentId: task.agentId,
+      runId,
+      abortSignal: ctx.signal,
+    },
+  )
+
+  if (!result.ok) {
+    return {
+      command: command.command,
+      cwd: command.cwd,
+      exitCode: null,
+      timedOut: false,
+      ok: false,
+      error: result.error,
+      ...(prepare ? { prepare: true } : {}),
+    }
+  }
+
+  const value = result.value as {
+    command?: unknown
+    cwd?: unknown
+    exitCode?: unknown
+    timedOut?: unknown
+    output?: unknown
+  }
+  const exitCode = typeof value.exitCode === 'number' ? value.exitCode : null
+  const timedOut = value.timedOut === true
+  return {
+    command: typeof value.command === 'string' ? value.command : command.command,
+    cwd: typeof value.cwd === 'string' ? value.cwd : command.cwd,
+    exitCode,
+    timedOut,
+    ok: exitCode === 0 && !timedOut,
+    output: typeof value.output === 'string' ? value.output : undefined,
+    ...(prepare ? { prepare: true } : {}),
+  }
+}
+
+function expandRequiredCommand(required: NonNullable<DispatchPlanItem['requiredCommands']>[number]): {
+  cwd?: string
+  commands: string[]
+} {
+  let cwd = required.cwd
+  let command = required.command.trim()
+  const cdMatch = command.match(/^cd\s+("?[^"&;]+"?)\s*&&\s*(.+)$/i)
+  if (cdMatch && !cwd) {
+    cwd = cdMatch[1].replace(/^"|"$/g, '')
+    command = cdMatch[2].trim()
+  }
+  return {
+    cwd,
+    commands: command
+      .split(/\s+&&\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean),
+  }
+}
+
+function buildPrepareCommand(
+  workspace: WorkspaceRow,
+  cwd: string | undefined,
+): { command: string; cwd?: string } | null {
+  const cwdAbs = cwd ? assertPathWithinWorkspace(workspace, cwd) : getEffectiveCwd(workspace)
+  if (!existsSync(path.join(cwdAbs, 'package.json'))) return null
+  if (existsSync(path.join(cwdAbs, 'node_modules'))) return null
+  return { command: 'pnpm install', ...(cwd ? { cwd } : {}) }
+}
+
+function buildContinuationPrompt(
+  basePrompt: string,
+  task: DispatchPlanItem,
+  attempt: number,
+  continuationContext: string,
+): string {
+  return [
+    basePrompt,
+    '',
+    '<continuation>',
+    `You are continuing the same dispatched task "${task.id}". This is attempt ${attempt}/${MAX_CHILD_TASK_ATTEMPTS}.`,
+    'Do not restart from scratch if useful files already exist. Inspect the workspace, fix the missing or failing parts, run the relevant verification, and then call report_task_result.',
+    continuationContext,
+    '</continuation>',
+  ].join('\n')
+}
+
+function buildTaskContinuationContext(
+  task: DispatchPlanItem,
+  evaluation: ChildAttemptEvaluation,
+  attempt: number,
+  maxAttempts: number,
+): string {
+  const lines = [
+    '<previous_attempt>',
+    `  <attempt>${attempt}/${maxAttempts}</attempt>`,
+    `  <status>${evaluation.result.status}</status>`,
+  ]
+  if (evaluation.result.error) {
+    lines.push(`  <error>${escapeXml(evaluation.result.error)}</error>`)
+  }
+  if (!evaluation.result.taskReport) {
+    lines.push('  <missing_report>true</missing_report>')
+  }
+  if ((task.targetPaths ?? []).length > 0) {
+    lines.push('  <target_paths>')
+    for (const targetPath of task.targetPaths ?? []) {
+      lines.push(`    <path>${escapeXml(targetPath)}</path>`)
+    }
+    lines.push('  </target_paths>')
+  }
+  if (evaluation.verificationResults.length > 0) {
+    lines.push('  <verification_results>')
+    for (const result of evaluation.verificationResults) {
+      lines.push(
+        `    <command text=${JSON.stringify(result.command)} ok="${result.ok}" exitCode="${result.exitCode ?? ''}" timedOut="${result.timedOut}"${result.prepare ? ' prepare="true"' : ''}>`,
+      )
+      if (result.cwd) lines.push(`      <cwd>${escapeXml(result.cwd)}</cwd>`)
+      if (result.error) lines.push(`      <error>${escapeXml(result.error)}</error>`)
+      if (result.output) lines.push(`      <output>${escapeXml(result.output.slice(-4000))}</output>`)
+      lines.push('    </command>')
+    }
+    lines.push('  </verification_results>')
+  }
+  lines.push('</previous_attempt>')
+  return lines.join('\n')
 }
 
 function bindImplicitSingleOutput(
@@ -1574,7 +1967,7 @@ function buildWorkspaceContextBlock(workspace: WorkspaceRow): string {
       '<workspace_info>',
       `  <cwd>${cwd}</cwd>`,
       `  <mode>local</mode>`,
-      `  <note>This directory is the user's REAL local project on their machine. Files inside it are their actual code. When you use fs_read / fs_write / bash, you are reading and modifying real files — be careful. You CAN access these files directly via the fs_read / fs_write / bash tools; do not tell the user you cannot access local files.</note>`,
+      `  <note>This directory is the user's REAL local project on their machine. Files inside it are their actual code. When you use fs_list / fs_read / fs_write / bash, you are reading and modifying real files — be careful. You CAN access these files directly via the workspace tools; do not tell the user you cannot access local files.</note>`,
       '</workspace_info>',
     ].join('\n')
   }
@@ -1715,13 +2108,14 @@ function buildAgentHubToolGuidance(
     ])
   }
 
-  if (tools.has('fs_read') || tools.has('fs_write') || tools.has('bash')) {
+  if (tools.has('fs_list') || tools.has('fs_read') || tools.has('fs_write') || tools.has('bash')) {
     add([
       '### workspace 文件与命令工具',
       '用途：只操作当前 workspace 内的真实文件；路径必须在 <workspace_info><cwd> 下。',
+      'fs_list 正确案例：fs_list({ path: "" }) 查看根目录；fs_list({ path: "src/server" }) 查看子目录。探索项目结构优先用 fs_list，不要先用 bash 拼目录命令。',
       'fs_read 正确案例：fs_read({ path: "src/app/page.tsx" })，先看现有代码再改。',
       'fs_write 正确案例：fs_write({ path: "src/app/page.tsx", content: "完整的新文件内容" })；content 是完整文件内容，不是 diff patch。',
-      'bash 正确案例：bash({ command: "pnpm typecheck" })，用于验证改动。',
+      'bash 正确案例：bash({ command: "pnpm typecheck" })；子目录命令用 bash({ command: "pnpm build", cwd: "frontend", timeoutMs: 300000 })，不要写 cd frontend && pnpm build。',
       '临时启动服务测试时，必须在同一个 bash 命令里清理后台进程，例如 `npm run dev > /tmp/agenthub-dev.log 2>&1 & pid=$!; trap "kill $pid" EXIT; sleep 3; curl http://127.0.0.1:3000`；不要裸 `server &` 留长驻后台进程。',
       '常见错误：fs_write 只写局部 diff、bash 里 cd 到 workspace 外、裸 `cmd &` 留后台服务、或在 Windows workspace 用 POSIX-only 参数。',
       '错误案例：读取 ~/.ssh、/etc、仓库外路径，或在没有看文件的情况下覆盖代码。',
@@ -1733,8 +2127,9 @@ function buildAgentHubToolGuidance(
       '### plan_tasks',
       '用途：Orchestrator 用结构化计划拆分子任务；执行顺序只认 dependsOn 字段。',
       '正确案例：实现依赖设计时，t2.dependsOn=["t1"]，不要只在 task 文本里写“基于 t1”。',
-      '字段名必须是 agentId、dependsOn、expectedOutputs、acceptanceCriteria；不要写 agent_id、depends_on、expected_outputs、acceptance_criteria。',
+      '字段名必须是 agentId、dependsOn、expectedOutputs、acceptanceCriteria、taskKind、targetPaths、expectedWorkspaceChanges、requiredCommands、requiredEvidence；不要写 snake_case。',
       '文字型审查/诊断任务不要声明 expectedOutputs；把完成条件写进 acceptanceCriteria。',
+      '代码任务正确案例：{ taskKind: "code", targetPaths: ["frontend/"], requiredCommands: [{ command: "pnpm build", cwd: "frontend", timeoutMs: 300000 }], requiredEvidence: ["列出实际修改文件", "测试命令 exitCode=0"] }。',
     ])
   }
 
@@ -1742,8 +2137,8 @@ function buildAgentHubToolGuidance(
     add([
       '### report_task_result',
       '用途：被 Orchestrator 分派的子任务结束前必须调用一次，报告真实语义结果。',
-      '正确案例：report_task_result({ status: "complete", summary: "已实现并通过类型检查", acceptanceResults: [{ criterion: "通过 typecheck", passed: true, evidence: "pnpm typecheck exited 0" }] })。',
-      '字段名必须是 acceptanceResults；不要写 acceptance_results。',
+      '正确案例：report_task_result({ status: "complete", summary: "已实现并通过类型检查", filesChanged: [{ path: "src/server/foo.ts", action: "modified" }], commandsRun: [{ command: "pnpm test src/server/foo.test.ts", exitCode: 0 }], acceptanceResults: [{ criterion: "通过 typecheck", passed: true, evidence: "pnpm typecheck exited 0" }] })。',
+      '字段名必须是 acceptanceResults、filesChanged、commandsRun、tests；不要写 snake_case。',
       '错误案例：代码部分完成、测试失败、或缺少依赖时仍上报 complete；应使用 failed 或 blocked 并说明原因。',
     ])
   }
@@ -1804,7 +2199,7 @@ function buildOrchestratorPlanPrompt(
     '## 拆解原则',
     '- 充分利用每个 Agent 的 capabilities，不要把任务派给不合适的人。',
     '- 每个子任务必须独立可执行（被分派的 Agent 看不到完整群聊上下文，必要上下文要写进 task）。',
-    '- 计划阶段只能调用 ask_user 和 plan_tasks；除关键澄清外，不要直接给用户输出最终答案。',
+    '- 计划阶段只能调用 ask_user、plan_tasks 和只读侦察工具（fs_list/fs_read/read_artifact/read_attachment）；不要写文件或执行命令。',
     '- 若用户需求已足够明确，不要为了形式感提问，直接 plan_tasks。',
     '',
     '## 依赖关系（执行顺序的唯一来源，务必读完）',
@@ -1816,6 +2211,11 @@ function buildOrchestratorPlanPrompt(
     '- Do NOT declare expectedOutputs for text-only tasks such as review, validation, diagnosis, status check, explanation, or summary; put their completion checks in acceptanceCriteria.',
     '- If a task needs an upstream artifact, declare inputs with fromTaskId and outputId; the system will compile these into dependencies.',
     '- For tasks with quality requirements, add concise acceptanceCriteria that the assigned agent can verify.',
+    ...localWorkspaceRules,
+    '- For code or test tasks, set taskKind and declare targetPaths, expectedWorkspaceChanges, requiredCommands, and requiredEvidence whenever possible.',
+    '- Frontend and backend implementation tasks usually both depend on PRD/API contracts, not on each other; plan them as parallel siblings unless one truly consumes the other output.',
+    '- Prefer requiredCommands with cwd, for example { command: "pnpm build", cwd: "frontend", timeoutMs: 300000 }; avoid encoding directory changes as "cd frontend && ...".',
+    '- A retry/remediation plan must preserve the original user goal. Do not replace implementation work with a narrower review-only task unless the user explicitly approved that scope change.',
     ...localWorkspaceRules,
     '',
     '示例（设计 → 前端 → 审查，逐级依赖；agentId 用上面可用列表里的真实 id）：',
@@ -1835,6 +2235,7 @@ function buildOrchestratorAggregatePrompt(baseSystemPrompt: string): string {
     '你处于「聚合阶段」。所有子任务已执行完成（含成功与失败），结果在 user 消息中以 XML 给出。',
     '请直接给用户输出一条总结消息：',
     '- 简明列出完成 / 失败的任务',
+    '- 如果存在 failed / skipped / aborted 任务，必须明确说明整体未完成，不要把局部成功说成全部完成',
     '- 用 <artifact_ref id="art_xxx"/> 形式引用关键产物（如果有）',
     '- 给出明确的下一步建议',
     '不要再调用 plan_tasks，不要把任务再次分派。',
@@ -1937,6 +2338,7 @@ async function buildSubAgentPrompt(
   const taskInputsXml = renderTaskInputsXml(resolvedInputs)
   const expectedOutputsXml = renderExpectedOutputsXml(task.expectedOutputs ?? [])
   const acceptanceCriteriaXml = renderAcceptanceCriteriaXml(task.acceptanceCriteria ?? [])
+  const evidenceContractXml = renderTaskEvidenceContractXml(task)
 
   return [
     '<context>',
@@ -1947,6 +2349,7 @@ async function buildSubAgentPrompt(
     expectedOutputsXml && `  <expected_outputs>\n${expectedOutputsXml}\n  </expected_outputs>`,
     acceptanceCriteriaXml &&
       `  <acceptance_criteria>\n${acceptanceCriteriaXml}\n  </acceptance_criteria>`,
+    evidenceContractXml && `  <evidence_contract>\n${evidenceContractXml}\n  </evidence_contract>`,
     upstreamArtifactsXml &&
       `  <upstream_artifacts>\n${upstreamArtifactsXml}\n  </upstream_artifacts>`,
     `  <existing_artifacts>\n${existingXml || '    （无）'}\n  </existing_artifacts>`,
@@ -1962,6 +2365,10 @@ async function buildSubAgentPrompt(
     'If expected_outputs are declared and your completed work creates an artifact, use write_artifact and pass outputKey equal to that output id.',
     'If no expected_outputs are declared, complete the task with a normal message; do not create an artifact just to satisfy status tracking.',
     'Satisfy every acceptance_criteria item when present.',
+    'If evidence_contract is present, include matching filesChanged, commandsRun, tests, and/or acceptanceResults evidence in report_task_result.',
+    'For required_commands, you may run the command yourself, and AgentHub will also run it as a completion gate after your attempt. Use bash cwd instead of cd when running commands in subdirectories.',
+    'If a required command fails, fix the issue and continue; do not report complete until the command can pass.',
+    'For target_paths, list every changed or verified path in report_task_result.filesChanged.',
     'At the end, call report_task_result exactly once. A normal text response alone does not complete this dispatched task.',
     'Use report_task_result.status="complete" only when you have FULLY accomplished the assigned task.',
     'Never report complete if tests are failing, implementation is partial, unresolved errors remain, or you could not find necessary files/dependencies.',
@@ -2009,6 +2416,34 @@ function renderExpectedOutputsXml(outputs: DispatchExpectedOutput[]): string {
 
 function renderAcceptanceCriteriaXml(criteria: string[]): string {
   return criteria.map((criterion) => `    <item>${escapeXml(criterion)}</item>`).join('\n')
+}
+
+function renderTaskEvidenceContractXml(task: DispatchPlanItem): string {
+  const lines: string[] = []
+  if (task.taskKind) lines.push(`    <task_kind>${escapeXml(task.taskKind)}</task_kind>`)
+  for (const targetPath of task.targetPaths ?? []) {
+    lines.push(`    <target_path>${escapeXml(targetPath)}</target_path>`)
+  }
+  for (const change of task.expectedWorkspaceChanges ?? []) {
+    lines.push(`    <expected_workspace_change>${escapeXml(change)}</expected_workspace_change>`)
+  }
+  for (const requiredCommand of task.requiredCommands ?? []) {
+    const description = requiredCommand.description ? escapeXml(requiredCommand.description) : ''
+    const attrs = [
+      `command=${xmlAttr(requiredCommand.command)}`,
+      requiredCommand.cwd ? `cwd=${xmlAttr(requiredCommand.cwd)}` : '',
+      requiredCommand.timeoutMs ? `timeoutMs=${xmlAttr(String(requiredCommand.timeoutMs))}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    lines.push(
+      description ? `    <required_command ${attrs}>${description}</required_command>` : `    <required_command ${attrs} />`,
+    )
+  }
+  for (const evidence of task.requiredEvidence ?? []) {
+    lines.push(`    <required_evidence>${escapeXml(evidence)}</required_evidence>`)
+  }
+  return lines.join('\n')
 }
 
 function renderArtifactSummaryXml(artifact: ArtifactRow): string {
@@ -2095,6 +2530,34 @@ function renderTaskResultReportXml(report: TaskResultReport): string {
   for (const result of report.acceptanceResults ?? []) {
     children.push(
       `      <acceptance criterion=${xmlAttr(result.criterion)} passed=${xmlAttr(String(result.passed))}>${escapeXml(result.evidence)}</acceptance>`,
+    )
+  }
+  for (const file of report.filesChanged ?? []) {
+    const actionAttr = file.action ? ` action=${xmlAttr(file.action)}` : ''
+    children.push(`      <file path=${xmlAttr(file.path)}${actionAttr} />`)
+  }
+  for (const command of report.commandsRun ?? []) {
+    const summary = command.summary ? escapeXml(command.summary) : ''
+    const attrs = [
+      `command=${xmlAttr(command.command)}`,
+      `exitCode=${xmlAttr(String(command.exitCode))}`,
+      command.cwd ? `cwd=${xmlAttr(command.cwd)}` : '',
+      command.timedOut !== undefined ? `timedOut=${xmlAttr(String(command.timedOut))}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    children.push(
+      summary
+        ? `      <command ${attrs}>${summary}</command>`
+        : `      <command ${attrs} />`,
+    )
+  }
+  for (const test of report.tests ?? []) {
+    const summary = test.summary ? escapeXml(test.summary) : ''
+    children.push(
+      summary
+        ? `      <test command=${xmlAttr(test.command)} passed=${xmlAttr(String(test.passed))}>${summary}</test>`
+        : `      <test command=${xmlAttr(test.command)} passed=${xmlAttr(String(test.passed))} />`,
     )
   }
   for (const blocker of report.blockers ?? []) {

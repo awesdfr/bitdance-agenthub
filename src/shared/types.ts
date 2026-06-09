@@ -175,11 +175,18 @@ export interface DispatchPlanItem {
   id: string
   agentId: string
   task: string
+  taskKind?: DispatchTaskKind
   dependsOn?: string[]
   expectedOutputs?: DispatchExpectedOutput[]
   inputs?: DispatchTaskInput[]
   acceptanceCriteria?: string[]
+  targetPaths?: string[]
+  expectedWorkspaceChanges?: string[]
+  requiredCommands?: DispatchRequiredCommand[]
+  requiredEvidence?: string[]
 }
+
+export type DispatchTaskKind = 'code' | 'test' | 'review' | 'design' | 'doc' | 'analysis'
 
 export interface DispatchExpectedOutput {
   id: string
@@ -195,6 +202,13 @@ export interface DispatchTaskInput {
   description?: string
 }
 
+export interface DispatchRequiredCommand {
+  command: string
+  description?: string
+  cwd?: string
+  timeoutMs?: number
+}
+
 export type TaskResultReportStatus = 'complete' | 'failed' | 'blocked'
 
 export interface TaskAcceptanceResult {
@@ -203,10 +217,32 @@ export interface TaskAcceptanceResult {
   evidence: string
 }
 
+export interface TaskFileEvidence {
+  path: string
+  action?: 'created' | 'modified' | 'deleted' | 'verified'
+}
+
+export interface TaskCommandEvidence {
+  command: string
+  exitCode: number | null
+  cwd?: string
+  timedOut?: boolean
+  summary?: string
+}
+
+export interface TaskTestEvidence {
+  command: string
+  passed: boolean
+  summary?: string
+}
+
 export interface TaskResultReport {
   status: TaskResultReportStatus
   summary: string
   acceptanceResults?: TaskAcceptanceResult[]
+  filesChanged?: TaskFileEvidence[]
+  commandsRun?: TaskCommandEvidence[]
+  tests?: TaskTestEvidence[]
   blockers?: string[]
 }
 
