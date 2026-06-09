@@ -143,7 +143,10 @@ export class CodexAdapter implements AgentPlatformAdapter {
               }
             }
           }
-          if (event.item.server === 'agenthub' && event.item.tool === 'deploy_artifact') {
+          if (
+            event.item.server === 'agenthub' &&
+            (event.item.tool === 'deploy_artifact' || event.item.tool === 'deploy_workspace')
+          ) {
             const deployment = parseDeploymentFromCodexMcpResult(event.item.result)
             if (deployment) {
               yield baseEvent({
@@ -169,6 +172,7 @@ function buildCodexDeveloperInstructions(systemPrompt: string): string {
     '',
     '## AgentHub MCP tools',
     'When you create a previewable web app, use the AgentHub MCP write_artifact tool with type "web_app". After that, call deploy_artifact with the artifactId so the user receives a deployment status card with open/copy/download actions.',
+    'When you build a local workspace web project, deploy the generated static output directory with deploy_workspace, for example path "dist", "build", "out", or "client/dist". Do not create a web_app artifact just to deploy files that already exist on disk.',
     'When progress depends on the user choosing from a finite set of options, use ask_user to present structured choices instead of asking only in plain text. Do not use ask_user for open-ended discussion or non-blocking details.',
     'When you are executing an AgentHub dispatched sub-task, call report_task_result exactly once at the end to report whether the task is complete, failed, or blocked.',
     'deploy_artifact returns previewPath as a local relative path for the current AgentHub instance. Do not convert it into an absolute public URL and do not invent hostnames. In user-facing summaries, tell the user to use the deployment card buttons or quote previewPath exactly.',

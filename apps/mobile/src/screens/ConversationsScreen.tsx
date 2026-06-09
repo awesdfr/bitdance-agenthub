@@ -472,7 +472,7 @@ function MessagePartView({
             <XCircle className="inline-icon" aria-hidden="true" />
           )}
           {part.status === 'ready'
-            ? `部署预览：${part.title} v${part.version}`
+            ? `部署预览：${part.title} ${formatDeploySource(part)}`
             : `部署失败：${part.error ?? part.title}`}
         </span>
       )
@@ -488,6 +488,13 @@ function MessagePartView({
         </span>
       )
   }
+}
+
+function formatDeploySource(part: Extract<MobileMessagePart, { type: 'deploy_status' }>): string {
+  if (part.sourceType === 'workspace') {
+    return `工作区 ${part.workspacePath ?? '目录'}`
+  }
+  return `v${part.version}`
 }
 
 function ToolActivityBlock({

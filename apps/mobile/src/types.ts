@@ -40,6 +40,8 @@ export type MobileMessagePart =
       type: 'deploy_status'
       title: string
       version: number
+      sourceType?: 'artifact' | 'workspace'
+      workspacePath?: string
       previewPath: string
       status: 'ready' | 'failed'
       error?: string

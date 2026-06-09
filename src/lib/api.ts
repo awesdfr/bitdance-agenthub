@@ -11,6 +11,7 @@ import type {
   AskUserAnswer,
   DeployCandidateRecord,
   DeployStatusRecord,
+  PendingBashCommand,
   PendingDispatchPlan,
   PendingQuestion,
   PendingWrite,
@@ -223,6 +224,42 @@ export async function rejectPendingWrite(
 ): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/conversations/${conversationId}/pending-writes/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject' }),
+    }),
+  )
+}
+
+// ─── Pending bash commands ─────
+export async function fetchPendingBashCommands(
+  conversationId: string,
+): Promise<PendingBashCommand[]> {
+  const { pendingCommands } = await json<{ pendingCommands: PendingBashCommand[] }>(
+    fetch(`/api/conversations/${conversationId}/pending-bash-commands`),
+  )
+  return pendingCommands
+}
+
+export async function approvePendingBashCommand(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-bash-commands/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve' }),
+    }),
+  )
+}
+
+export async function rejectPendingBashCommand(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-bash-commands/${pendingId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'reject' }),

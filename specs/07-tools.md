@@ -68,8 +68,9 @@ export const toolRegistry = buildRegistry()
 
 | 名称 | 用途 | 副作用 | 谁该装备 |
 |---|---|---|---|
-| `write_artifact` | 创建产物 | 写 DB | 任何产出代码 / 文档 / 网页的 agent |
+| `write_artifact` | 创建聊天内可预览 / 可交接产物 | 写 DB | 需要交付 artifact、网页原型、文档、PPT 的 agent；不用于本地源码落盘 |
 | `deploy_artifact` | 为 web_app 生成部署发布状态 | 写 `.agenthub-data/deployments`；可选发布到用户配置的外部静态目录；返回 preview path 与下载路径 | 前端 / web app 产出 agent |
+| `deploy_workspace` | 为 workspace 内已构建的静态目录生成部署发布状态 | 复制 workspace 静态文件到 `.agenthub-data/deployments`；可选发布到用户配置的外部静态目录 | 本地项目 / 前端代码 agent |
 | `read_artifact` | 读已有产物的完整内容 | 读 DB | 跨任务复用产物的 agent（Orchestrator 派的子 agent 常用） |
 | `read_attachment` | 读用户上传附件 | 读文件系统 | 处理用户文档 / 文本附件的 agent |
 | `ask_user` | 向用户发起结构化选择题 | 等待用户回答（in-memory pending） | 需要澄清范围 / 风格 / 平台 / 风险选择的 agent |
@@ -112,13 +113,37 @@ export const toolRegistry = buildRegistry()
 
 **外部静态发布目录**：`deployment_publish_dir` 必须是绝对路径且不能是文件系统根目录。发布时只删除 / 覆盖 `<publishDir>/<deploymentId>` 子目录，且复制公开文件时不会带上 `.agenthub` 私有目录。`deployment_public_base_url` 是用户已有静态服务的公开根 URL，AgentHub 只负责写文件，不启动托管服务。
 
+### deploy_workspace
+
+源文件：`src/server/tools/deploy-workspace.ts`
+
+**入参**：`{ path: string, title?: string, entry?: string }`
+
+**作用域**：只能部署当前会话 workspace effective cwd 内的目录。`path` 应指向已经构建好的静态输出目录，例如 `dist` / `build` / `out` / `client/dist` / `apps/web/dist`。工具只复制现有静态文件，不运行 `npm install`、`pnpm build`、dev server 或其它 build 命令；Agent 应先用 `bash` 完成构建并确认目录里有 HTML entry。
+
+**校验与限制**：
+- `path` 经过 `assertPathWithinWorkspace`，不能逃逸当前 workspace。
+- source 必须是目录，默认 entry 为 `index.html`，`entry` 显式传入时也必须是 HTML 文件。
+- 递归复制文件上限 2000 个 / 100 MB。
+- 跳过隐藏目录（`.well-known` 除外）、`.agenthub`、`.git`、`node_modules`，避免把私有元数据、仓库历史或依赖目录发布出去。
+
+**返回值**：`DeployStatusRecord`。成功记录带 `sourceType:'workspace'`、`workspacePath:<相对 effective cwd 的目录>`、`artifactId:'workspace:<workspacePath>'`、`version:0`。外部发布配置与 `deploy_artifact` 共用 `maybePublishExternally`，因此也可能返回 `deploymentType:'external_static'` 与 `publicUrl` / `localPreviewPath`。
+
+**典型流程**：
+1. `bash({ command: "pnpm build" })`
+2. `fs_read({ path: "dist/index.html" })` 或等价检查确认输出存在
+3. `deploy_workspace({ path: "dist", title: "前端构建预览" })`
+
+不要把源码根目录、`src/`、server 目录或 `node_modules` 传给 `deploy_workspace`。如果项目只能通过后端服务运行，当前工具不等于完整应用托管；需要先产出静态目录，或后续实现服务型部署。
+
 ### 确定性部署命令
 
 源文件：`src/server/deploy-command-service.ts`、`src/app/api/conversations/[id]/deploy/route.ts`
 
-用户发送精确命令 `部署` / `发布` / `上线` / `/deploy` 时，`conversation-service.sendMessage` 在 responder 选择前拦截，不启动 AgentRun。命令只作用于当前会话的 `web_app` artifacts：
+用户发送精确命令 `部署` / `发布` / `上线` / `/deploy` 时，`conversation-service.sendMessage` 在 responder 选择前拦截，不启动 AgentRun。命令优先作用于当前会话的 `web_app` artifacts；没有 artifact 候选时，再尝试常见 workspace 静态输出目录。
 
-- 0 个候选：插入 system text message，提示当前会话没有可部署网页产物。
+- 0 个 artifact 候选：按顺序查找 `dist` / `build` / `out` / `public` / `client/dist` / `client/build` / `client/out` / `apps/web/dist` / `apps/web/build` / `apps/web/out`，且目录必须包含 `index.html`。找到后复用 `deploy_workspace` 的会话级 helper 部署，并插入 `deploy_status` part。
+- 没有 artifact 且没有 workspace 静态输出目录：插入 system text message，提示当前会话没有可部署网页产物，也没有常见本地静态输出目录。
 - 1 个候选：复用 `deploy_artifact` 的会话级 helper 直接部署，并插入 `deploy_status` part。
 - 多个候选：插入 `deploy_candidates` part，让用户在 UI 中选择。选择后由 `POST /api/conversations/:id/deploy { artifactId }` 部署并插入 `deploy_status` part。
 
@@ -308,16 +333,21 @@ export const toolRegistry = buildRegistry()
 
 **流程**：
 1. 命中 `getBannedPatterns(currentPlatform())` 黑名单（POSIX / Windows 各一套，详见 Spec 11）→ 拒
-2. `child_process.spawn(shell.cmd, shell.args(command), { cwd: getEffectiveCwd(workspace), windowsHide: true })`
+2. 命中关键命令审批规则 → 注册 `PendingBashCommand`，发 `bash_command.pending` SSE，等待用户批准；拒绝则不执行命令并返回错误
+3. `child_process.spawn(shell.cmd, shell.args(command), { cwd: getEffectiveCwd(workspace), windowsHide: true })`
    - 跨平台 shell（详见 Spec 11 「Shell 选择」节）：
      - POSIX：`sh -c <command>`
-     - Windows：`powershell.exe -NoProfile -NonInteractive -Command "chcp 65001 > $null; <command>"`（用系统自带 PS 5.1，chcp 65001 强制 UTF-8 输出）
-3. stdout + stderr 合并截断 **10000 字符**
-4. **30s 超时**：进程清理走 `killProcessTree`
+     - Windows：`powershell.exe -NoProfile -NonInteractive -Command "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); <command>"`（用系统自带 PS 5.1，并强制 UTF-8 输出）
+4. stdout + stderr 合并截断 **10000 字符**
+5. **30s 超时**：进程清理走 `killProcessTree`
    - POSIX：`child.kill('SIGTERM')`
    - Windows：`taskkill /F /T /PID <pid>` 递归杀进程树（Node 的 SIGTERM 在 Windows 杀不到孙子进程）
-5. `ctx.abortSignal` 触发同样的 `killProcessTree`
-6. **不支持** stdin / 环境变量定制 / pty / TUI
+6. `ctx.abortSignal` 触发同样的 `killProcessTree`
+7. **不支持** stdin / 环境变量定制 / pty / TUI
+
+**需要审批但不直接禁止的命令**：安装 / 变更依赖（`npm|pnpm|yarn|bun install/add/remove/update/ci`、`npx`、`pnpm dlx`、`pip install`、`uv sync` 等）、可能丢弃本地修改的 git 命令（`git reset` / `git clean` / 覆盖当前目录的 `git checkout|restore`）、批量删除（`rm -rf`、`find -delete`）、权限 / owner 变更（`chmod` / `chown`）、Docker 运行 / 构建 / 镜像 / 网络 / volume 相关命令，以及 Windows 上 `Remove-Item -Recurse/-Force`。这些命令没有命中黑名单时由用户决定是否放行。
+
+**运行机制**：handler 注册 `PendingBashCommand`，通过 SSE 推 `bash_command.pending`；桌面端 `PendingBashCommandsPanel` 展示命令、cwd、Agent 与原因。用户批准 / 拒绝后 `pendingBashCommands.approve/reject()` 唤醒工具调用并发 `bash_command.resolved`；run abort 也会发 resolved 清掉 UI。pending 队列是进程内存单例，刷新页面时前端通过 `GET /api/conversations/[id]/pending-bash-commands` 兜底恢复。
 
 **工具 description 按平台变体**（详见 Spec 11 「工具描述按平台变体」节）：description 字段在模块加载时根据 `currentPlatform()` 拼接，POSIX 展示 sh 示例与 POSIX 黑名单文案，Windows 展示 PowerShell 示例与 Windows 黑名单文案。这是 LLM 选择命令语法的关键提示。
 
@@ -347,6 +377,22 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 ```
 
 **callId 串联**：`call_<nanoid>`，由 Adapter 在 tool.call 时分配，tool.result 必须带回相同 callId（用于前端合并 + LLM 的下一轮 turn）。
+
+---
+
+## 工具提示注入
+
+AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生成的 `AgentHub 工具调用规范`。这段提示只注入当前 run 实际可用的工具，避免让 LLM 调用不存在的能力。
+
+当 `workspace.mode === 'local'` 且 agent 具备 AgentHub 文件工具（`fs_read` / `fs_write` / `bash`）或 SDK 本地文件工具（Claude Code / Codex）时，会额外注入「本地项目模式」：
+
+- 用户要求创建 / 修改 / 初始化 / 调试 / 构建前后端项目或源码文件时，优先直接操作 workspace 文件。
+- Custom agent 使用 `fs_read` / `fs_write` / `bash`；SDK agent 使用各自内置 Read / Write / Edit / Bash / shell 工具。
+- 不要用 `write_artifact` 保存应该落盘的源码、`package.json`、`tsconfig`、`server/`、`client/` 或构建配置。
+- `write_artifact` 只用于用户明确要求 artifact / 可预览原型 / 独立 demo / 文档交接，或任务本身声明 artifact handoff。
+- 本地代码改动完成后优先运行 install / typecheck / build / test 等验证命令；无法运行时说明原因。
+
+如果当前是 local workspace 但 agent 没有文件/命令工具，提示会要求 agent 说明能力不足，而不是用 `write_artifact` 假装已经写入本地项目。
 
 ---
 
@@ -433,7 +479,7 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 
 **副作用**：sandbox 模式 quota（`SANDBOX_TOTAL_BYTES` / `SANDBOX_TOTAL_FILES`）对 Claude Code agent 失效（SDK 自己写盘绕过 quota 检查）。Claude Code agent 实际场景都是 `workspace.mode === 'local'`（绑真实项目），quota 不适用，可接受。
 
-**AgentHub MCP 工具**：Claude Code adapter 通过 SDK in-process MCP server 暴露 `write_artifact` / `read_artifact` / `deploy_artifact` / `ask_user` / `report_task_result`。其中 `write_artifact` 和 `deploy_artifact` 的结果会被 adapter 翻译为 `artifact.create` / `deploy.status`。
+**AgentHub MCP 工具**：Claude Code adapter 通过 SDK in-process MCP server 暴露 `write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`。其中 `write_artifact` 的结果会被 adapter 翻译为 `artifact.create`，`deploy_artifact` / `deploy_workspace` 的结果会被翻译为 `deploy.status`。
 
 ---
 
@@ -441,7 +487,7 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 
 `adapterName === 'codex'` 的 agent 不消费上面的「内置工具清单」。它通过 `@openai/codex-sdk` 暴露 Codex 自身的本地命令、文件变更、MCP、web search、todo/plan 等事件。
 
-AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`write_artifact` / `read_artifact` / `deploy_artifact` / `ask_user` / `report_task_result`。bridge 通过受保护的内部 API 调用 `toolRegistry`，不会把 `bash` / `fs_write` 等 AgentHub 工具开放给 Codex。
+AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`write_artifact` / `read_artifact` / `deploy_artifact` / `deploy_workspace` / `ask_user` / `report_task_result`。bridge 通过受保护的内部 API 调用 `toolRegistry`，不会把 `bash` / `fs_write` 等 AgentHub 工具开放给 Codex。
 
 **审批策略**：当前 Codex TypeScript SDK 没有 Claude `canUseTool` 等价 hook。AgentHub 因此不在 Review 模式下开放自动写盘：
 

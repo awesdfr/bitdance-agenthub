@@ -164,7 +164,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `GET /api/artifacts/:id/preview` 只服务 `web_app` artifact，返回 `text/html`，并设置 CSP sandbox / `nosniff` / `no-store`。前端 artifact 卡与 ArtifactPreviewPanel 顶部直接使用该实时预览路径。
 
-`deploy_artifact` 始终会生成本地静态发布目录：
+`deploy_artifact` 始终会从 `web_app` artifact 生成本地静态发布目录；`deploy_workspace` 则从 workspace 内已经构建好的静态目录复制文件到同一套发布目录结构：
 
 ```
 .agenthub-data/deployments/dep_xxx/
@@ -184,6 +184,8 @@ store.previewArtifactId → ArtifactPreviewPanel
   version: number,
   previewPath: '/deployments/dep_xxx',
   status: 'ready' | 'failed',
+  sourceType?: 'artifact' | 'workspace',
+  workspacePath?: 'dist',
   deploymentType?: 'local_static' | 'external_static',
   deploymentPath?: '/deployments/dep_xxx',
   localPreviewPath?: '/deployments/dep_xxx',
@@ -198,7 +200,9 @@ store.previewArtifactId → ArtifactPreviewPanel
 }
 ```
 
-若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。
+`sourceType='artifact'` 的记录来自聊天内 `web_app` artifact；`sourceType='workspace'` 的记录来自本地 workspace 静态输出目录，`artifactId` 使用 `workspace:<workspacePath>` 占位，`version` 固定为 `0`。
+
+若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。
 
 `summaryInstruction` 只给 Agent 看，用于约束最终文字总结：本地发布时不得自造公网域名；外部发布时只能引用结构化返回的 `previewPath` / `publicUrl`，不得改写成其它 URL。UI 展示仍以结构化部署卡片为准。
 

@@ -46,8 +46,8 @@ CodexAdapter MUST use `@openai/codex-sdk` `runStreamed()` rather than treating C
 
 Claude Code and Codex adapters MUST expose allowlisted AgentHub tools through adapter-owned MCP bridges rather than consuming per-agent `toolNames`.
 
-#### Scenario: Codex creates and deploys an artifact
-- **WHEN** Codex calls the AgentHub MCP `write_artifact` or `deploy_artifact` tool
+#### Scenario: Codex creates and deploys an artifact or workspace build
+- **WHEN** Codex calls the AgentHub MCP `write_artifact`, `deploy_artifact`, or `deploy_workspace` tool
 - **THEN** the adapter translates the MCP result into `artifact.create` or `deploy.status`.
 
 #### Scenario: SDK agent asks a structured user question

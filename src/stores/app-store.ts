@@ -9,6 +9,7 @@ import type {
   DispatchPlanItem,
   DispatchTaskStatus,
   MessagePart,
+  PendingBashCommand,
   PendingDispatchPlan,
   PendingQuestion,
   PendingWrite,
@@ -76,6 +77,9 @@ interface AppState {
   // ─── Agent fs_write 审批等待队列（按 conversationId 分桶）─
   pendingWritesByConv: Record<string, PendingWrite[]>
 
+  // ─── Agent bash 关键命令审批等待队列（按 conversationId 分桶）─
+  pendingBashCommandsByConv: Record<string, PendingBashCommand[]>
+
   // ─── Agent ask_user 结构化问答等待队列（按 conversationId 分桶）─
   pendingQuestionsByConv: Record<string, PendingQuestion[]>
 
@@ -135,6 +139,11 @@ interface AppState {
 
   setPendingWritesForConversation(conversationId: string, list: PendingWrite[]): void
 
+  setPendingBashCommandsForConversation(
+    conversationId: string,
+    list: PendingBashCommand[],
+  ): void
+
   setPendingQuestionsForConversation(conversationId: string, list: PendingQuestion[]): void
 
   setPendingDispatchPlansForConversation(
@@ -176,6 +185,7 @@ export const useAppStore = create<AppState>()(
     replyTargetByConv: {},
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
+    pendingBashCommandsByConv: {},
     pendingQuestionsByConv: {},
     unreadByConv: {},
     mobileSidebarOpen: false,
@@ -206,6 +216,9 @@ export const useAppStore = create<AppState>()(
         for (const mid of msgIds) delete s.messages[mid]
         delete s.messageIdsByConv[id]
         delete s.runsByConv[id]
+        delete s.pendingWritesByConv[id]
+        delete s.pendingBashCommandsByConv[id]
+        delete s.pendingQuestionsByConv[id]
         if (s.activeConversationId === id) s.activeConversationId = null
       }),
 
@@ -366,6 +379,7 @@ export const useAppStore = create<AppState>()(
         delete s.runsByConv[conversationId]
         delete s.replyTargetByConv[conversationId]
         delete s.pendingWritesByConv[conversationId]
+        delete s.pendingBashCommandsByConv[conversationId]
         delete s.pendingQuestionsByConv[conversationId]
         delete s.unreadByConv[conversationId]
         if (s.highlightedMessageId && messageIds.has(s.highlightedMessageId)) {
@@ -417,6 +431,12 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         if (list.length === 0) delete s.pendingWritesByConv[conversationId]
         else s.pendingWritesByConv[conversationId] = list
+      }),
+
+    setPendingBashCommandsForConversation: (conversationId, list) =>
+      set((s) => {
+        if (list.length === 0) delete s.pendingBashCommandsByConv[conversationId]
+        else s.pendingBashCommandsByConv[conversationId] = list
       }),
 
     setPendingQuestionsForConversation: (conversationId, list) =>
@@ -783,6 +803,22 @@ export const useAppStore = create<AppState>()(
             return
           }
 
+          case 'bash_command.pending': {
+            const list = s.pendingBashCommandsByConv[event.conversationId] ?? []
+            if (list.some((p) => p.id === event.pendingCommand.id)) return
+            s.pendingBashCommandsByConv[event.conversationId] = [...list, event.pendingCommand]
+            return
+          }
+
+          case 'bash_command.resolved': {
+            const list = s.pendingBashCommandsByConv[event.conversationId]
+            if (!list) return
+            const next = list.filter((p) => p.id !== event.pendingId)
+            if (next.length === 0) delete s.pendingBashCommandsByConv[event.conversationId]
+            else s.pendingBashCommandsByConv[event.conversationId] = next
+            return
+          }
+
           case 'ask_user.pending': {
             const list = s.pendingQuestionsByConv[event.conversationId] ?? []
             if (list.some((q) => q.id === event.pendingQuestion.id)) return
@@ -1056,6 +1092,14 @@ export const useActiveTab = (conversationId: string): string =>
 /** 该会话当前所有待审批的 fs_write（review 模式下 agent 想改文件，等用户决定）。 */
 export const usePendingWrites = (conversationId: string | null): PendingWrite[] =>
   useAppStore(useShallow((s) => (conversationId ? s.pendingWritesByConv[conversationId] ?? [] : [])))
+
+/** 该会话当前所有待审批的关键 bash 命令。 */
+export const usePendingBashCommands = (conversationId: string | null): PendingBashCommand[] =>
+  useAppStore(
+    useShallow((s) =>
+      conversationId ? s.pendingBashCommandsByConv[conversationId] ?? [] : [],
+    ),
+  )
 
 /** 该会话当前所有待回答的 ask_user（agent 通过结构化问答让用户选）。 */
 export const usePendingQuestions = (conversationId: string | null): PendingQuestion[] =>

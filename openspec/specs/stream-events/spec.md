@@ -57,9 +57,22 @@ Adapters SHALL emit `message.usage` and `run.usage` when provider usage data is 
 Adapters SHALL emit `deploy.status` when an AgentHub deploy tool finishes, and AgentRunner MUST convert that event into a `deploy_status` message part.
 
 #### Scenario: Deploy tool returns ready
-- **WHEN** `deploy_artifact` returns a ready deployment record
+- **WHEN** `deploy_artifact` or `deploy_workspace` returns a ready deployment record
 - **THEN** the adapter emits `deploy.status`
 - **AND** AgentRunner persists and publishes a `part.start` for `deploy_status`.
+
+### Requirement: Bash approval events SHALL drive pending command UI
+
+When a command approval gate is triggered, AgentHub MUST publish a pending command event and a resolved command event so all connected clients can render and clear the approval state.
+
+#### Scenario: Key command waits for approval
+- **WHEN** an agent requests a command that requires approval
+- **THEN** AgentHub publishes `bash_command.pending` with the command, cwd, agent id, run id, and reason.
+
+#### Scenario: Pending command is resolved
+- **WHEN** the user approves, rejects, or the run is aborted
+- **THEN** AgentHub publishes `bash_command.resolved`
+- **AND** frontend reducers remove that pending command id.
 
 ### Requirement: Errors SHALL be visible in conversation state
 

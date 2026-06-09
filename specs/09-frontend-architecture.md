@@ -59,6 +59,7 @@ interface AppState {
   replyTargetByConv: Record<string, string | null>           // 引用回复目标
   pendingAttachmentsByConv: Record<string, AttachmentRow[]>  // 待发送附件
   pendingWritesByConv: Record<string, PendingWrite[]>        // Agent fs_write 审批队列（review 模式）
+  pendingBashCommandsByConv: Record<string, PendingBashCommand[]> // Agent bash 关键命令审批队列
   highlightedMessageId: string | null                         // 跳转后短暂高亮
   streamConnected: boolean
 }
@@ -99,10 +100,14 @@ interface AppState {
 | `dispatch.end` | 优先通过 `parentRunId` 找 `dispatchesByRunId`，更新 `taskStatus[taskId]` 为 `complete` / `failed` / `aborted` / `skipped`；旧事件可用 `childRunId` 反查兜底 |
 | `fs_write.pending` | `pendingWritesByConv[convId].push(pendingWrite)`（已存在的 id 不重复 push） |
 | `fs_write.resolved` | 从 `pendingWritesByConv[convId]` 移除 `pendingId`；ChatPanel 的清理 effect 会同步关掉对应 `diff:<pwId>` tab |
+| `bash_command.pending` | `pendingBashCommandsByConv[convId].push(pendingCommand)`（已存在的 id 不重复 push） |
+| `bash_command.resolved` | 从 `pendingBashCommandsByConv[convId]` 移除 `pendingId` |
 
 **幂等性**：`message.start` / `run.start` 在 id 已存在时仍 idempotent（覆盖写）；`messageIdsByConv` 用 `includes` 检查防重复。这样支持事件重放（未来重连补发）。
 
-**部署卡片**：`DeployStatusPart` 根据 `DeployStatusRecord.deploymentType` 区分本地静态部署与外部静态发布。`external_static` 时，`previewPath` 是公开 URL，卡片必须继续提供打开 / 复制操作，并在 `localPreviewPath` 存在时显示本地回退路径。源码包 / 容器包下载仍来自本地 deployment id。
+**部署卡片**：`DeployStatusPart` 根据 `DeployStatusRecord.deploymentType` 区分本地静态部署与外部静态发布，根据 `sourceType` 区分 artifact 版本与 workspace 目录来源。`external_static` 时，`previewPath` 是公开 URL，卡片必须继续提供打开 / 复制操作，并在 `localPreviewPath` 存在时显示本地回退路径。源码包 / 容器包下载仍来自本地 deployment id。
+
+**bash 审批卡片**：`PendingBashCommandsPanel` 渲染当前会话 `pendingBashCommandsByConv`。卡片显示发起 Agent、命令、cwd 和审批原因，用户点击执行 / 拒绝后调用 `POST /api/conversations/:id/pending-bash-commands/:commandId`，最终通过 `bash_command.resolved` 清理 UI。
 
 **部署候选卡片**：`DeployCandidatesPart` 渲染 `deploy_candidates` message part。卡片列出当前会话多个 `web_app` 候选，每项显示标题、版本、创建 Agent、时间与 artifact id。点击候选的部署按钮调用 `POST /api/conversations/:id/deploy`，成功后把返回的 system message upsert 到 store；不通过 SSE，也不启动 AgentRun。
 

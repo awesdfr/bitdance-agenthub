@@ -1,9 +1,14 @@
+import { existsSync, statSync } from 'node:fs'
+import path from 'node:path'
+
 import { and, desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { MessageInsert, MessageRow } from '@/db/schema'
 import { newMessageId } from '@/server/ids'
 import { deployArtifactForConversation } from '@/server/tools/deploy-artifact'
+import { deployWorkspaceForConversation } from '@/server/tools/deploy-workspace'
+import { getEffectiveCwd } from '@/server/workspace-utils'
 import type { DeployCandidateRecord, DeployStatusRecord, MessagePart } from '@/shared/types'
 
 export interface DeployCommandIntent {
@@ -82,12 +87,19 @@ export async function handleDeployCommand(args: {
 
   switch (decision.kind) {
     case 'no_candidates': {
+      const workspaceDeploy = await deployFirstWorkspaceCandidate({
+        conversationId: args.conversationId,
+        afterCreatedAt: args.afterCreatedAt,
+      })
+      if (workspaceDeploy) return workspaceDeploy
+
       const message = await insertSystemMessage({
         conversationId: args.conversationId,
         parts: [
           {
             type: 'text',
-            content: '当前会话还没有可部署的网页产物。请先让 Agent 生成 web_app 产物，再发送部署命令。',
+            content:
+              '当前会话还没有可部署的网页产物，也没有找到常见的本地静态输出目录（dist/build/out/client/dist）。请先让 Agent 生成 web_app 产物，或构建本地项目后再部署。',
           },
         ],
         afterCreatedAt: args.afterCreatedAt,
@@ -109,6 +121,56 @@ export async function handleDeployCommand(args: {
         afterCreatedAt: args.afterCreatedAt,
       })
   }
+}
+
+async function deployFirstWorkspaceCandidate(args: {
+  conversationId: string
+  afterCreatedAt?: number
+}): Promise<Extract<DeployCommandResult, { kind: 'deployed' }> | null> {
+  const candidate = await findWorkspaceDeployCandidate(args.conversationId)
+  if (!candidate) return null
+
+  const deployment = await deployWorkspaceForConversation(args.conversationId, {
+    path: candidate.path,
+    title: candidate.title,
+  })
+  const message = await insertSystemMessage({
+    conversationId: args.conversationId,
+    parts: [{ type: 'deploy_status', deployment }],
+    afterCreatedAt: args.afterCreatedAt,
+  })
+  return { kind: 'deployed', deployment, message }
+}
+
+const WORKSPACE_DEPLOY_CANDIDATES = [
+  'dist',
+  'build',
+  'out',
+  'public',
+  'client/dist',
+  'client/build',
+  'client/out',
+  'apps/web/dist',
+  'apps/web/build',
+  'apps/web/out',
+]
+
+async function findWorkspaceDeployCandidate(
+  conversationId: string,
+): Promise<{ path: string; title: string } | null> {
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.conversationId, conversationId),
+  })
+  if (!workspace) return null
+  const cwd = getEffectiveCwd(workspace)
+  for (const relPath of WORKSPACE_DEPLOY_CANDIDATES) {
+    const absPath = path.resolve(cwd, relPath)
+    const stat = statSync(absPath, { throwIfNoEntry: false })
+    if (!stat?.isDirectory()) continue
+    if (!existsSync(path.join(absPath, 'index.html'))) continue
+    return { path: relPath, title: `Workspace ${relPath}` }
+  }
+  return null
 }
 
 export async function deploySelectedArtifact(args: {

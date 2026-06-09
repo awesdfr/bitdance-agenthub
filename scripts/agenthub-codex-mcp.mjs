@@ -61,6 +61,20 @@ server.registerTool(
 )
 
 server.registerTool(
+  'deploy_workspace',
+  {
+    description:
+      'Create a deployment card from an existing static output directory inside the current workspace, such as dist, build, out, or client/dist. Use this after building a local project. It copies files only and does not run build commands.',
+    inputSchema: {
+      path: z.string(),
+      title: z.string().optional(),
+      entry: z.string().optional(),
+    },
+  },
+  async (args) => callAgentHubTool('deploy_workspace', args),
+)
+
+server.registerTool(
   'ask_user',
   {
     description:

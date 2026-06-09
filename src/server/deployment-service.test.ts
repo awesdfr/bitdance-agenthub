@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -11,6 +11,7 @@ import {
   buildDeploymentContainerZip,
   buildDeploymentSourceZip,
   createLocalStaticDeployment,
+  createWorkspaceStaticDeployment,
   publishDeploymentToStaticDirectory,
   readDeploymentAsset,
 } from './deployment-service'
@@ -160,6 +161,52 @@ describe('deployment-service', () => {
     expect(await containerZip.file('Dockerfile')?.async('string')).toContain('FROM nginx')
     expect(await containerZip.file('nginx.conf')?.async('string')).toContain('try_files')
     expect(await containerZip.file('app/index.html')?.async('string')).toContain('body { color: red; }')
+  })
+
+  it('materializes a workspace static directory deployment', async () => {
+    const dataDir = tempDataDir()
+    const workspaceDir = tempDataDir()
+    const sourceDir = path.join(workspaceDir, 'dist')
+    mkdirSync(path.join(sourceDir, 'assets'), { recursive: true })
+    mkdirSync(path.join(sourceDir, '.git'), { recursive: true })
+    writeFileSync(path.join(sourceDir, 'index.html'), '<main>workspace</main>', 'utf8')
+    writeFileSync(path.join(sourceDir, 'assets', 'app.js'), 'document.body.dataset.app = "1"', 'utf8')
+    writeFileSync(path.join(sourceDir, '.git', 'config'), 'private', 'utf8')
+
+    const record = createWorkspaceStaticDeployment({
+      id: 'dep_workspace123',
+      title: 'Workspace Build',
+      sourceDir,
+      workspacePath: 'dist',
+      createdAt: 456,
+      dataDir,
+    })
+
+    expect(record).toMatchObject({
+      id: 'dep_workspace123',
+      artifactId: 'workspace:dist',
+      title: 'Workspace Build',
+      version: 0,
+      previewPath: '/deployments/dep_workspace123',
+      deploymentType: 'local_static',
+      sourceType: 'workspace',
+      workspacePath: 'dist',
+      status: 'ready',
+      createdAt: 456,
+    })
+
+    const deploymentDir = path.join(dataDir, 'deployments', 'dep_workspace123')
+    expect(readFileSync(path.join(deploymentDir, 'index.html'), 'utf8')).toContain('workspace')
+    expect(readFileSync(path.join(deploymentDir, 'assets', 'app.js'), 'utf8')).toContain('dataset.app')
+    expect(existsSync(path.join(deploymentDir, '.git'))).toBe(false)
+
+    const source = await buildDeploymentSourceZip('dep_workspace123', { dataDir })
+    expect(source).not.toBeNull()
+    if (!source) throw new Error('source zip missing')
+    const sourceZip = await JSZip.loadAsync(source.body)
+    expect(await sourceZip.file('index.html')?.async('string')).toContain('workspace')
+    expect(sourceZip.file('.git/config')).toBeNull()
+    expect(await sourceZip.file('README.txt')?.async('string')).toContain('Source path: dist')
   })
 
   it('publishes public deployment files to a configured static directory', () => {

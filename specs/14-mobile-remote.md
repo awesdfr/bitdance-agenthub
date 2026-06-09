@@ -330,7 +330,7 @@ Tab 4: 设置
 - 审批按钮必须大且明确，拒绝和批准视觉区分。
 - Auto 写入模式只能查看，不建议移动端切换；如要切换必须二次确认。
 - artifact_ref 在消息里渲染为可点击产物卡片，点开后用底部 sheet 预览；web_app 默认用 `sandbox="allow-scripts"` iframe，源码视图只读；document 用 Markdown 只读渲染；image 等比预览。
-- `deploy_status` message part 在 mobile DTO 中降级为 inline chip，显示 ready/failed、标题、版本和失败原因；移动端不执行桌面工具，只展示桌面端生成的 previewPath。
+- `deploy_status` message part 在 mobile DTO 中降级为 inline chip，显示 ready/failed、标题、artifact 版本或 workspace 路径、失败原因；移动端不执行桌面工具，只展示桌面端生成的 previewPath。
 - 长文本和 diff 要支持横向滚动、行号、复制。
 
 ---

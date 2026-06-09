@@ -82,7 +82,7 @@ export async function buildHistoryFor(
 收集：
 - `text` / `code` → 拼到 assistant content
 - `artifact_ref` → 折叠 `[产物: <title> (id=<artifactId>)]` 文本（需要从 artifacts 表 join 出 title；title 拿不到时退化为 `[产物 art_xxx]`）
-- `deploy_status` → 折叠 `[部署预览: <title> vN (<previewPath>)]` 或 `[部署失败: ...]`
+- `deploy_status` → artifact 来源折叠 `[部署预览: <title> vN (<previewPath>)]`，workspace 来源折叠 `[部署预览: <title> workspace=<path> (<previewPath>)]`，失败时折叠 `[部署失败: ...]`
 
 输出（按 OpenAI schema）：
 

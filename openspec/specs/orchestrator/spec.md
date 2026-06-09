@@ -28,6 +28,12 @@ The orchestration flow MUST produce a compiled and validated task plan before la
 - **THEN** AgentRunner adds high-confidence inferred dependencies before dispatch
 - **AND** publishes and executes the compiled plan.
 
+#### Scenario: Local workspace code project is requested
+- **WHEN** the conversation workspace is local
+- **AND** the user asks to create, modify, initialize, debug, or build project source files
+- **THEN** the plan prompt tells the orchestrator to prefer agents with file/command tools
+- **AND** the plan should use `acceptanceCriteria` for local file and command outcomes instead of `expectedOutputs`.
+
 ### Requirement: Child tasks SHALL respect dependency order and semantic reports
 
 AgentRunner MUST execute dispatch tasks as a DAG and skip dependent tasks when prerequisites fail, required inputs cannot be resolved, or the child task does not report a successful semantic outcome.

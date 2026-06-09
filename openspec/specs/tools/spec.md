@@ -30,6 +30,16 @@ The bash tool MUST reject commands that match the platform-specific banned patte
 - **WHEN** the command matches `rm -rf /`
 - **THEN** the tool refuses to run it.
 
+### Requirement: Key bash commands SHALL require user approval
+
+AgentHub MUST require explicit user approval before executing bash commands that are not banned but can materially change dependencies, discard files, or affect host-level runtime state. This approval gate MUST apply to AgentHub's `bash` tool and SDK command hooks where the adapter exposes a pre-execution permission callback.
+
+#### Scenario: Agent installs dependencies
+- **WHEN** an agent requests `pnpm install`
+- **THEN** AgentHub records a pending bash command
+- **AND** emits it through the conversation event stream
+- **AND** executes the command only after user approval.
+
 ### Requirement: Review mode SHALL require write approval
 
 In review mode, file write effects managed by AgentHub MUST create pending approvals instead of directly mutating workspace files.
@@ -61,6 +71,12 @@ AgentHub MUST append usage guidance and concrete examples for the AgentHub-manag
 - **WHEN** a Claude Code or Codex run is built
 - **THEN** the injected guidance includes the allowlisted AgentHub MCP tools exposed by that adapter
 - **AND** examples use the exact camelCase argument names accepted by the tool schemas.
+
+#### Scenario: Local workspace code task has file tools
+- **WHEN** a run is built for a local workspace
+- **AND** the agent has AgentHub file tools or SDK local file tools
+- **THEN** the injected guidance tells the agent to prefer direct workspace file/command tools for project source work
+- **AND** tells the agent not to use `write_artifact` for source files that should be written to disk.
 
 ### Requirement: Agents SHALL be able to ask structured user questions
 
@@ -96,6 +112,21 @@ AgentHub MUST provide a `deploy_artifact` tool that accepts a web app artifact i
 #### Scenario: Agent deploys a non-web artifact
 - **WHEN** `deploy_artifact` receives a document, image, or missing artifact id
 - **THEN** it returns a failed deployment record with a user-visible reason.
+
+### Requirement: Workspace static directories SHALL be deployable to preview URLs
+
+AgentHub MUST provide a `deploy_workspace` tool that accepts a static output directory inside the current workspace and returns a deployment status record. The tool MUST copy existing static files only; it MUST NOT run build commands. Workspace deployments MUST enforce workspace path isolation, reject missing or non-directory sources, require an HTML entry file, and exclude private or dependency directories such as `.agenthub`, `.git`, and `node_modules`.
+
+#### Scenario: Agent deploys a built local project
+- **WHEN** `deploy_workspace` receives `path="dist"` and `dist/index.html` exists inside the conversation workspace
+- **THEN** it creates a ready deployment record
+- **AND** the record has `sourceType="workspace"` and `workspacePath="dist"`.
+
+#### Scenario: Slash deploy has no artifact candidates
+- **WHEN** a user sends `/deploy`
+- **AND** the conversation has no `web_app` artifact candidates
+- **AND** a common static output directory such as `dist`, `build`, `out`, or `client/dist` exists with `index.html`
+- **THEN** AgentHub deploys that workspace directory and inserts a `deploy_status` message part.
 
 ### Requirement: Child tasks SHALL report semantic task outcomes
 

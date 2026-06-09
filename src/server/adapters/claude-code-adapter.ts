@@ -8,11 +8,13 @@ import {
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
+import { classifyBashApproval, waitForBashApproval } from '@/server/bash-command-approval'
 import { db, schema } from '@/db/client'
 import type { WorkspaceRow } from '@/db/schema'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
 import { pendingWrites } from '@/server/pending-writes'
+import { currentPlatform } from '@/server/platform'
 import { findBannedPattern } from '@/server/security'
 import { REPORT_TASK_RESULT_TOOL_NAME } from '@/server/task-result-report'
 import { toolRegistry } from '@/server/tools/registry'
@@ -103,7 +105,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     const agenthubMcpServer = createSdkMcpServer({
       name: 'agenthub',
       version: '1.0.0',
-      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片），用 read_artifact 读其他 Agent 的产物，用 deploy_artifact 为 web_app 生成本地预览路径。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。deploy_artifact 返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
+      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片），用 read_artifact 读其他 Agent 的产物，用 deploy_artifact 为 web_app artifact 生成本地预览路径，用 deploy_workspace 为当前 workspace 内 dist/build/out 等静态目录生成部署卡。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。部署工具返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
       tools: [
         tool(
           'write_artifact',
@@ -161,6 +163,27 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
           { artifactId: z.string() },
           async (args) => {
             const result = await toolRegistry.execute('deploy_artifact', args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
+            }
+          },
+        ),
+        tool(
+          'deploy_workspace',
+          'Create a deployment card from an existing static output directory inside the current workspace, such as dist, build, out, or client/dist. Use this after building a local project. It copies files only; it does not run build commands.',
+          {
+            path: z.string(),
+            title: z.string().optional(),
+            entry: z.string().optional(),
+          },
+          async (args) => {
+            const result = await toolRegistry.execute('deploy_workspace', args, toolCtx)
             if (!result.ok) {
               return {
                 content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
@@ -399,7 +422,9 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               if (
                 !block.is_error &&
                 (toolName === 'mcp__agenthub__deploy_artifact' ||
-                  toolName.endsWith('__deploy_artifact'))
+                  toolName.endsWith('__deploy_artifact') ||
+                  toolName === 'mcp__agenthub__deploy_workspace' ||
+                  toolName.endsWith('__deploy_workspace'))
               ) {
                 const deployment = parseDeploymentFromMcpResult(block.content)
                 if (deployment) {
@@ -608,6 +633,19 @@ async function bridgePermission(
     const banned = findBannedPattern(cmd)
     if (banned) {
       return deny(`Command blocked by safety policy (matches ${banned}): ${cmd.slice(0, 100)}`)
+    }
+    const approval = classifyBashApproval(cmd, currentPlatform())
+    if (approval.required) {
+      const approved = await waitForBashApproval({
+        conversationId: ctx.input.conversationId,
+        agentId: ctx.input.agentId,
+        runId: ctx.input.runId,
+        command: cmd,
+        cwd: getEffectiveCwd(ctx.workspace),
+        reason: approval.reason,
+        signal: ctx.signal,
+      })
+      if (!approved) return deny(`User rejected command execution: ${approval.reason}`)
     }
     return allow()
   }

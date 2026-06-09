@@ -18,7 +18,7 @@ import {
   getEffectiveApiKey,
 } from '@/server/settings-service'
 import { estimateTokens } from '@/shared/model-registry'
-import type { MessagePart, ModelProvider } from '@/shared/types'
+import type { DeployStatusRecord, MessagePart, ModelProvider } from '@/shared/types'
 
 const RECENT_MESSAGES_TO_KEEP = 6
 const MAX_RENDERED_MESSAGE_CHARS = 4000
@@ -263,7 +263,7 @@ function renderPublicParts(
       case 'deploy_status':
         if (part.deployment.status === 'ready') {
           out.push(
-            `[deployment: ${part.deployment.title} v${part.deployment.version} (${part.deployment.previewPath})]`,
+            `[deployment: ${part.deployment.title} ${formatDeploymentSourceLabel(part.deployment)} (${part.deployment.previewPath})]`,
           )
         } else {
           out.push(`[deployment failed: ${part.deployment.title} (${part.deployment.error ?? 'unknown error'})]`)
@@ -280,6 +280,13 @@ function renderPublicParts(
     }
   }
   return out.join('\n').trim()
+}
+
+function formatDeploymentSourceLabel(deployment: DeployStatusRecord): string {
+  if (deployment.sourceType === 'workspace') {
+    return `workspace=${deployment.workspacePath ?? 'unknown'}`
+  }
+  return `v${deployment.version}`
 }
 
 function collectArtifactIds(messages: MessageRow[]): string[] {

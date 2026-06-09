@@ -37,7 +37,7 @@
 | `modelId` | string | — | provider 默认 | 切换 provider 时自动重置 |
 | `apiKey` | string | — | `''` | 命名 provider 留空走 env var；`openai-compatible` 必填 per-agent key |
 | `apiBaseUrl` | string | — | `''` | Claude Code 可填 Anthropic 兼容 endpoint；Codex 仅可填 Codex/Responses 兼容 endpoint；Custom `openai-compatible` 必填 Chat Completions 兼容 endpoint |
-| `toolNames` | string[] | — | 默认产物工具 + `ask_user` | 当前可勾选：`write_artifact` / `deploy_artifact` / `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `fs_write` / `bash` |
+| `toolNames` | string[] | — | 全栈通用预设 | 当前可勾选：`write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `fs_write` / `bash` |
 | `supportsVision` | boolean | — | `true` | 决定是否把图片 base64 注入 messages |
 | `avatar` | string | — | `'🤖'` | service 层默认（UI 当前不暴露） |
 | `isBuiltin` | boolean | — | `false` | service 写死，UI 不可改 |
@@ -105,12 +105,21 @@ Custom provider 实现在 `custom-provider-client.ts` 的 `resolveCustomProvider
 源：`create-agent-dialog.tsx:35`
 
 ```typescript
-const AVAILABLE_TOOLS = ['write_artifact', 'deploy_artifact', 'read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'fs_write', 'bash'] as const
+const AVAILABLE_TOOLS = ['write_artifact', 'deploy_artifact', 'deploy_workspace', 'read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'fs_write', 'bash'] as const
 ```
 
 UI 当前允许勾选产物、附件和 workspace 相关常用工具。`plan_tasks` 不在列表里 —— 因为它是 Orchestrator 专用，自建 agent 不应装备。
 
 每个勾选项展示面向用户的中文 label + 一句权限说明 + 原始工具名（来自同文件的 `TOOL_META`），而不是只露裸工具名。
+
+工具区提供 4 个一键预设：
+
+| 预设 | 工具 | 用途 |
+|---|---|---|
+| 全栈通用 | 全部 `AVAILABLE_TOOLS` | 默认；既能创建 artifact，也能直接读写本地 workspace 并运行命令 |
+| 本地代码 | `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `fs_write` / `bash` | 读取上游产物，直接在当前 workspace 初始化、修改、验证项目源码，并部署已构建静态目录 |
+| 产物交付 | `write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` | PRD、设计稿、网页原型、文档等聊天内交付；也可发布已有 workspace 静态目录 |
+| 审查验证 | `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `bash` | 读取产物或本地代码并运行检查，不默认写文件 |
 
 **新增工具时**：除了在 `src/server/tools/registry.ts` 注册，还要在这里 `AVAILABLE_TOOLS` 加上、并在 `TOOL_META` 补一条文案，才能在 UI 正常勾选（详见 Spec 07 「新增工具步骤」）。
 

@@ -48,6 +48,7 @@ const CODEX_DEFAULT_MODEL = 'gpt-5-codex'
 const AVAILABLE_TOOLS = [
   'write_artifact',
   'deploy_artifact',
+  'deploy_workspace',
   'read_artifact',
   'read_attachment',
   'ask_user',
@@ -55,13 +56,40 @@ const AVAILABLE_TOOLS = [
   'fs_write',
   'bash',
 ] as const
-const DEFAULT_CUSTOM_TOOLS = [
-  'write_artifact',
-  'deploy_artifact',
-  'read_artifact',
-  'read_attachment',
-  'ask_user',
-] as const
+type ToolName = (typeof AVAILABLE_TOOLS)[number]
+
+const TOOL_PRESETS: Array<{
+  id: string
+  label: string
+  desc: string
+  tools: readonly ToolName[]
+}> = [
+  {
+    id: 'all-purpose',
+    label: '全栈通用',
+    desc: '本地代码 + artifact 交付',
+    tools: AVAILABLE_TOOLS,
+  },
+  {
+    id: 'local-code',
+    label: '本地代码',
+    desc: '读写 workspace 并运行命令',
+    tools: ['deploy_workspace', 'read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'fs_write', 'bash'],
+  },
+  {
+    id: 'artifact',
+    label: '产物交付',
+    desc: '网页、文档、原型卡片',
+    tools: ['write_artifact', 'deploy_artifact', 'deploy_workspace', 'read_artifact', 'read_attachment', 'ask_user'],
+  },
+  {
+    id: 'review',
+    label: '审查验证',
+    desc: '读取产物/文件并跑检查',
+    tools: ['read_artifact', 'read_attachment', 'ask_user', 'fs_read', 'bash'],
+  },
+]
+const DEFAULT_CUSTOM_TOOLS = TOOL_PRESETS[0].tools
 
 // 工具勾选项的「面向用户」文案：label 讲它能做什么，desc 讲授予的权限边界。
 // 新增工具时记得在这里补一条（详见 specs/10-agent-builder.md「工具勾选」）。
@@ -71,6 +99,7 @@ const TOOL_META: Record<
 > = {
   write_artifact: { label: '创建产物', desc: '生成可预览的代码 / 网页 / 文档 / PPT，支持多版本迭代' },
   deploy_artifact: { label: '部署网页', desc: '把网页产物发布为本地静态站点，生成预览链接与下载包' },
+  deploy_workspace: { label: '部署目录', desc: '把工作区内 dist/build/out 等静态目录生成预览链接与下载包' },
   read_artifact: { label: '读取产物', desc: '查看会话中已有产物的完整内容，便于在其基础上继续改' },
   read_attachment: { label: '读取附件', desc: '读取用户上传的文本 / 文件附件内容' },
   ask_user: { label: '结构化提问', desc: '让用户在明确选项中选择，用于范围、风格、平台等关键澄清' },
@@ -186,6 +215,13 @@ export function CreateAgentDialog({
       return next
     })
   }
+
+  const applyToolPreset = (tools: readonly ToolName[]) => {
+    setToolNames(new Set(tools))
+  }
+
+  const isPresetActive = (tools: readonly ToolName[]) =>
+    toolNames.size === tools.length && tools.every((toolName) => toolNames.has(toolName))
 
   const submit = async () => {
     if (submitting) return
@@ -579,7 +615,28 @@ export function CreateAgentDialog({
                 {adapterKind === 'custom' ? (
                   <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                     <Label>工具集</Label>
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {TOOL_PRESETS.map((preset) => {
+                          const active = isPresetActive(preset.tools)
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => applyToolPreset(preset.tools)}
+                              className={cn(
+                                'rounded-md border px-2.5 py-2 text-left transition hover:border-foreground/30',
+                                active && 'border-primary bg-primary/5',
+                              )}
+                            >
+                              <div className="text-xs font-medium">{preset.label}</div>
+                              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                                {preset.desc}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
                       {AVAILABLE_TOOLS.map((t) => {
                         const meta = TOOL_META[t]
                         return (

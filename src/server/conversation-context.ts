@@ -4,7 +4,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { db, schema } from '@/db/client'
 import type { AgentRow, ArtifactRow, MessageRow } from '@/db/schema'
 import { estimateTokens } from '@/shared/model-registry'
-import type { MessagePart } from '@/shared/types'
+import type { DeployStatusRecord, MessagePart } from '@/shared/types'
 
 import {
   getLatestContextSummary,
@@ -278,7 +278,7 @@ function renderAgentPublicText(
       case 'deploy_status':
         if (p.deployment.status === 'ready') {
           buf.push(
-            `[部署预览: ${p.deployment.title} v${p.deployment.version} (${p.deployment.previewPath})]`,
+            `[部署预览: ${p.deployment.title} ${formatDeploymentSourceLabel(p.deployment)} (${p.deployment.previewPath})]`,
           )
         } else {
           buf.push(`[部署失败: ${p.deployment.title} (${p.deployment.error ?? 'unknown error'})]`)
@@ -290,6 +290,13 @@ function renderAgentPublicText(
     }
   }
   return buf.join('\n').trim()
+}
+
+function formatDeploymentSourceLabel(deployment: DeployStatusRecord): string {
+  if (deployment.sourceType === 'workspace') {
+    return `workspace=${deployment.workspacePath ?? 'unknown'}`
+  }
+  return `v${deployment.version}`
 }
 
 // ─── 批量取 artifact title ───────────────────────────────

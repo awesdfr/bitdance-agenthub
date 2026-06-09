@@ -26,6 +26,8 @@ export interface DeploymentManifest {
   sourceEntry: string
   runtimeEntry: string
   sourceFiles: string[]
+  sourceType?: 'artifact' | 'workspace'
+  workspacePath?: string
 }
 
 interface DeploymentOptions {
@@ -50,6 +52,15 @@ interface CreateLocalStaticDeploymentArgs extends DeploymentOptions {
   title: string
   version: number
   content: Extract<ArtifactContent, { type: 'web_app' }>
+  createdAt?: number
+}
+
+interface CreateWorkspaceStaticDeploymentArgs extends DeploymentOptions {
+  id: string
+  title: string
+  sourceDir: string
+  workspacePath: string
+  entry?: string
   createdAt?: number
 }
 
@@ -94,6 +105,7 @@ export function createLocalStaticDeployment(
     sourceEntry,
     runtimeEntry: RUNTIME_ENTRY,
     sourceFiles,
+    sourceType: 'artifact',
   }
 
   try {
@@ -129,6 +141,79 @@ export function createLocalStaticDeployment(
     summaryInstruction: DEPLOYMENT_SUMMARY_INSTRUCTION,
     status: 'ready',
     createdAt,
+    sourceType: 'artifact',
+  }
+}
+
+export function createWorkspaceStaticDeployment(
+  args: CreateWorkspaceStaticDeploymentArgs,
+): DeployStatusRecord {
+  assertDeploymentId(args.id)
+
+  const sourceStat = statSync(args.sourceDir, { throwIfNoEntry: false })
+  if (!sourceStat?.isDirectory()) {
+    throw new Error(`Workspace deployment source is not a directory: ${args.workspacePath}`)
+  }
+
+  const dataDir = getAgentHubDataDir(args)
+  const deploymentsRoot = getDeploymentsRoot({ dataDir })
+  const deploymentDir = getDeploymentDir(args.id, { dataDir })
+  if (existsSync(deploymentDir)) {
+    throw new Error(`Deployment already exists: ${args.id}`)
+  }
+
+  const createdAt = args.createdAt ?? Date.now()
+  const sourceFiles = listWorkspaceStaticFiles(args.sourceDir)
+  const sourceEntry = resolveWorkspaceEntry(args.entry, sourceFiles)
+  const manifest: DeploymentManifest = {
+    id: args.id,
+    artifactId: `workspace:${args.workspacePath}`,
+    title: args.title,
+    version: 0,
+    deploymentType: 'local_static',
+    createdAt,
+    sourceEntry,
+    runtimeEntry: RUNTIME_ENTRY,
+    sourceFiles,
+    sourceType: 'workspace',
+    workspacePath: args.workspacePath,
+  }
+
+  try {
+    mkdirSync(deploymentDir, { recursive: true })
+
+    for (const file of sourceFiles) {
+      const source = path.join(args.sourceDir, ...file.split('/'))
+      const body = readFileSync(source)
+      writeBinaryFileWithin(deploymentDir, path.posix.join(SOURCE_ROOT, file), body)
+      writeBinaryFileWithin(deploymentDir, file, body)
+    }
+
+    if (sourceEntry !== RUNTIME_ENTRY) {
+      const runtimeHtml = readFileSync(path.join(args.sourceDir, ...sourceEntry.split('/')))
+      writeBinaryFileWithin(deploymentDir, RUNTIME_ENTRY, runtimeHtml)
+    }
+    writeTextFileWithin(deploymentDir, MANIFEST_PATH, JSON.stringify(manifest, null, 2))
+  } catch (error) {
+    cleanupPartialDeployment(deploymentDir, deploymentsRoot)
+    throw error
+  }
+
+  return {
+    id: args.id,
+    artifactId: manifest.artifactId,
+    title: args.title,
+    version: 0,
+    previewPath: deploymentPreviewPath(args.id),
+    deploymentType: 'local_static',
+    deploymentPath: deploymentPreviewPath(args.id),
+    sourceDownloadPath: deploymentDownloadPath(args.id, 'source'),
+    containerDownloadPath: deploymentDownloadPath(args.id, 'container'),
+    summaryInstruction: DEPLOYMENT_SUMMARY_INSTRUCTION,
+    status: 'ready',
+    createdAt,
+    sourceType: 'workspace',
+    workspacePath: args.workspacePath,
   }
 }
 
@@ -371,6 +456,12 @@ function writeTextFileWithin(root: string, relativePath: string, body: string): 
   writeFileSync(absPath, body, 'utf8')
 }
 
+function writeBinaryFileWithin(root: string, relativePath: string, body: Buffer): void {
+  const absPath = safeJoinDeploymentPath(root, relativePath)
+  mkdirSync(path.dirname(absPath), { recursive: true })
+  writeFileSync(absPath, body)
+}
+
 function safeJoinDeploymentPath(root: string, relativePath: string): string {
   const normalized = normalizeDeploymentFilePath(relativePath)
   if (!normalized && relativePath !== MANIFEST_PATH && !relativePath.startsWith(`${SOURCE_ROOT}/`)) {
@@ -403,6 +494,52 @@ function listPublicDeploymentFiles(root: string, relativeDir = ''): string[] {
     }
   }
   return out.sort()
+}
+
+const WORKSPACE_DEPLOY_MAX_FILES = 2000
+const WORKSPACE_DEPLOY_MAX_BYTES = 100 * 1024 * 1024
+const WORKSPACE_DEPLOY_IGNORED_DIRS = new Set(['.agenthub', '.git', 'node_modules'])
+
+function listWorkspaceStaticFiles(sourceDir: string, relativeDir = '', acc = { files: 0, bytes: 0 }): string[] {
+  const absDir = relativeDir ? path.join(sourceDir, ...relativeDir.split('/')) : sourceDir
+  const out: string[] = []
+  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') && entry.name !== '.well-known') continue
+    if (entry.isDirectory() && WORKSPACE_DEPLOY_IGNORED_DIRS.has(entry.name)) continue
+    const rel = relativeDir ? path.posix.join(relativeDir, entry.name) : entry.name
+    const normalized = normalizeDeploymentFilePath(rel)
+    if (!normalized) continue
+    const absPath = path.join(sourceDir, ...normalized.split('/'))
+    if (entry.isDirectory()) {
+      out.push(...listWorkspaceStaticFiles(sourceDir, normalized, acc))
+      continue
+    }
+    if (!entry.isFile()) continue
+    const size = statSync(absPath).size
+    acc.files += 1
+    acc.bytes += size
+    if (acc.files > WORKSPACE_DEPLOY_MAX_FILES) {
+      throw new Error(`Workspace deployment has too many files (>${WORKSPACE_DEPLOY_MAX_FILES})`)
+    }
+    if (acc.bytes > WORKSPACE_DEPLOY_MAX_BYTES) {
+      throw new Error(`Workspace deployment is too large (>${Math.round(WORKSPACE_DEPLOY_MAX_BYTES / 1024 / 1024)}MB)`)
+    }
+    out.push(normalized)
+  }
+  return out.sort()
+}
+
+function resolveWorkspaceEntry(entry: string | undefined, files: string[]): string {
+  const raw = entry?.trim() || RUNTIME_ENTRY
+  const normalized = normalizeDeploymentFilePath(raw)
+  if (!normalized) throw new Error(`Unsafe workspace deployment entry path: ${raw}`)
+  if (!files.includes(normalized)) {
+    throw new Error(`Workspace deployment entry not found: ${normalized}`)
+  }
+  if (!normalized.toLowerCase().endsWith('.html')) {
+    throw new Error(`Workspace deployment entry must be an HTML file: ${normalized}`)
+  }
+  return normalized
 }
 
 function contentTypeFor(filePath: string): string {
@@ -466,6 +603,18 @@ function responseHeadersFor(contentType: string): Record<string, string> {
 }
 
 function sourceReadme(manifest: DeploymentManifest): string {
+  if (manifest.sourceType === 'workspace') {
+    return [
+      `Workspace deployment: ${manifest.title}`,
+      `Source path: ${manifest.workspacePath ?? '(unknown)'}`,
+      `Deployment: ${manifest.id}`,
+      `Entry: ${manifest.sourceEntry}`,
+      '',
+      'This ZIP contains files copied from a workspace static output directory.',
+      `Generated at: ${new Date(manifest.createdAt).toISOString()}`,
+      '',
+    ].join('\n')
+  }
   return [
     `Artifact: ${manifest.title}`,
     `Version: v${manifest.version}`,
@@ -480,8 +629,8 @@ function sourceReadme(manifest: DeploymentManifest): string {
 
 function containerReadme(manifest: DeploymentManifest): string {
   return [
-    `Artifact: ${manifest.title}`,
-    `Version: v${manifest.version}`,
+    `${manifest.sourceType === 'workspace' ? 'Workspace deployment' : 'Artifact'}: ${manifest.title}`,
+    manifest.sourceType === 'workspace' ? `Source path: ${manifest.workspacePath ?? '(unknown)'}` : `Version: v${manifest.version}`,
     `Deployment: ${manifest.id}`,
     '',
     'Build and run:',

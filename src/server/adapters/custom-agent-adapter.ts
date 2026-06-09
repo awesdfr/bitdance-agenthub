@@ -303,7 +303,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           }
         }
 
-        if (tc.name === 'deploy_artifact' && result.ok && isDeployStatusRecord(value)) {
+        if (
+          (tc.name === 'deploy_artifact' || tc.name === 'deploy_workspace') &&
+          result.ok &&
+          isDeployStatusRecord(value)
+        ) {
           yield baseEvent(input, {
             type: 'deploy.status',
             messageId,

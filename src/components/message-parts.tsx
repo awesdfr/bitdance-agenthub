@@ -645,6 +645,10 @@ function DeployStatusPart({
   const fallbackPreviewPath = deployment.localPreviewPath
   const fallbackPreviewUrl = fallbackPreviewPath ? resolvePreviewUrl(fallbackPreviewPath) : null
   const actionPreviewPath = ready ? deployment.previewPath : fallbackPreviewPath
+  const sourceLabel =
+    deployment.sourceType === 'workspace'
+      ? `工作区 ${deployment.workspacePath ?? '目录'}`
+      : `v${deployment.version}`
 
   return (
     <Card
@@ -673,7 +677,7 @@ function DeployStatusPart({
                 : '部署预览失败'}
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            {deployment.title} · v{deployment.version}
+            {deployment.title} · {sourceLabel}
             {(isLocalStatic || isExternalStatic) && ` · ${deployment.id}`}
           </div>
           {ready ? (

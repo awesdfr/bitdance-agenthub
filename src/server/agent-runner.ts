@@ -469,6 +469,7 @@ async function executeOrchestratorRun(
       parentRunId: runId,
       conversationId: args.conversationId,
       triggerMessageId: args.triggerMessageId,
+      workspace,
       signal,
       seedResults: mergedResults,
       externalPlanItems: [...planItemsById.values()],
@@ -549,7 +550,7 @@ async function runPlanStage(
   replanContext: string | null,
   resolvedExternalTasks: readonly DispatchPlanItem[] = [],
 ): Promise<{ plan: DispatchPlanItem[] | null; planRun: RunExecutionResult }> {
-  const planSystemPrompt = buildOrchestratorPlanPrompt(agent.systemPrompt, otherAgents)
+  const planSystemPrompt = buildOrchestratorPlanPrompt(agent.systemPrompt, otherAgents, workspace)
   const planToolNames = ensureIncludes(
     ensureIncludes(agent.toolNames, 'plan_tasks'),
     ASK_USER_TOOL_NAME,
@@ -671,6 +672,7 @@ interface DagContext {
   parentRunId: string
   conversationId: string
   triggerMessageId: string
+  workspace: WorkspaceRow
   signal: AbortSignal
   seedResults?: Map<string, DispatchTaskResult>
   externalPlanItems?: readonly DispatchPlanItem[]
@@ -794,6 +796,7 @@ async function runChildTask(
       ctx.conversationId,
       plan,
       resolvedInputs,
+      ctx.workspace,
     )
 
     const { runId: childRunId, promise } = AgentRunner.run({
@@ -1374,7 +1377,7 @@ async function buildAdapterInput(
   const effectiveCwd = getEffectiveCwd(workspace)
   const baseSystemPrompt = systemPromptOverride ?? agent.systemPrompt
   let systemPromptWithWorkspace = buildWorkspaceContextBlock(workspace) + '\n\n' + baseSystemPrompt
-  const toolGuidance = buildAgentHubToolGuidance(agent, toolNames)
+  const toolGuidance = buildAgentHubToolGuidance(agent, toolNames, workspace)
   if (toolGuidance) systemPromptWithWorkspace += '\n\n' + toolGuidance
 
   // Key 优先级：agent.apiKey (per-agent) > app_settings.* (用户全局自填) > adapter 内部 fallback env var
@@ -1520,13 +1523,19 @@ function buildWorkspaceContextBlock(workspace: WorkspaceRow): string {
 
 // ─── Prompt 构造 ───────────────────────────────────────────
 
-function buildAgentHubToolGuidance(agent: AgentRow, toolNames: string[]): string {
+function buildAgentHubToolGuidance(
+  agent: AgentRow,
+  toolNames: string[],
+  workspace: WorkspaceRow,
+): string {
   const tools = new Set(toolNames)
-  if (agent.adapterName === 'claude-code' || agent.adapterName === 'codex') {
+  const isSdkAgent = agent.adapterName === 'claude-code' || agent.adapterName === 'codex'
+  if (isSdkAgent) {
     for (const toolName of [
       'write_artifact',
       'read_artifact',
       'deploy_artifact',
+      'deploy_workspace',
       ASK_USER_TOOL_NAME,
       REPORT_TASK_RESULT_TOOL_NAME,
     ]) {
@@ -1536,6 +1545,8 @@ function buildAgentHubToolGuidance(agent: AgentRow, toolNames: string[]): string
 
   const sections: string[] = []
   const add = (lines: string[]) => sections.push(lines.join('\n'))
+  const hasWorkspaceFileTools =
+    tools.has('fs_read') || tools.has('fs_write') || tools.has('bash') || isSdkAgent
 
   if (tools.size > 0) {
     add([
@@ -1544,6 +1555,27 @@ function buildAgentHubToolGuidance(agent: AgentRow, toolNames: string[]): string
       '- 字段名必须严格使用工具 schema 里的 camelCase，例如 artifactId、attachmentId、parentArtifactId、outputKey、dependsOn、expectedOutputs、acceptanceCriteria、acceptanceResults。',
       '- 不要编造 artifactId、attachmentId、outputKey、文件路径；只能使用上下文里明确给出的 id / 路径。',
       '- 工具返回 ok:false 或 isError=true 时，先根据错误修正参数；不要继续基于失败结果推进。',
+    ])
+  }
+
+  if (workspace.mode === 'local' && hasWorkspaceFileTools) {
+    add([
+      '## 本地项目模式',
+      '当前 workspace 是用户绑定的真实本地文件夹。用户要求创建、修改、初始化、调试、构建前后端项目或源码文件时，必须优先直接操作 workspace 文件。',
+      isSdkAgent
+        ? '- 使用 SDK 自带的 Read / Write / Edit / Bash / shell 工具读写文件、安装依赖、运行构建与测试。'
+        : '- 使用 fs_read / fs_write / bash 读写文件、安装依赖、运行构建与测试。',
+      '- 不要用 write_artifact 保存应该落盘到本地项目的源码、package.json、tsconfig、server/client 文件或构建配置。',
+      '- 如果本地项目已经构建出 dist / build / out / client/dist 等静态目录，可用 deploy_workspace 为该目录生成部署预览卡。',
+      '- write_artifact 只用于用户明确要求 artifact / 可预览原型 / 独立 demo / 文档交接，或任务本身声明需要 artifact handoff。',
+      '- 完成本地项目改动后，优先运行必要的验证命令（install / typecheck / build / test）；如果无法运行，说明具体原因。',
+    ])
+  } else if (workspace.mode === 'local' && tools.has('write_artifact')) {
+    add([
+      '## 本地项目模式',
+      '当前 workspace 是用户绑定的真实本地文件夹，但这个 agent 没有文件/命令工具，不能直接修改本地项目。',
+      '- 如果用户要求写入本地项目源码，应说明当前 agent 缺少 fs_read / fs_write / bash 或 SDK 本地工具，而不是用 write_artifact 假装已经落盘。',
+      '- 只有用户明确要求 artifact / 可预览原型 / 独立 demo / 文档交接时，才使用 write_artifact。',
     ])
   }
 
@@ -1601,6 +1633,16 @@ function buildAgentHubToolGuidance(agent: AgentRow, toolNames: string[]): string
     ])
   }
 
+  if (tools.has('deploy_workspace')) {
+    add([
+      '### deploy_workspace',
+      '用途：把当前 workspace 内已有的静态输出目录部署成预览卡，例如 dist、build、out、client/dist。',
+      '正确流程：先用 bash 运行项目构建命令，确认静态目录存在且包含 index.html，再 deploy_workspace({ path: "dist", title: "前端构建预览" })。',
+      '常见错误：把源码根目录、node_modules、server 目录传给 deploy_workspace；它只复制静态文件，不会自动构建或启动服务。',
+      '如果项目是 Vite/React/Next 静态导出，优先部署构建输出目录，而不是创建 web_app artifact。',
+    ])
+  }
+
   if (tools.has('fs_read') || tools.has('fs_write') || tools.has('bash')) {
     add([
       '### workspace 文件与命令工具',
@@ -1649,15 +1691,30 @@ const GROUP_CHAT_SYSTEM_NOTE = [
   '- 历史里的产物只折叠成 `[产物: 标题 (id=...)]` 占位；需要完整内容时用 read_artifact 按 id 获取，不要凭占位臆测。',
 ].join('\n')
 
-function buildOrchestratorPlanPrompt(baseSystemPrompt: string, otherAgents: AgentRow[]): string {
+function buildOrchestratorPlanPrompt(
+  baseSystemPrompt: string,
+  otherAgents: AgentRow[],
+  workspace: WorkspaceRow,
+): string {
   const agentList = otherAgents
     .map(
       (a) =>
         `- { id: ${JSON.stringify(a.id)}, name: ${JSON.stringify(a.name)}, capabilities: ${JSON.stringify(
           a.capabilities,
-        )}, description: ${JSON.stringify(a.description)} }`,
+        )}, tools: ${JSON.stringify(a.toolNames)}, description: ${JSON.stringify(a.description)} }`,
     )
     .join('\n')
+  const localWorkspaceRules =
+    workspace.mode === 'local'
+      ? [
+          '',
+          '## 本地 workspace 规划规则',
+          '- 用户要求在当前文件夹创建 / 修改 / 初始化 / 调试前后端项目或源码文件时，优先派给具备 fs_read / fs_write / bash 或 SDK 本地工具的 agent。',
+          '- 这类本地代码任务不要声明 expectedOutputs；用 acceptanceCriteria 描述应落盘的目录、文件、命令和验证结果。',
+          '- 子任务文本必须明确写出“直接修改当前本地 workspace 文件，不要用 write_artifact 代替源码落盘”。',
+          '- 只有需要聊天内交付的独立文档、设计稿、可预览原型或 artifact handoff，才声明 expectedOutputs。',
+        ]
+      : []
 
   return [
     baseSystemPrompt,
@@ -1686,6 +1743,7 @@ function buildOrchestratorPlanPrompt(baseSystemPrompt: string, otherAgents: Agen
     '- Do NOT declare expectedOutputs for text-only tasks such as review, validation, diagnosis, status check, explanation, or summary; put their completion checks in acceptanceCriteria.',
     '- If a task needs an upstream artifact, declare inputs with fromTaskId and outputId; the system will compile these into dependencies.',
     '- For tasks with quality requirements, add concise acceptanceCriteria that the assigned agent can verify.',
+    ...localWorkspaceRules,
     '',
     '示例（设计 → 前端 → 审查，逐级依赖；agentId 用上面可用列表里的真实 id）：',
     'tasks: [',
@@ -1716,6 +1774,7 @@ async function buildSubAgentPrompt(
   conversationId: string,
   plan: DispatchPlanItem[],
   resolvedInputs: ResolvedTaskInput[],
+  workspace: WorkspaceRow,
 ): Promise<string> {
   // 收集已完成上游任务的 artifact 列表，作为隐式上下文。
   // 使用传递依赖闭包，避免 Review 只看到直接上游实现而看不到 PRD / UI 设计。
@@ -1825,6 +1884,8 @@ async function buildSubAgentPrompt(
     '</your_task>',
     '',
     'Before working, read every required input artifact with read_artifact(artifactId).',
+    workspace.mode === 'local' &&
+      'If this task is about local project source files, directly modify the current local workspace with file/command tools. Do not use write_artifact to store source files that should be written to disk.',
     'If expected_outputs are declared and your completed work creates an artifact, use write_artifact and pass outputKey equal to that output id.',
     'If no expected_outputs are declared, complete the task with a normal message; do not create an artifact just to satisfy status tracking.',
     'Satisfy every acceptance_criteria item when present.',

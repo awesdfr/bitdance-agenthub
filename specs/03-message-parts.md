@@ -122,9 +122,9 @@ Agent 的主要文字输出。content 是 markdown 文本，前端用 `react-mar
 { type: 'deploy_status', deployment: DeployStatusRecord }
 ```
 
-展示一次 web_app 部署状态。`status='ready'` 时卡片提供打开 / 复制预览 URL；本地静态发布记录还提供源码包 / 容器包下载；外部静态发布记录显示公开 URL 与本地回退路径；`status='failed'` 时展示失败原因。
+展示一次部署状态。`sourceType='artifact'` 表示来自 `web_app` artifact；`sourceType='workspace'` 表示来自 workspace 静态输出目录，并用 `workspacePath` 标识来源。`status='ready'` 时卡片提供打开 / 复制预览 URL；本地静态发布记录还提供源码包 / 容器包下载；外部静态发布记录显示公开 URL 与本地回退路径；`status='failed'` 时展示失败原因。
 
-**注入路径**：Adapter 在 `deploy_artifact` 成功返回部署记录后 emit `deploy.status`，AgentRunner 在当前 message 末尾 push `deploy_status` 并补发 `part.start`。确定性部署命令（`部署` / `发布` / `上线` / `/deploy`）不经过 Adapter，也可以直接由 `deploy-command-service` 创建包含 `deploy_status` 的 system message。
+**注入路径**：Adapter 在 `deploy_artifact` / `deploy_workspace` 成功返回部署记录后 emit `deploy.status`，AgentRunner 在当前 message 末尾 push `deploy_status` 并补发 `part.start`。确定性部署命令（`部署` / `发布` / `上线` / `/deploy`）不经过 Adapter，也可以直接由 `deploy-command-service` 创建包含 `deploy_status` 的 system message。
 
 ### 8. `deploy_candidates`
 
@@ -233,7 +233,7 @@ LLM 下一轮 turn 需要 history（assistant 的旧消息回传 messages 数组
 | `tool_use` | `[调用 <toolName>(<args 摘要>)]` |
 | `tool_result` | `[<toolName> 结果: <result 摘要>]` |
 | `artifact_ref` | `[产物: art_xxx]` |
-| `deploy_status` | `[部署预览: title vN (/deployments/dep_xxx)]` 或 `[部署失败: ...]` |
+| `deploy_status` | `[部署预览: title vN (/deployments/dep_xxx)]` / `[部署预览: title workspace=dist (/deployments/dep_xxx)]` 或 `[部署失败: ...]` |
 | `deploy_candidates` | `[部署候选: title vN (id=art_xxx), ...]` |
 | 附件 | `[图片附件: <fileName>]` / `[文件附件: <fileName>]` |
 

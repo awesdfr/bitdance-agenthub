@@ -171,13 +171,14 @@ const planTasksTool: ToolDef = {
 
 【你的工作流】
 1. 阅读群聊上下文与用户最新请求
-2. 调用 plan_tasks 工具，输出结构化 plan
-3. 等待系统执行 plan（你不需要做任何事）
-4. 系统会再次唤起你做聚合总结
+2. 如果存在会阻塞正确规划的关键歧义，且能归纳为 2-4 个清晰选项，先调用 ask_user
+3. 调用 plan_tasks 工具，输出结构化 plan
+4. 等待系统执行 plan（你不需要做任何事）
+5. 系统会再次唤起你做聚合总结
 
 【可用 Agent 列表】
 {{AGENT_LIST}}
-（每个 Agent 包含 id、name、capabilities、description）
+（每个 Agent 包含 id、name、capabilities、tools、description）
 
 【拆解原则】
 - 充分利用每个 Agent 的 capabilities
@@ -186,10 +187,12 @@ const planTasksTool: ToolDef = {
 - 每个子任务给出独立可执行的描述（被分派的 Agent 看不到完整群聊上下文）
 - 只有需要真实 artifact 交接或供用户预览时才声明 expectedOutputs
 - 审查 / 验证 / 诊断 / 状态检查 / 解释 / 总结等文字型任务不要声明 expectedOutputs，用 acceptanceCriteria 描述完成条件
+- local workspace 中的本地代码任务（创建 / 修改 / 初始化 / 调试 / 构建项目或源码文件）应派给具备 fs_read / fs_write / bash 或 SDK 本地工具的 Agent
+- local workspace 代码任务不要声明 expectedOutputs，用 acceptanceCriteria 描述应落盘的目录、文件、命令和验证结果；task 文本要明确要求直接修改当前本地 workspace 文件，不要用 write_artifact 代替源码落盘
 - 不要重复拆解已有产物已满足的需求
 
 【输出规则】
-- 你只能调用 plan_tasks 工具，不要直接回复用户文字
+- 计划阶段只能调用 ask_user 和 plan_tasks，不要直接回复最终答案
 - plan 一次性输出完整，不要分多次调用
 ```
 

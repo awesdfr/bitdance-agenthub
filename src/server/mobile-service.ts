@@ -61,6 +61,8 @@ export type MobileMessagePart =
       type: 'deploy_status'
       title: string
       version: number
+      sourceType?: 'artifact' | 'workspace'
+      workspacePath?: string
       previewPath: string
       status: 'ready' | 'failed'
       error?: string
@@ -348,6 +350,8 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
         type: 'deploy_status',
         title: part.deployment.title,
         version: part.deployment.version,
+        sourceType: part.deployment.sourceType,
+        workspacePath: part.deployment.workspacePath,
         previewPath: part.deployment.previewPath,
         status: part.deployment.status,
         error: part.deployment.error,

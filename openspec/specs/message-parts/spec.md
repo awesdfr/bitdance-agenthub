@@ -48,4 +48,4 @@ Messages SHALL represent deploy preview results with a `deploy_status` part inst
 #### Scenario: Deployment finishes
 - **WHEN** an adapter emits `deploy.status`
 - **THEN** AgentRunner injects a `deploy_status` part into the current message
-- **AND** the part includes status, artifact id, title, version, preview path, and optional error.
+- **AND** the part includes status, source id, title, preview path, optional source type, and optional error.

@@ -179,7 +179,7 @@ function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
       return `[Artifact: ${part.artifactId}]`
     case 'deploy_status':
       return part.deployment.status === 'ready'
-        ? `[Deployment: ${part.deployment.title} v${part.deployment.version} (${part.deployment.previewPath})]`
+        ? `[Deployment: ${part.deployment.title} ${formatDeploymentSourceLabel(part.deployment)} (${part.deployment.previewPath})]`
         : `[Deployment failed: ${part.deployment.title} (${part.deployment.error ?? 'unknown error'})]`
     case 'deploy_candidates':
       return `[Deployment candidates: ${part.candidates
@@ -189,6 +189,15 @@ function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
     case 'file_attachment':
       return `[Attachment: ${part.fileName} (${part.attachmentId}, ${part.mimeType}, ${part.size} bytes)]`
   }
+}
+
+function formatDeploymentSourceLabel(
+  deployment: Extract<MessageRow['parts'][number], { type: 'deploy_status' }>['deployment'],
+): string {
+  if (deployment.sourceType === 'workspace') {
+    return `workspace=${deployment.workspacePath ?? 'unknown'}`
+  }
+  return `v${deployment.version}`
 }
 
 function blockquote(text: string): string {

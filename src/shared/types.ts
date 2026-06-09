@@ -228,6 +228,17 @@ export interface PendingDispatchPlan {
   createdAt: number
 }
 
+export interface PendingBashCommand {
+  id: string
+  conversationId: string
+  agentId: string
+  runId: string
+  command: string
+  cwd: string
+  reason: string
+  createdAt: number
+}
+
 export interface DeployStatusRecord {
   id: string
   artifactId: string
@@ -235,6 +246,8 @@ export interface DeployStatusRecord {
   version: number
   previewPath: string
   status: 'ready' | 'failed'
+  sourceType?: 'artifact' | 'workspace'
+  workspacePath?: string
   deploymentType?: 'local_static' | 'external_static'
   deploymentPath?: string
   localPreviewPath?: string
@@ -299,6 +312,8 @@ export type StreamEvent = BaseEvent &
       }
     | { type: 'fs_write.pending'; pendingWrite: PendingWrite }
     | { type: 'fs_write.resolved'; pendingId: string; applied: boolean }
+    | { type: 'bash_command.pending'; pendingCommand: PendingBashCommand }
+    | { type: 'bash_command.resolved'; pendingId: string; approved: boolean }
     | { type: 'ask_user.pending'; pendingQuestion: PendingQuestion }
     | { type: 'ask_user.resolved'; pendingId: string; answered: boolean }
     | { type: 'heartbeat' }

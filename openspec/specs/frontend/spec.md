@@ -17,7 +17,7 @@ The frontend MUST use REST routes and SSE stream events; it SHALL not import or 
 
 ### Requirement: Store reducers SHALL apply StreamEvent deterministically
 
-Zustand reducers MUST update conversation, message, artifact, pending write, dispatch, and usage state from `StreamEvent` payloads.
+Zustand reducers MUST update conversation, message, artifact, pending write, pending bash command, dispatch, and usage state from `StreamEvent` payloads.
 
 #### Scenario: `part.delta` arrives
 - **WHEN** the event references an existing part

@@ -3,12 +3,13 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
+import { classifyBashApproval, waitForBashApproval } from '@/server/bash-command-approval'
 import { db, schema } from '@/db/client'
 import { currentPlatform, type Platform } from '@/server/platform'
 import { findBannedPattern } from '@/server/security'
 import { getEffectiveCwd } from '@/server/workspace-utils'
 
-import type { ToolDef } from './types'
+import type { ToolDef, ToolResult } from './types'
 
 const ArgsSchema = z.object({
   command: z.string().min(1),
@@ -101,71 +102,96 @@ export const bashTool: ToolDef = {
     if (!workspace) return { ok: false, error: 'Workspace not found' }
 
     const cwd = getEffectiveCwd(workspace)
-    const shell = buildShellInvocation(command, PLATFORM)
-
-    return new Promise((resolve) => {
-      const child = spawn(shell.cmd, shell.args, {
+    const approval = classifyBashApproval(command, PLATFORM)
+    if (approval.required) {
+      const approved = await waitForBashApproval({
+        conversationId: ctx.conversationId,
+        agentId: ctx.agentId,
+        runId: ctx.runId,
+        command,
         cwd,
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
+        reason: approval.reason,
+        signal: ctx.abortSignal,
       })
-
-      let buffer = ''
-      let truncated = false
-      const append = (chunk: Buffer) => {
-        if (truncated) return
-        const text = chunk.toString('utf8')
-        if (buffer.length + text.length <= MAX_OUTPUT_CHARS) {
-          buffer += text
-        } else {
-          buffer = (buffer + text).slice(0, MAX_OUTPUT_CHARS)
-          truncated = true
-        }
+      if (!approved) {
+        return { ok: false, error: `User rejected command execution: ${approval.reason}` }
       }
+    }
 
-      child.stdout?.on('data', append)
-      child.stderr?.on('data', append)
+    return runShellCommand(command, cwd, PLATFORM, ctx.abortSignal)
+  },
+}
 
-      let timedOut = false
-      const timer = setTimeout(() => {
-        timedOut = true
-        killProcessTree(child, PLATFORM)
-      }, TIMEOUT_MS)
+function runShellCommand(
+  command: string,
+  cwd: string,
+  platform: Platform,
+  signal: AbortSignal,
+): Promise<ToolResult> {
+  const shell = buildShellInvocation(command, platform)
 
-      const onAbort = () => killProcessTree(child, PLATFORM)
-      ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+  return new Promise((resolve) => {
+    const child = spawn(shell.cmd, shell.args, {
+      cwd,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
 
-      child.on('error', (err) => {
-        clearTimeout(timer)
-        ctx.abortSignal.removeEventListener('abort', onAbort)
-        resolve({
-          ok: false,
-          error: `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
-        })
-      })
+    let buffer = ''
+    let truncated = false
+    const append = (chunk: Buffer) => {
+      if (truncated) return
+      const text = chunk.toString('utf8')
+      if (buffer.length + text.length <= MAX_OUTPUT_CHARS) {
+        buffer += text
+      } else {
+        buffer = (buffer + text).slice(0, MAX_OUTPUT_CHARS)
+        truncated = true
+      }
+    }
 
-      child.on('close', (exitCode, signal) => {
-        clearTimeout(timer)
-        ctx.abortSignal.removeEventListener('abort', onAbort)
-        const note = timedOut
-          ? `\n\n[KILLED after ${TIMEOUT_MS / 1000}s timeout]`
-          : signal
-            ? `\n\n[KILLED by signal ${signal}]`
-            : ''
-        const truncNote = truncated ? `\n\n[TRUNCATED at ${MAX_OUTPUT_CHARS} chars]` : ''
-        resolve({
-          ok: true,
-          value: {
-            cwd,
-            command,
-            exitCode: exitCode ?? null,
-            output: buffer + truncNote + note,
-            truncated,
-            timedOut,
-          },
-        })
+    child.stdout?.on('data', append)
+    child.stderr?.on('data', append)
+
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      killProcessTree(child, platform)
+    }, TIMEOUT_MS)
+
+    const onAbort = () => killProcessTree(child, platform)
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      resolve({
+        ok: false,
+        error: `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
       })
     })
-  },
+
+    child.on('close', (exitCode, closeSignal) => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      const note = timedOut
+        ? `\n\n[KILLED after ${TIMEOUT_MS / 1000}s timeout]`
+        : closeSignal
+          ? `\n\n[KILLED by signal ${closeSignal}]`
+          : ''
+      const truncNote = truncated ? `\n\n[TRUNCATED at ${MAX_OUTPUT_CHARS} chars]` : ''
+      resolve({
+        ok: true,
+        value: {
+          cwd,
+          command,
+          exitCode: exitCode ?? null,
+          output: buffer + truncNote + note,
+          truncated,
+          timedOut,
+        },
+      })
+    })
+  })
 }

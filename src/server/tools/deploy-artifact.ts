@@ -90,7 +90,7 @@ export async function deployArtifactForConversation(
   }
 }
 
-async function maybePublishExternally(local: DeployStatusRecord): Promise<DeployStatusRecord> {
+export async function maybePublishExternally(local: DeployStatusRecord): Promise<DeployStatusRecord> {
   const settings = await getAppSettings()
   if (!settings.deploymentPublishEnabled) return local
 
@@ -147,6 +147,7 @@ function failedDeployment(
     version,
     previewPath: artifactPreviewPath(artifactId),
     status: 'failed',
+    sourceType: 'artifact',
     error,
     createdAt: Date.now(),
   }

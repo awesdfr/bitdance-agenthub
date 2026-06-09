@@ -61,6 +61,10 @@ type StreamEvent = BaseEvent & (
   | { type: 'fs_write.pending',  pendingWrite: PendingWrite }       // agent 调 fs_write，等用户审批
   | { type: 'fs_write.resolved', pendingId: string, applied: boolean } // approve / reject / run abort
 
+  // —— Agent bash 关键命令审批（详见 Spec 07） ——
+  | { type: 'bash_command.pending',  pendingCommand: PendingBashCommand }
+  | { type: 'bash_command.resolved', pendingId: string, approved: boolean }
+
   // —— Token usage 计量（adapter 在 run 结束前 emit）——
   | { type: 'run.usage', runId: string, usage: RunUsageEvent }
 
@@ -86,6 +90,17 @@ interface PendingWrite {
   absolutePath: string
   oldContent: string | null     // null 表示新建文件
   newContent: string
+  createdAt: number
+}
+
+interface PendingBashCommand {
+  id: string                    // pbc_<nanoid>
+  conversationId: string
+  agentId: string
+  runId: string
+  command: string
+  cwd: string
+  reason: string
   createdAt: number
 }
 
@@ -198,7 +213,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 
 `deploy_status` part 同样由 AgentRunner 注入，不由 Adapter 直接发 `part.start`：
 
-1. Adapter 执行 `deploy_artifact` 工具，得到 `DeployStatusRecord`
+1. Adapter 执行 `deploy_artifact` / `deploy_workspace` 工具，得到 `DeployStatusRecord`
 2. Adapter emit `tool.result`
 3. Adapter emit `deploy.status`
 4. AgentRunner 接到 `deploy.status` 后，在对应 message 末尾 push `{ type:'deploy_status', deployment }` 并补发 `part.start`
@@ -225,6 +240,8 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `dispatch.*` | ❌ 透传（信息来自 plan_tasks 工具调用 + agent_runs 表） | |
 | `fs_write.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-writes.ts`）；dev server 重启丢失，前端 mount 时拉一次兜底 |
 | `fs_write.resolved` | ❌ 透传 | applied=true/false 由前端 store 用来移除对应 pending |
+| `bash_command.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-bash-commands.ts`）；前端 mount 时拉一次兜底 |
+| `bash_command.resolved` | ❌ 透传 | approved=true/false 由前端 store 用来移除对应 pending |
 | `run.usage` | ✅ 落到 `agent_runs.usage` JSON 列 | adapter 在 run 结束前 emit；前端 store 同步更新该 run 行 |
 | `heartbeat` | ❌ 透传 | |
 

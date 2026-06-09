@@ -21,7 +21,11 @@ import type Database from 'better-sqlite3'
 import { BUILTIN_AGENTS } from './builtin-agents'
 
 const FRONTEND_DEPLOYMENT_PROMPT_HINT =
-  'deploy_artifact 返回的 previewPath 是当前 AgentHub 实例下的相对路径，不要在文字总结里把它改写成公网域名或自造完整 URL；让用户点击部署卡片按钮，或原样引用 previewPath。'
+  'deploy_artifact / deploy_workspace 返回的 previewPath 是当前 AgentHub 实例下的相对路径，不要在文字总结里把它改写成公网域名或自造完整 URL；让用户点击部署卡片按钮，或原样引用 previewPath。'
+const FRONTEND_LOCAL_WORKSPACE_PROMPT_HINT =
+  '当 workspace_info mode=local 且用户要求创建 / 修改 / 初始化 / 调试前端项目、源码文件、依赖或构建配置时，优先使用 fs_read / fs_write / bash 直接操作本地文件并运行验证；不要用 write_artifact 代替应该落盘的源码。构建出 dist/build/out 等静态目录后，可用 deploy_workspace 生成部署预览卡。只有用户明确要求网页产物、可预览原型、artifact 或独立 demo 时，才用 write_artifact + deploy_artifact。'
+const REVIEWER_LOCAL_WORKSPACE_PROMPT_HINT =
+  '本地代码审查先用 fs_read 查看关键文件，必要时用 bash 运行检查命令；不要只根据文件名、任务摘要或 artifact 占位做判断。'
 const BUILTIN_TOOL_UPGRADES = new Map(
   BUILTIN_AGENTS.map((agent) => [agent.id, agent.toolNames] as const),
 )
@@ -273,6 +277,18 @@ function upgradeBuiltinAgents(sqlite: Database.Database): void {
       !systemPrompt.includes('不要在文字总结里把它改写成公网域名')
     ) {
       systemPrompt += `\n\n${FRONTEND_DEPLOYMENT_PROMPT_HINT}`
+      changed = true
+    }
+    if (
+      row.id === 'ag_frontend' &&
+      (!systemPrompt.includes('不要用 write_artifact 代替应该落盘的源码') ||
+        !systemPrompt.includes('deploy_workspace'))
+    ) {
+      systemPrompt += `\n\n${FRONTEND_LOCAL_WORKSPACE_PROMPT_HINT}`
+      changed = true
+    }
+    if (row.id === 'ag_reviewer' && !systemPrompt.includes('本地代码审查先用 fs_read')) {
+      systemPrompt += `\n\n${REVIEWER_LOCAL_WORKSPACE_PROMPT_HINT}`
       changed = true
     }
 
