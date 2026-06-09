@@ -30,6 +30,11 @@ The bash tool MUST reject commands that match the platform-specific banned patte
 - **WHEN** the command matches `rm -rf /`
 - **THEN** the tool refuses to run it.
 
+#### Scenario: POSIX background process inherits stdio
+- **WHEN** a bash command starts a background process and the shell script exits
+- **THEN** the bash tool MUST NOT wait forever on inherited stdout or stderr
+- **AND** it SHOULD clean up the command process group before returning.
+
 ### Requirement: Key bash commands SHALL require user approval
 
 AgentHub MUST require explicit user approval before executing bash commands that are not banned but can materially change dependencies, discard files, or affect host-level runtime state. This approval gate MUST apply to AgentHub's `bash` tool and SDK command hooks where the adapter exposes a pre-execution permission callback.

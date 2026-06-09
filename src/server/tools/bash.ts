@@ -17,6 +17,7 @@ const ArgsSchema = z.object({
 
 const TIMEOUT_MS = 30_000
 const MAX_OUTPUT_CHARS = 10_000
+const POSIX_ORPHANED_STDIO_GRACE_MS = 500
 
 interface ShellInvocation {
   cmd: string
@@ -37,20 +38,36 @@ function buildShellInvocation(command: string, platform: Platform): ShellInvocat
   return { cmd: 'sh', args: ['-c', command] }
 }
 
-function killProcessTree(child: ChildProcess, platform: Platform) {
+function killProcessTree(
+  child: ChildProcess,
+  platform: Platform,
+  signal: NodeJS.Signals = 'SIGTERM',
+) {
   if (platform === 'windows' && typeof child.pid === 'number') {
     const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true })
     // 极少数 Win 镜像（Server Core 缩减版）没 taskkill.exe，吃 ENOENT 防 unhandled error 崩 worker
     killer.on('error', () => {})
     return
   }
-  child.kill('SIGTERM')
+  if (typeof child.pid === 'number') {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? (error as { code?: unknown }).code : null
+      if (code !== 'ESRCH') {
+        child.kill(signal)
+      }
+      return
+    }
+  }
+  child.kill(signal)
 }
 
 const PLATFORM = currentPlatform()
 
 const DESCRIPTION_POSIX =
-  'Run a shell command (sh -c) inside the workspace (cwd is set automatically). Use POSIX syntax: ls, grep, cat, git, npm, python, etc. Output is stdout + stderr combined, truncated to 10000 chars, 30s timeout. Destructive commands (rm -rf /, sudo, fork bombs, curl | sh) are blocked. No interactive stdin.'
+  'Run a shell command (sh -c) inside the workspace (cwd is set automatically). Use POSIX syntax: ls, grep, cat, git, npm, python, etc. Output is stdout + stderr combined, truncated to 10000 chars, 30s timeout. Destructive commands (rm -rf /, sudo, fork bombs, curl | sh) are blocked. No interactive stdin. Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
 
 const DESCRIPTION_WINDOWS =
   'Run a Windows PowerShell 5.1 command inside the workspace (cwd is set automatically). ' +
@@ -59,14 +76,15 @@ const DESCRIPTION_WINDOWS =
   '`Select-String pattern file.txt` (NOT `grep`), `Remove-Item path` (NOT `rm`), `New-Item -ItemType Directory` (NOT `mkdir -p`), ' +
   '`Copy-Item src dst` (NOT `cp`), `Move-Item src dst` (NOT `mv`). git/npm/python/node work as usual. ' +
   'Output is UTF-8, stdout + stderr combined, truncated to 10000 chars, 30s timeout. ' +
-  'Destructive commands (Remove-Item -Recurse -Force, format, shutdown, iex(iwr ...), reg delete, Set-ExecutionPolicy Unrestricted) are blocked. No interactive stdin.'
+  'Destructive commands (Remove-Item -Recurse -Force, format, shutdown, iex(iwr ...), reg delete, Set-ExecutionPolicy Unrestricted) are blocked. No interactive stdin. ' +
+  'Do not leave persistent background servers running; start test servers only inside a command that cleans them up.'
 
 /**
  * bash —— 在 workspace 内跑 shell 命令。详见 specs/07-tools.md, specs/11-platform.md。
  *
  * cwd 强制为 workspace effective cwd（local → boundPath，sandbox → rootPath）；
  * 命令前匹配双平台黑名单；30s 超时；stdout + stderr 合并截断 10000 字符。
- * AbortSignal 触发立即 kill 进程树（Windows 走 taskkill /F /T，POSIX 走 SIGTERM）。
+ * AbortSignal 触发立即 kill 进程树（Windows 走 taskkill /F /T，POSIX 走进程组 SIGTERM）。
  */
 export const bashTool: ToolDef = {
   name: 'bash',
@@ -136,10 +154,17 @@ function runShellCommand(
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: platform !== 'windows',
     })
 
     let buffer = ''
     let truncated = false
+    let resolved = false
+    let timedOut = false
+    let aborted = false
+    let orphanedStdio = false
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+    let orphanedStdioTimer: ReturnType<typeof setTimeout> | null = null
     const append = (chunk: Buffer) => {
       if (truncated) return
       const text = chunk.toString('utf8')
@@ -154,44 +179,84 @@ function runShellCommand(
     child.stdout?.on('data', append)
     child.stderr?.on('data', append)
 
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      killProcessTree(child, platform)
-    }, TIMEOUT_MS)
-
-    const onAbort = () => killProcessTree(child, platform)
-    signal.addEventListener('abort', onAbort, { once: true })
-
-    child.on('error', (err) => {
-      clearTimeout(timer)
+    const cleanup = () => {
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+      if (orphanedStdioTimer) clearTimeout(orphanedStdioTimer)
       signal.removeEventListener('abort', onAbort)
-      resolve({
-        ok: false,
-        error: `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
-      })
-    })
+    }
 
-    child.on('close', (exitCode, closeSignal) => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', onAbort)
+    const finish = (
+      exitCode: number | null,
+      closeSignal: NodeJS.Signals | null,
+    ) => {
+      if (resolved) return
+      resolved = true
+      cleanup()
       const note = timedOut
         ? `\n\n[KILLED after ${TIMEOUT_MS / 1000}s timeout]`
-        : closeSignal
-          ? `\n\n[KILLED by signal ${closeSignal}]`
-          : ''
+        : aborted
+          ? '\n\n[KILLED after run abort]'
+          : closeSignal
+            ? `\n\n[KILLED by signal ${closeSignal}]`
+            : ''
+      const orphanNote = orphanedStdio
+        ? '\n\n[STOPPED background processes after shell exit to close inherited stdio]'
+        : ''
       const truncNote = truncated ? `\n\n[TRUNCATED at ${MAX_OUTPUT_CHARS} chars]` : ''
       resolve({
         ok: true,
         value: {
           cwd,
           command,
-          exitCode: exitCode ?? null,
-          output: buffer + truncNote + note,
+          exitCode,
+          output: buffer + truncNote + note + orphanNote,
           truncated,
           timedOut,
         },
       })
+    }
+
+    const closeInheritedStdio = () => {
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+    }
+
+    timeoutTimer = setTimeout(() => {
+      timedOut = true
+      killProcessTree(child, platform)
+      closeInheritedStdio()
+    }, TIMEOUT_MS)
+
+    const onAbort = () => {
+      aborted = true
+      killProcessTree(child, platform)
+      closeInheritedStdio()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    child.on('error', (err) => {
+      if (resolved) return
+      resolved = true
+      cleanup()
+      resolve({
+        ok: false,
+        error: `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    })
+
+    child.on('exit', (exitCode, closeSignal) => {
+      if (platform === 'windows') return
+      orphanedStdioTimer = setTimeout(() => {
+        if (resolved) return
+        orphanedStdio = true
+        killProcessTree(child, platform)
+        closeInheritedStdio()
+        finish(exitCode ?? null, closeSignal)
+      }, POSIX_ORPHANED_STDIO_GRACE_MS)
+    })
+
+    child.on('close', (exitCode, closeSignal) => {
+      finish(exitCode ?? null, closeSignal)
     })
   })
 }

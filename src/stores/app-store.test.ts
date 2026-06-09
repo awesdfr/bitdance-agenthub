@@ -31,6 +31,7 @@ function resetStore(): void {
     pendingQuoteForInput: null,
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
+    pendingBashCommandsByConv: {},
     pendingQuestionsByConv: {},
     unreadByConv: {},
     mobileSidebarOpen: false,
@@ -113,5 +114,108 @@ describe('app-store dispatch plan binding', () => {
     const state = useAppStore.getState()
     expect(state.dispatchesByRunId.run_orch?.messageId).toBe('msg_plan')
     expect(selectDispatchForMessage(state, 'msg_plan')?.pendingPlanId).toBe('pdp_1')
+  })
+})
+
+describe('app-store run failure cleanup', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+
+  it('adds error results for unresolved tool calls when a run fails', () => {
+    useAppStore.setState({
+      messages: {
+        msg_tool: {
+          ...agentMessage('msg_tool', 'run_failed', 1),
+          status: 'streaming',
+          parts: [
+            {
+              type: 'tool_use',
+              callId: 'call_bash',
+              toolName: 'bash',
+              args: { command: 'npm run dev' },
+            },
+          ],
+        },
+      },
+      messageIdsByConv: { conv_1: ['msg_tool'] },
+    })
+
+    useAppStore.getState().applyEvent({
+      type: 'run.end',
+      conversationId: 'conv_1',
+      timestamp: 2,
+      runId: 'run_failed',
+      status: 'failed',
+      error: 'process exited with code 1',
+    })
+
+    const message = useAppStore.getState().messages.msg_tool
+    expect(message.status).toBe('error')
+    expect(message.parts).toContainEqual({
+      type: 'tool_result',
+      callId: 'call_bash',
+      result: '工具调用未完成：本次运行失败。process exited with code 1',
+      isError: true,
+    })
+
+    useAppStore.getState().applyEvent({
+      type: 'tool.result',
+      conversationId: 'conv_1',
+      timestamp: 3,
+      messageId: 'msg_tool',
+      callId: 'call_bash',
+      result: 'server fallback',
+      isError: true,
+    })
+
+    const results = useAppStore
+      .getState()
+      .messages.msg_tool.parts.filter((part) => part.type === 'tool_result')
+    expect(results).toHaveLength(1)
+    expect(results[0]).toEqual({
+      type: 'tool_result',
+      callId: 'call_bash',
+      result: 'server fallback',
+      isError: true,
+    })
+  })
+
+  it('does not duplicate existing tool results on aborted runs', () => {
+    useAppStore.setState({
+      messages: {
+        msg_tool: {
+          ...agentMessage('msg_tool', 'run_aborted', 1),
+          status: 'streaming',
+          parts: [
+            {
+              type: 'tool_use',
+              callId: 'call_done',
+              toolName: 'fs_read',
+              args: { path: 'README.md' },
+            },
+            {
+              type: 'tool_result',
+              callId: 'call_done',
+              result: 'ok',
+              isError: false,
+            },
+          ],
+        },
+      },
+      messageIdsByConv: { conv_1: ['msg_tool'] },
+    })
+
+    useAppStore.getState().applyEvent({
+      type: 'run.end',
+      conversationId: 'conv_1',
+      timestamp: 2,
+      runId: 'run_aborted',
+      status: 'aborted',
+    })
+
+    const message = useAppStore.getState().messages.msg_tool
+    expect(message.status).toBe('aborted')
+    expect(message.parts.filter((part) => part.type === 'tool_result')).toHaveLength(1)
   })
 })

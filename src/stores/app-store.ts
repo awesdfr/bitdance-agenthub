@@ -567,6 +567,15 @@ export const useAppStore = create<AppState>()(
               run.finishedAt = event.timestamp
               run.error = event.error ?? null
             }
+            if (event.status === 'failed' || event.status === 'aborted') {
+              closeUnresolvedToolCallsForRun(
+                s.messages,
+                event.conversationId,
+                event.runId,
+                event.status,
+                event.error,
+              )
+            }
             return
           }
 
@@ -687,6 +696,14 @@ export const useAppStore = create<AppState>()(
           case 'tool.result': {
             const msg = s.messages[event.messageId]
             if (!msg) return
+            const existing = msg.parts.find(
+              (part) => part.type === 'tool_result' && part.callId === event.callId,
+            )
+            if (existing?.type === 'tool_result') {
+              existing.result = event.result
+              existing.isError = event.isError
+              return
+            }
             msg.parts.push({
               type: 'tool_result',
               callId: event.callId,
@@ -872,6 +889,45 @@ function attachDispatchToMessageForRun(
   if (!runId) return
   const dispatch = dispatches[runId]
   if (dispatch && !dispatch.messageId) dispatch.messageId = messageId
+}
+
+function closeUnresolvedToolCallsForRun(
+  messages: Record<string, MessageRow>,
+  conversationId: string,
+  runId: string,
+  status: 'failed' | 'aborted',
+  error?: string,
+): void {
+  const result = buildUnresolvedToolResult(status, error)
+  const messageStatus = status === 'aborted' ? 'aborted' : 'error'
+
+  for (const message of Object.values(messages)) {
+    if (message.conversationId !== conversationId || message.runId !== runId) continue
+    if (message.status === 'streaming') message.status = messageStatus
+
+    const completedCallIds = new Set<string>()
+    for (const part of message.parts) {
+      if (part.type === 'tool_result') completedCallIds.add(part.callId)
+    }
+
+    for (const part of message.parts) {
+      if (part.type !== 'tool_use' || completedCallIds.has(part.callId)) continue
+      message.parts.push({
+        type: 'tool_result',
+        callId: part.callId,
+        result,
+        isError: true,
+      })
+      completedCallIds.add(part.callId)
+    }
+  }
+}
+
+function buildUnresolvedToolResult(status: 'failed' | 'aborted', error?: string): string {
+  if (status === 'aborted') return '工具调用未完成：本次运行已中止。'
+  return error
+    ? `工具调用未完成：本次运行失败。${error}`
+    : '工具调用未完成：本次运行失败。'
 }
 
 function areMessagesEquivalent(a: MessageRow, b: MessageRow): boolean {

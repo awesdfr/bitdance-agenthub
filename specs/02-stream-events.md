@@ -235,7 +235,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `part.delta` | ✅ 追加到 `messages.parts[i].content` | 高频写，可批量合并（每 100ms flush） |
 | `part.end` | ❌ 透传 | parts 状态由 part.start/delta 已足够 |
 | `tool.call` | ✅ 写为 message.parts 里的 tool_use part | |
-| `tool.result` | ✅ 写为 message.parts 里的 tool_result part | |
+| `tool.result` | ✅ 写为 message.parts 里的 tool_result part | run 失败 / 中止时，AgentRunner 会为未配对 `tool_result` 的 `tool_use` 补发 `isError=true` 结果 |
 | `artifact.*` | ✅ 落到 `artifacts` 表 | |
 | `dispatch.*` | ❌ 透传（信息来自 plan_tasks 工具调用 + agent_runs 表） | |
 | `fs_write.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-writes.ts`）；dev server 重启丢失，前端 mount 时拉一次兜底 |

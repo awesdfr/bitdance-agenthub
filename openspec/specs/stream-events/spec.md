@@ -81,4 +81,5 @@ Failures MUST be represented in both AgentRun status and conversation-visible me
 #### Scenario: Provider rejects a request
 - **WHEN** the adapter throws a provider error
 - **THEN** AgentRunner marks streaming messages as `error`
+- **AND** persists and publishes error `tool_result` events for unresolved tool calls in the run
 - **AND** appends or creates a visible `[失败]` message.

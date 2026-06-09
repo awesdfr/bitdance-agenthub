@@ -1236,6 +1236,10 @@ async function finalize(
 ): Promise<RunResult> {
   const finishedAt = Date.now()
 
+  if (status === 'failed' || status === 'aborted') {
+    await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
+  }
+
   await db
     .update(schema.agentRuns)
     .set({ status, finishedAt, error: error ?? null })
@@ -1345,6 +1349,68 @@ async function emitErrorVisualisation(
     timestamp: now,
     messageId: errorMessageId,
   })
+}
+
+async function persistUnresolvedToolFailures(
+  runId: string,
+  conversationId: string,
+  status: 'failed' | 'aborted',
+  error: string | undefined,
+  timestamp: number,
+): Promise<void> {
+  const messages = await db.query.messages.findMany({
+    where: eq(schema.messages.runId, runId),
+  })
+  const result = buildUnresolvedToolFailureResult(status, error)
+
+  for (const message of messages) {
+    const nextParts = [...message.parts]
+    const completedCallIds = new Set<string>()
+    for (const part of nextParts) {
+      if (part.type === 'tool_result') completedCallIds.add(part.callId)
+    }
+
+    const missingCallIds: string[] = []
+    for (const part of nextParts) {
+      if (part.type !== 'tool_use' || completedCallIds.has(part.callId)) continue
+      nextParts.push({
+        type: 'tool_result',
+        callId: part.callId,
+        result,
+        isError: true,
+      })
+      completedCallIds.add(part.callId)
+      missingCallIds.push(part.callId)
+    }
+
+    if (missingCallIds.length === 0) continue
+
+    await db
+      .update(schema.messages)
+      .set({ parts: nextParts })
+      .where(eq(schema.messages.id, message.id))
+    for (const callId of missingCallIds) {
+      publish({
+        type: 'tool.result',
+        conversationId,
+        timestamp,
+        messageId: message.id,
+        callId,
+        result,
+        isError: true,
+      })
+    }
+  }
+}
+
+function buildUnresolvedToolFailureResult(
+  status: 'failed' | 'aborted',
+  error: string | undefined,
+): string {
+  if (status === 'aborted') return '工具调用未完成：本次运行已中止。'
+  return error
+    ? `工具调用未完成：本次运行失败。${error}`
+    : '工具调用未完成：本次运行失败。'
 }
 
 function finalizeOk(
@@ -1650,7 +1716,8 @@ function buildAgentHubToolGuidance(
       'fs_read 正确案例：fs_read({ path: "src/app/page.tsx" })，先看现有代码再改。',
       'fs_write 正确案例：fs_write({ path: "src/app/page.tsx", content: "完整的新文件内容" })；content 是完整文件内容，不是 diff patch。',
       'bash 正确案例：bash({ command: "pnpm typecheck" })，用于验证改动。',
-      '常见错误：fs_write 只写局部 diff、bash 里 cd 到 workspace 外、或在 Windows workspace 用 POSIX-only 参数。',
+      '临时启动服务测试时，必须在同一个 bash 命令里清理后台进程，例如 `npm run dev > /tmp/agenthub-dev.log 2>&1 & pid=$!; trap "kill $pid" EXIT; sleep 3; curl http://127.0.0.1:3000`；不要裸 `server &` 留长驻后台进程。',
+      '常见错误：fs_write 只写局部 diff、bash 里 cd 到 workspace 外、裸 `cmd &` 留后台服务、或在 Windows workspace 用 POSIX-only 参数。',
       '错误案例：读取 ~/.ssh、/etc、仓库外路径，或在没有看文件的情况下覆盖代码。',
     ])
   }

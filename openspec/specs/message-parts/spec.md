@@ -15,6 +15,16 @@ Message content MUST be an ordered `MessagePart[]`; rich content MUST not be hid
 - **THEN** the message stores `tool_use` and `tool_result` parts
 - **AND** the UI renders them as tool activity.
 
+#### Scenario: A bash tool call contains a long command
+- **WHEN** a `tool_use` part has `toolName='bash'` and string `args.command`
+- **THEN** the UI renders the command in a dedicated copyable terminal-style block
+- **AND** the command remains readable through wrapping or scrolling instead of being clipped.
+
+#### Scenario: A bash tool result includes output
+- **WHEN** the matching `tool_result` carries `result.output` or an error string
+- **THEN** the UI renders that output in a dedicated copyable terminal-style block
+- **AND** shows exit code, timeout, and truncation metadata when available.
+
 ### Requirement: Thinking content SHALL be distinct from text content
 
 Reasoning or planning output SHALL use `thinking` parts rather than regular `text` parts when the adapter can identify it.

@@ -83,7 +83,7 @@ interface AppState {
 |---|---|
 | `heartbeat` | 无变更（仅作连接保活信号，由 SSE 端定期发） |
 | `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running', usage: null }` |
-| `run.end` | 更新 run 的 `status` / `finishedAt` / `error` |
+| `run.end` | 更新 run 的 `status` / `finishedAt` / `error`；当 status 为 `failed` / `aborted` 时，把同 run 的 streaming 消息改为 `error` / `aborted`，并为未配对 `tool_result` 的 `tool_use` 补本地错误结果，避免工具卡停在「调用中」 |
 | `run.usage` | 更新 run 的 `usage` 字段（input/output/cache tokens）；派生 hook `useConversationUsageTotal` 据此聚合 |
 | `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
 | `message.end` | `messages[messageId].status = 'complete'`；若用户不在该会话（`activeConversationId !== conversationId`）则 `unreadByConv[conversationId] +1`。**不在 message.start 计未读**——claude-code-adapter 整 run 只发一次 message.start，那时用户通常仍在该会话被抑制，后续切走再无 +1 机会 |
@@ -91,7 +91,7 @@ interface AppState {
 | `part.delta` | 按 delta type 追加：`text.append` / `thinking.append` / `code.append`（其它类型 part 不增量） |
 | `part.end` | 无变更（前端用 `message.end` 收尾，不需要 part 级别 end） |
 | `tool.call` | 给消息 push 一个 `tool_use` part |
-| `tool.result` | 给消息 push 一个 `tool_result` part（前端按 callId 合并渲染） |
+| `tool.result` | 给消息 push 一个 `tool_result` part（前端按 callId 合并渲染）；若同 callId 结果已存在，则更新已有结果以配合失败兜底的幂等处理 |
 | `artifact.create` | `artifacts[artifact.id] = artifact`（不在消息里插 `artifact_ref` part，那由 `part.start` 单独投递） |
 | `artifact.update` | 浅合并 `content` patch（TODO：当前没有 emitter，前端 reducer 已就绪） |
 | `deploy.status` | 不直接改 store；AgentRunner 会补发 `part.start(deploy_status)`，reducer 按普通 part 写入 |

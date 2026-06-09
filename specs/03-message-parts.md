@@ -98,6 +98,10 @@ Agent 的主要文字输出。content 是 markdown 文本，前端用 `react-mar
 
 **渲染合并**：前端 `PartList`（`message-parts.tsx:14-46`）按 callId 把 `tool_use` + `tool_result` 合并为同一张 `ToolUsePart` 卡片，显示「调用中 / 已完成 / 失败」三态 + 详情可展开。tool_result 自身不单独渲染。
 
+**失败兜底**：run 失败或中止时，AgentRunner 会为该 run 内没有配对 `tool_result` 的 `tool_use` 补一个 `isError=true` 的 `tool_result` 并发布事件；前端 `run.end` reducer 也会做同样的本地兜底，避免工具卡长期停在「调用中」。
+
+**bash 命令 / 输出视图**：`toolName='bash'` 且 `args.command` 是字符串时，`ToolUsePart` 将命令提升为独立终端样式块，支持自动换行、滚动、复制和详情展开。若 `tool_result.result.output` 存在，或 `tool_result.isError=true` 且 result 是字符串，工具卡会默认显示独立输出块，直接反馈 stdout/stderr 或错误；其余参数 / 返回元数据仍在详情中以 JSON 块展示。
+
 ### 6. `artifact_ref`
 
 ```typescript
@@ -201,7 +205,7 @@ function PartList({ parts }) {
 | `code` | `<CodeBlock>` | shiki 双主题 |
 | `thinking` | `<ThinkingPart>` | 折叠 |
 | `tool_use` | `<ToolUsePart>` | 合并 tool_result 渲染 |
-| `tool_result` | （跳过） | 由 ToolUsePart 吸收 |
+| `tool_result` | （跳过） | 由 ToolUsePart 吸收；失败 / 中止 run 会为未闭合 tool_use 补错误结果 |
 | `artifact_ref` | `<ArtifactRefPart>` | 卡片，lazy fetch |
 | `deploy_status` | `<DeployStatusPart>` | 部署状态卡，ready 时带打开/复制，存在下载路径时带源码包/容器包下载 |
 | `deploy_candidates` | `<DeployCandidatesPart>` | 多个 web_app 候选选择卡，点击后调用部署 API |

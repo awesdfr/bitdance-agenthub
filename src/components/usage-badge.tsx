@@ -247,7 +247,7 @@ function ContextRow({ used, ceiling }: { used: number; ceiling: number }) {
     tone === 'danger' ? 'text-red-600 dark:text-red-400'
       : tone === 'warn' ? 'text-amber-600 dark:text-amber-400'
         : 'text-muted-foreground'
-  const barColor = tone === 'danger' ? 'bg-red-500' : tone === 'warn' ? 'bg-amber-500' : 'bg-primary/60'
+  const gradientSize = hasData && pct > 0 ? `${10000 / pct}% 100%` : '100% 100%'
 
   return (
     <div className="space-y-1" title="最近一次 prompt 大小 / 模型 contextWindow 上限">
@@ -259,7 +259,14 @@ function ContextRow({ used, ceiling }: { used: number; ceiling: number }) {
         </span>
       </div>
       <div className="h-1 overflow-hidden rounded-full bg-border/60">
-        <div className={cn('h-full transition-all', barColor)} style={{ width: `${pct}%` }} />
+        <div
+          className="h-full transition-all"
+          style={{
+            width: `${pct}%`,
+            backgroundImage: 'linear-gradient(90deg, #3370FF 0%, #F59E0B 68%, #EF4444 100%)',
+            backgroundSize: gradientSize,
+          }}
+        />
       </div>
     </div>
   )

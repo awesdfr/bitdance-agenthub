@@ -23,6 +23,11 @@ Zustand reducers MUST update conversation, message, artifact, pending write, pen
 - **WHEN** the event references an existing part
 - **THEN** the store appends content to that part without reordering other parts.
 
+#### Scenario: A failed run leaves an open tool call
+- **WHEN** `run.end` arrives with `status='failed'` or `status='aborted'`
+- **THEN** the store marks streaming messages from that run as terminal
+- **AND** appends local error `tool_result` parts for any unmatched `tool_use` call ids.
+
 ### Requirement: Artifact preview SHALL be separate from chat rendering
 
 The UI MUST render artifact previews in a dedicated panel and render chat artifact references as cards or links.

@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Image as ImageIcon, Layers, Loader2, Package, Presentation, Rocket, Sparkles, XCircle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, Image as ImageIcon, Layers, Loader2, Package, Presentation, Rocket, Sparkles, Terminal, XCircle } from 'lucide-react'
 import type { MouseEvent, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
@@ -276,6 +276,15 @@ function ToolUsePart({
   completion?: { result: unknown; isError: boolean }
 }) {
   const [showDetails, setShowDetails] = useState(false)
+  const command = toolName === 'bash' ? extractCommand(args) : null
+  const remainingArgs = command ? omitCommand(args) : args
+  const bashResult =
+    toolName === 'bash' && completion
+      ? extractBashResult(completion.result) ??
+        (completion.isError && typeof completion.result === 'string'
+          ? { output: completion.result }
+          : null)
+      : null
 
   const state: 'running' | 'success' | 'error' = !completion
     ? 'running'
@@ -302,45 +311,46 @@ function ToolUsePart({
   }[state]
 
   return (
-    <Card className={cn(styles)}>
-      <CardContent className="space-y-1 px-3 py-2">
-        <div className="flex items-center gap-2 text-xs">
+    <Card className={cn('min-w-0 overflow-hidden', styles)}>
+      <CardContent className="min-w-0 space-y-2 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
           {state === 'running' && <Loader2 className={cn('size-3.5 animate-spin', iconColor)} />}
           {state === 'success' && <Check className={cn('size-3.5', iconColor)} />}
           {state === 'error' && <XCircle className={cn('size-3.5', iconColor)} />}
-          <code className="rounded bg-black/5 px-1.5 py-0.5 font-mono text-[11px] dark:bg-white/10">
+          <code className="min-w-0 max-w-[12rem] truncate rounded bg-black/5 px-1.5 py-0.5 font-mono text-[11px] dark:bg-white/10">
             {toolName}
           </code>
           <span className="text-muted-foreground">·</span>
-          <span className="font-medium">{label}</span>
+          <span className="shrink-0 font-medium">{label}</span>
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
-            className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+            className="ml-auto shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
           >
             {showDetails ? '隐藏详情' : '详情'}
           </button>
         </div>
 
+        {command && <CommandPreview command={command} expanded={showDetails} />}
+        {bashResult && (
+          <BashOutputPreview
+            result={bashResult}
+            expanded={showDetails}
+            tone={completion?.isError ? 'error' : 'neutral'}
+          />
+        )}
+
         {showDetails && (
-          <div className="space-y-1 pt-1">
-            <div>
-              <div className="text-[10px] text-muted-foreground">参数</div>
-              <pre className="overflow-x-auto rounded bg-black/5 px-2 py-1 text-[11px] dark:bg-white/5">
-                {JSON.stringify(args, null, 2)}
-              </pre>
-            </div>
+          <div className="min-w-0 space-y-2 pt-1">
+            {remainingArgs !== null && (
+              <ToolDetailBlock label={command ? '其他参数' : '参数'} value={remainingArgs} />
+            )}
             {completion && (
-              <div>
-                <div className="text-[10px] text-muted-foreground">
-                  {completion.isError ? '错误' : '返回'}
-                </div>
-                <pre className="overflow-x-auto rounded bg-black/5 px-2 py-1 text-[11px] dark:bg-white/5">
-                  {typeof completion.result === 'string'
-                    ? completion.result
-                    : JSON.stringify(completion.result, null, 2)}
-                </pre>
-              </div>
+              <ToolDetailBlock
+                label={completion.isError ? '错误' : '返回'}
+                value={completion.result}
+                tone={completion.isError ? 'error' : 'neutral'}
+              />
             )}
             <div className="font-mono text-[10px] text-muted-foreground">{callId}</div>
           </div>
@@ -348,6 +358,177 @@ function ToolUsePart({
       </CardContent>
     </Card>
   )
+}
+
+function CommandPreview({ command, expanded }: { command: string; expanded: boolean }) {
+  return (
+    <TerminalPreviewBlock
+      label="命令"
+      content={command}
+      copyTitle="复制命令"
+      expanded={expanded}
+    />
+  )
+}
+
+interface BashResultPreview {
+  output: string
+  exitCode?: number | null
+  truncated?: boolean
+  timedOut?: boolean
+}
+
+function BashOutputPreview({
+  result,
+  expanded,
+  tone,
+}: {
+  result: BashResultPreview
+  expanded: boolean
+  tone: 'neutral' | 'error'
+}) {
+  const meta = [
+    typeof result.exitCode === 'number' ? `exit ${result.exitCode}` : null,
+    result.timedOut ? 'timeout' : null,
+    result.truncated ? 'truncated' : null,
+  ].filter(Boolean)
+  const shouldWarn = tone === 'error' || result.timedOut || (result.exitCode ?? 0) !== 0
+
+  return (
+    <TerminalPreviewBlock
+      label="输出"
+      content={result.output || '(无输出)'}
+      copyTitle="复制输出"
+      expanded={expanded}
+      meta={meta.length > 0 ? meta.join(' · ') : undefined}
+      tone={shouldWarn ? 'error' : 'neutral'}
+      collapsedMaxClassName="max-h-44"
+    />
+  )
+}
+
+function TerminalPreviewBlock({
+  label,
+  content,
+  copyTitle,
+  expanded,
+  meta,
+  tone = 'neutral',
+  collapsedMaxClassName = 'max-h-20',
+}: {
+  label: string
+  content: string
+  copyTitle: string
+  expanded: boolean
+  meta?: string
+  tone?: 'neutral' | 'error'
+  collapsedMaxClassName?: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        'min-w-0 overflow-hidden rounded-md border bg-zinc-950 text-zinc-100 shadow-sm',
+        tone === 'error'
+          ? 'border-red-700/70'
+          : 'border-zinc-200 dark:border-zinc-800',
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2 border-b border-zinc-800 px-2.5 py-1.5 text-[10px] text-zinc-400">
+        <Terminal className="size-3 shrink-0" />
+        <span className="shrink-0 font-medium">{label}</span>
+        {meta && <span className="min-w-0 truncate font-mono text-zinc-500">{meta}</span>}
+        <button
+          type="button"
+          onClick={copy}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+          title={copyTitle}
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          {copied ? '已复制' : '复制'}
+        </button>
+      </div>
+      <pre
+        className={cn(
+          'min-w-0 max-w-full overflow-auto px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-100 whitespace-pre-wrap break-words [overflow-wrap:anywhere]',
+          expanded ? 'max-h-80' : collapsedMaxClassName,
+        )}
+      >
+        <code>{content}</code>
+      </pre>
+    </div>
+  )
+}
+
+function ToolDetailBlock({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: unknown
+  tone?: 'neutral' | 'error'
+}) {
+  return (
+    <div
+      className={cn(
+        'min-w-0 overflow-hidden rounded-md border bg-background/70',
+        tone === 'error' && 'border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20',
+      )}
+    >
+      <div className="border-b border-border/60 px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+        {label}
+      </div>
+      <pre className="max-h-72 min-w-0 max-w-full overflow-auto px-2.5 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        <code>{formatToolValue(value)}</code>
+      </pre>
+    </div>
+  )
+}
+
+function extractCommand(value: unknown): string | null {
+  if (!isPlainRecord(value)) return null
+  const command = value.command
+  return typeof command === 'string' && command.trim() ? command : null
+}
+
+function omitCommand(value: unknown): unknown | null {
+  if (!isPlainRecord(value)) return value
+  const rest = { ...value }
+  delete rest.command
+  return Object.keys(rest).length > 0 ? rest : null
+}
+
+function extractBashResult(value: unknown): BashResultPreview | null {
+  if (!isPlainRecord(value) || typeof value.output !== 'string') return null
+  return {
+    output: value.output,
+    exitCode:
+      typeof value.exitCode === 'number' || value.exitCode === null ? value.exitCode : undefined,
+    truncated: typeof value.truncated === 'boolean' ? value.truncated : undefined,
+    timedOut: typeof value.timedOut === 'boolean' ? value.timedOut : undefined,
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function formatToolValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  const json = JSON.stringify(value, null, 2)
+  return json ?? String(value)
 }
 
 // ─── 连续 tool_use 折叠 cluster ────────────────────────
