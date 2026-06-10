@@ -12,10 +12,12 @@ export interface ConnectionHint {
 
 export function getConnectionHints({
   protocol,
-  port,
+  remotePort,
+  localPort,
 }: {
   protocol: string
-  port: string
+  remotePort: string
+  localPort: string
 }): ConnectionHint[] {
   const hints: ConnectionHint[] = []
   const seen = new Set<string>()
@@ -27,7 +29,7 @@ export function getConnectionHints({
       const kind = classifyIp(address.address)
       if (!kind) continue
 
-      const host = withPort(address.address, port)
+      const host = withPort(address.address, remotePort)
       const url = `${protocol}//${host}`
       if (seen.has(url)) continue
       seen.add(url)
@@ -42,7 +44,7 @@ export function getConnectionHints({
     }
   }
 
-  const localHost = withPort('localhost', port)
+  const localHost = withPort('localhost', localPort)
   hints.push({
     kind: 'local',
     label: '本机预览',

@@ -8,14 +8,16 @@ import { getAppSettings } from '@/server/settings-service'
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const settings = await getAppSettings()
-  const port =
+  const localPort = url.port || process.env.PORT || '3000'
+  const remotePort =
     settings.companionMode === 'off'
-      ? url.port || process.env.PORT || '3000'
+      ? localPort
       : String(DEFAULT_COMPANION_PORT)
   return NextResponse.json({
     hints: getConnectionHints({
       protocol: url.protocol,
-      port,
+      remotePort,
+      localPort,
     }),
     companionMode: settings.companionMode,
     mobileDeviceTokenConfigured: !!settings.mobileDeviceToken,
