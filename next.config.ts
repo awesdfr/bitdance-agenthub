@@ -12,10 +12,18 @@ const nextConfig: NextConfig = {
     '@openai/codex',
     '@modelcontextprotocol/sdk',
     'pptxgenjs',
+    'pdf-parse',
   ],
 
   outputFileTracingIncludes: {
-    '/*': ['scripts/agenthub-codex-mcp.mjs'],
+    '/*': [
+      'scripts/agenthub-codex-mcp.mjs',
+      // pdf-parse loads pdf.worker.mjs at runtime; keep worker assets in standalone/Electron.
+      'node_modules/pdf-parse/dist/**/*',
+      'node_modules/pdfjs-dist/**/*',
+      'node_modules/.pnpm/pdf-parse@*/node_modules/pdf-parse/dist/**/*',
+      'node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/**/*',
+    ],
   },
 
   outputFileTracingExcludes: {

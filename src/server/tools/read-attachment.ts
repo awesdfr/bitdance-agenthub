@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
+import path from 'node:path'
 
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
@@ -34,13 +35,13 @@ function isTextLike(mime: string): boolean {
  * - id 以 `att_` 开头的是 attachment，必须用 read_attachment
  * - id 以 `art_` 开头的是 artifact（agent 自己产出的产物），用 read_artifact
  *
- * 文本类附件直接返回内容；图片附件提示走 multimodal channel；其他二进制（PDF / docx 等）
- * 当前只返回元信息（未来可加 PDF 文本抽取）。
+ * 文本类附件直接返回内容；PDF 懒解析成文本；图片附件提示走 multimodal channel；
+ * 其他二进制（docx / zip 等）只返回元信息。
  */
 export const readAttachmentTool: ToolDef = {
   name: 'read_attachment',
   description:
-    "Read the contents of a user-uploaded attachment (id starts with 'att_'). Use this when the user prompt mentions [图片附件: ...] or [文件附件: ...]. Returns plain text for text-like files (txt/md/json/csv/etc). For images and binary formats only metadata is returned. Do NOT use this for ids starting with 'art_' — that's for read_artifact.",
+    "Read the contents of a user-uploaded attachment (id starts with 'att_'). Use this when the user prompt mentions [图片附件: ...] or [文件附件: ...]. Returns plain text for text-like files (txt/md/json/csv/etc) and extractable PDF text. For images and unsupported binary formats only metadata is returned. Do NOT use this for ids starting with 'art_' — that's for read_artifact.",
   parameters: {
     type: 'object',
     required: ['attachmentId'],
@@ -93,13 +94,28 @@ export const readAttachmentTool: ToolDef = {
       kind: row.kind,
     }
 
+    if (isPdfLike(row.mimeType, row.fileName, absPath)) {
+      if (ctx.abortSignal.aborted) {
+        return { ok: false, error: 'PDF extraction aborted' }
+      }
+      try {
+        const extracted = await extractPdfText(absPath)
+        if (ctx.abortSignal.aborted) {
+          return { ok: false, error: 'PDF extraction aborted' }
+        }
+        return { ok: true, value: { ...meta, ...extracted } }
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Failed to extract PDF text: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+    }
+
     if (isTextLike(row.mimeType)) {
       try {
         const raw = readFileSync(absPath, 'utf8')
-        const truncated = raw.length > MAX_TEXT_CHARS
-        const content = truncated
-          ? raw.slice(0, MAX_TEXT_CHARS) + `\n\n[TRUNCATED at ${MAX_TEXT_CHARS} chars]`
-          : raw
+        const { content, truncated } = truncateText(raw)
         return { ok: true, value: { ...meta, content, truncated } }
       } catch (err) {
         return {
@@ -128,4 +144,54 @@ export const readAttachmentTool: ToolDef = {
       },
     }
   },
+}
+
+function isPdfLike(mimeType: string, fileName: string, absPath: string): boolean {
+  if (mimeType === 'application/pdf') return true
+  if (path.extname(fileName).toLowerCase() === '.pdf') return true
+  const fd = openSync(absPath, 'r')
+  try {
+    const header = Buffer.alloc(5)
+    const bytesRead = readSync(fd, header, 0, header.length, 0)
+    return bytesRead === header.length && header.toString('ascii') === '%PDF-'
+  } catch {
+    return false
+  } finally {
+    closeSync(fd)
+  }
+}
+
+function truncateText(raw: string): { content: string; truncated: boolean } {
+  const truncated = raw.length > MAX_TEXT_CHARS
+  const content = truncated
+    ? raw.slice(0, MAX_TEXT_CHARS) + `\n\n[TRUNCATED at ${MAX_TEXT_CHARS} chars]`
+    : raw
+  return { content, truncated }
+}
+
+async function extractPdfText(absPath: string): Promise<{
+  content: string
+  truncated: boolean
+  pageCount: number
+  note?: string
+}> {
+  const { PDFParse } = await import('pdf-parse')
+  const parser = new PDFParse({ data: readFileSync(absPath) })
+  try {
+    const result = await parser.getText()
+    const text = result.text.trim()
+    const { content, truncated } = truncateText(text)
+    return {
+      content,
+      truncated,
+      pageCount: result.total,
+      ...(text
+        ? {}
+        : {
+            note: 'No extractable text was found in this PDF. It may be scanned or image-only; OCR is required to inspect its content.',
+          }),
+    }
+  } finally {
+    await parser.destroy().catch(() => undefined)
+  }
 }
