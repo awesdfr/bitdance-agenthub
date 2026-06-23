@@ -1,7 +1,18 @@
 'use client'
 
-import { Cpu, MessageSquareText, SlidersHorizontal, Sparkles, User, Wrench } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  Cable,
+  Cpu,
+  Loader2,
+  MessageSquareText,
+  PackageCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Terminal,
+  User,
+  Wrench,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AgentCreateWizard } from '@/components/agent-create-wizard'
 import { Button } from '@/components/ui/button'
@@ -16,9 +27,13 @@ import {
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import type { AgentRow } from '@/db/schema'
+import type { AgentRow, CliProfileRow, McpServerRow, ModelProfileRow, SkillRow } from '@/db/schema'
 import {
   createAgent,
+  fetchCliProfiles,
+  fetchMcpServers,
+  fetchModelProfiles,
+  fetchSkillsCenterData,
   updateAgent,
   type CreateAgentBody,
   type UpdateAgentBody,
@@ -26,16 +41,12 @@ import {
 import { cn } from '@/lib/utils'
 import {
   AGENT_BUILDER_PROVIDER_DEFAULTS as PROVIDER_DEFAULTS,
-  AGENT_TOOL_META as TOOL_META,
-  AGENT_TOOL_PRESETS as TOOL_PRESETS,
-  AVAILABLE_AGENT_TOOLS,
   CLAUDE_CODE_DEFAULT_MODEL,
   CODEX_DEFAULT_MODEL,
   DEFAULT_CUSTOM_AGENT_TOOLS,
   type AgentBuilderAdapter as AdapterKind,
   type AgentBuilderProvider as Provider,
   type AgentConfigDraft,
-  type AgentToolName as ToolName,
 } from '@/shared/agent-builder-config'
 import { validateCodexBaseUrl } from '@/shared/codex-compat'
 import {
@@ -47,6 +58,18 @@ import { useAppStore } from '@/stores/app-store'
 type AgentTab = 'basic' | 'model' | 'toolsPrompt'
 type CreateStep = 'choose' | 'wizard' | 'detail'
 
+interface CapabilityCatalog {
+  skills: SkillRow[]
+  mcpServers: McpServerRow[]
+  cliProfiles: CliProfileRow[]
+}
+
+const emptyCapabilityCatalog: CapabilityCatalog = {
+  skills: [],
+  mcpServers: [],
+  cliProfiles: [],
+}
+
 const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub custom agent。你的任务是理解用户目标，使用已启用的工具完成工作，并把结果清晰交付给用户。
 
 工作原则：
@@ -56,6 +79,37 @@ const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub custom agent。你�
 4. 产出代码、网页、文档或设计稿时，优先用 write_artifact 创建结构化产物；网页产物完成后再调用 deploy_artifact。
 5. 探索项目目录时优先用 fs_list，再用 fs_read 读取具体文件；使用 fs_write 或 bash 前确认确有必要，并只在当前 workspace 范围内操作。
 6. 最终回复保持简洁，说明完成了什么、产物在哪里、还剩什么需要用户决策。`
+
+const MANUAL_MODEL_VALUE = '__manual_model__'
+
+const SUPPORTED_AGENT_MODEL_PROFILE_PROVIDERS = new Set<ModelProfileRow['provider']>([
+  'anthropic',
+  'openai',
+  'deepseek',
+  'volcano-ark',
+])
+
+function isAgentCompatibleModelProfile(profile: ModelProfileRow) {
+  return SUPPORTED_AGENT_MODEL_PROFILE_PROVIDERS.has(profile.provider)
+}
+
+function modelProfileProviderToAgentProvider(providerValue: ModelProfileRow['provider']): Provider | null {
+  if (!SUPPORTED_AGENT_MODEL_PROFILE_PROVIDERS.has(providerValue)) return null
+  return providerValue as Provider
+}
+
+function modelProfileStatusLabel(status: ModelProfileRow['healthStatus']) {
+  if (status === 'ok') return '已通过'
+  if (status === 'failed') return '异常'
+  return '未测试'
+}
+
+function modelProfileMatchesAgent(profile: ModelProfileRow, agent: AgentRow) {
+  const mappedProvider = modelProfileProviderToAgentProvider(profile.provider)
+  if (!mappedProvider) return false
+  if (agent.modelProvider !== mappedProvider || agent.modelId !== profile.model) return false
+  return !agent.apiBaseUrl || agent.apiBaseUrl === profile.baseUrl
+}
 
 /**
  * 创建 / 编辑 Agent 的对话框。
@@ -79,10 +133,19 @@ export function CreateAgentDialog({
   const [description, setDescription] = useState('')
   const [capabilitiesText, setCapabilitiesText] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [modelProfiles, setModelProfiles] = useState<ModelProfileRow[]>([])
+  const [modelProfilesLoading, setModelProfilesLoading] = useState(false)
+  const [capabilityCatalog, setCapabilityCatalog] =
+    useState<CapabilityCatalog>(emptyCapabilityCatalog)
+  const [capabilityCatalogLoading, setCapabilityCatalogLoading] = useState(false)
+  const [selectedModelProfileId, setSelectedModelProfileId] = useState('')
   const [adapterKind, setAdapterKind] = useState<AdapterKind>('custom')
   const [provider, setProvider] = useState<Provider>('deepseek')
   const [modelId, setModelId] = useState(PROVIDER_DEFAULTS.deepseek.defaultModel)
   const [toolNames, setToolNames] = useState<Set<string>>(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set())
+  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<Set<string>>(new Set())
+  const [selectedCliProfileIds, setSelectedCliProfileIds] = useState<Set<string>>(new Set())
   const [supportsVision, setSupportsVision] = useState(true)
   const [apiKey, setApiKey] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
@@ -91,6 +154,72 @@ export function CreateAgentDialog({
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<AgentTab>('basic')
   const [createStep, setCreateStep] = useState<CreateStep>('choose')
+
+  const compatibleModelProfiles = useMemo(
+    () => modelProfiles.filter(isAgentCompatibleModelProfile),
+    [modelProfiles],
+  )
+  const selectedModelProfile = useMemo(
+    () =>
+      compatibleModelProfiles.find((profile) => profile.id === selectedModelProfileId) ?? null,
+    [compatibleModelProfiles, selectedModelProfileId],
+  )
+
+  const applyModelProfile = useCallback((profile: ModelProfileRow) => {
+    const nextProvider = modelProfileProviderToAgentProvider(profile.provider)
+    if (!nextProvider) return
+    setSelectedModelProfileId(profile.id)
+    setAdapterKind('custom')
+    setProvider(nextProvider)
+    setModelId(profile.model)
+    setApiBaseUrl(profile.baseUrl)
+    setApiKey('')
+    setSupportsVision(profile.supportsVision)
+    setToolNames((prev) => (prev.size === 0 ? new Set(DEFAULT_CUSTOM_AGENT_TOOLS) : prev))
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setModelProfilesLoading(true)
+    fetchModelProfiles()
+      .then((profiles) => {
+        if (alive) setModelProfiles(profiles)
+      })
+      .catch(() => {
+        if (alive) setModelProfiles([])
+      })
+      .finally(() => {
+        if (alive) setModelProfilesLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setCapabilityCatalogLoading(true)
+    Promise.all([fetchSkillsCenterData(), fetchMcpServers(), fetchCliProfiles()])
+      .then(([skillsData, mcpServers, cliProfiles]) => {
+        if (!alive) return
+        setCapabilityCatalog({
+          skills: skillsData.skills,
+          mcpServers,
+          cliProfiles,
+        })
+      })
+      .catch(() => {
+        if (alive) setCapabilityCatalog(emptyCapabilityCatalog)
+      })
+      .finally(() => {
+        if (alive) setCapabilityCatalogLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [open])
 
   // 每次打开 / 切换 agent 时，重置表单到该 agent 的当前值（或创建态的默认）。
   useEffect(() => {
@@ -118,9 +247,13 @@ export function CreateAgentDialog({
               : PROVIDER_DEFAULTS[p].defaultModel),
       )
       setToolNames(new Set(agent.toolNames))
+      setSelectedSkillIds(new Set(agent.skillIds))
+      setSelectedMcpServerIds(new Set(agent.mcpServerIds))
+      setSelectedCliProfileIds(new Set(agent.cliProfileIds))
       setSupportsVision(agent.supportsVision)
       setApiKey(agent.apiKey ?? '')
       setApiBaseUrl(agent.apiBaseUrl ?? '')
+      setSelectedModelProfileId('')
     } else {
       setAdapterKind('custom')
       setName('')
@@ -130,9 +263,13 @@ export function CreateAgentDialog({
       setProvider('deepseek')
       setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
       setToolNames(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+      setSelectedSkillIds(new Set())
+      setSelectedMcpServerIds(new Set())
+      setSelectedCliProfileIds(new Set())
       setSupportsVision(true)
       setApiKey('')
       setApiBaseUrl('')
+      setSelectedModelProfileId('')
       setCreateStep('choose')
     }
     if (agent) setCreateStep('detail')
@@ -141,40 +278,35 @@ export function CreateAgentDialog({
     setActiveTab('basic')
   }, [open, agent])
 
-  const handleAdapterKindChange = (kind: AdapterKind) => {
-    setAdapterKind(kind)
-    if (kind === 'claude-code') {
-      setModelId(CLAUDE_CODE_DEFAULT_MODEL)
-    } else if (kind === 'codex') {
-      setModelId(CODEX_DEFAULT_MODEL)
-    } else {
-      setModelId(PROVIDER_DEFAULTS[provider].defaultModel)
-      setToolNames((prev) => (prev.size === 0 ? new Set(DEFAULT_CUSTOM_AGENT_TOOLS) : prev))
-      setSystemPrompt((prev) => (prev.trim() ? prev : DEFAULT_CUSTOM_SYSTEM_PROMPT))
+  useEffect(() => {
+    if (!open || compatibleModelProfiles.length === 0) return
+    if (agent) {
+      const match = compatibleModelProfiles.find((profile) => modelProfileMatchesAgent(profile, agent))
+      setSelectedModelProfileId(match?.id ?? MANUAL_MODEL_VALUE)
+      return
     }
-  }
+    if (!selectedModelProfileId) applyModelProfile(compatibleModelProfiles[0])
+  }, [agent, applyModelProfile, compatibleModelProfiles, open, selectedModelProfileId])
 
   const handleProviderChange = (p: Provider) => {
+    setSelectedModelProfileId(MANUAL_MODEL_VALUE)
+    setAdapterKind('custom')
     setProvider(p)
     // 切换 provider 时把 modelId 自动重置到该 provider 的默认（避免跨家串）
     setModelId(PROVIDER_DEFAULTS[p].defaultModel)
   }
 
-  const toggleTool = (t: string) => {
-    setToolNames((prev) => {
+  const toggleSelectedId = (
+    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
+    id: string,
+  ) => {
+    setter((prev) => {
       const next = new Set(prev)
-      if (next.has(t)) next.delete(t)
-      else next.add(t)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
-
-  const applyToolPreset = (tools: readonly ToolName[]) => {
-    setToolNames(new Set(tools))
-  }
-
-  const isPresetActive = (tools: readonly ToolName[]) =>
-    toolNames.size === tools.length && tools.every((toolName) => toolNames.has(toolName))
 
   const applyDraftToForm = (draft: AgentConfigDraft) => {
     const kind = draft.adapterName
@@ -223,6 +355,9 @@ export function CreateAgentDialog({
         modelProvider: isSdkAgent ? undefined : draft.modelProvider,
         modelId: draft.modelId?.trim() || undefined,
         toolNames: isSdkAgent ? [] : draft.toolNames,
+        skillIds: [],
+        mcpServerIds: [],
+        cliProfileIds: [],
         supportsVision: draft.supportsVision,
       }
       const created = await createAgent(body)
@@ -249,7 +384,7 @@ export function CreateAgentDialog({
     if (!trimmed) return fail('basic', '名称不能为空')
     if (!description.trim()) return fail('basic', '描述不能为空')
     if (!systemPrompt.trim()) return fail('toolsPrompt', 'System Prompt 不能为空')
-    if (adapterKind === 'custom' && !modelId.trim()) return fail('model', 'Custom adapter 必须填写 Model ID')
+    if (adapterKind === 'custom' && !modelId.trim()) return fail('model', '请先选择模型，或手动填写模型 ID')
     const trimmedApiBaseUrl = apiBaseUrl.trim()
     const trimmedApiKey = apiKey.trim()
     if (adapterKind === 'codex') {
@@ -283,6 +418,9 @@ export function CreateAgentDialog({
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: isSdkAgent ? modelId.trim() || null : modelId.trim(),
           toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          skillIds: Array.from(selectedSkillIds),
+          mcpServerIds: Array.from(selectedMcpServerIds),
+          cliProfileIds: Array.from(selectedCliProfileIds),
           supportsVision,
           apiKey: trimmedApiKey || null,
           apiBaseUrl: trimmedApiBaseUrl || null,
@@ -300,6 +438,9 @@ export function CreateAgentDialog({
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: modelId.trim() || undefined,
           toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          skillIds: Array.from(selectedSkillIds),
+          mcpServerIds: Array.from(selectedMcpServerIds),
+          cliProfileIds: Array.from(selectedCliProfileIds),
           supportsVision,
           apiKey: trimmedApiKey || undefined,
           apiBaseUrl: trimmedApiBaseUrl || undefined,
@@ -365,11 +506,11 @@ export function CreateAgentDialog({
               </TabsTrigger>
               <TabsTrigger value="model">
                 <Cpu className="size-3.5" />
-                模型与适配器
+                模型
               </TabsTrigger>
               <TabsTrigger value="toolsPrompt">
                 <Wrench className="size-3.5" />
-                工具与提示词
+                能力与提示词
               </TabsTrigger>
             </TabsList>
 
@@ -408,320 +549,217 @@ export function CreateAgentDialog({
 
               <TabsContent value="model" className="mt-0 space-y-3 py-1">
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                  <Label>适配器</Label>
-                  <div className="flex flex-col gap-1.5">
-                    <label
-                      className={cn(
-                        'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
-                        adapterKind === 'custom' && 'border-primary bg-primary/5',
-                      )}
-                    >
-                      <input
-                        type="radio"
-                        name="adapterKind"
-                        checked={adapterKind === 'custom'}
-                        onChange={() => handleAdapterKindChange('custom')}
-                        className="mt-0.5 accent-primary"
-                      />
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium">Custom Agent SDK</div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          用 DeepSeek / OpenAI / 火山方舟 / 自定义 OpenAI-compatible API。可自定义工具集和模型。
+                  <Label required>模型</Label>
+                  <div className="space-y-2">
+                    {compatibleModelProfiles.length > 0 ? (
+                      <select
+                        value={selectedModelProfile?.id ?? MANUAL_MODEL_VALUE}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (value === MANUAL_MODEL_VALUE) {
+                            setSelectedModelProfileId(MANUAL_MODEL_VALUE)
+                            setAdapterKind('custom')
+                            return
+                          }
+                          const profile = compatibleModelProfiles.find((item) => item.id === value)
+                          if (profile) applyModelProfile(profile)
+                        }}
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none transition focus:border-ring"
+                      >
+                        {compatibleModelProfiles.map((profile) => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.name} · {profile.model}
+                          </option>
+                        ))}
+                        <option value={MANUAL_MODEL_VALUE}>手动填写模型</option>
+                      </select>
+                    ) : (
+                      <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                        {modelProfilesLoading
+                          ? '正在读取模型配置...'
+                          : '还没有可直接选择的模型。可以先去「模型管理」添加并测试，也可以在下面手动填写。'}
+                      </div>
+                    )}
+
+                    {selectedModelProfile ? (
+                      <div className="rounded-md border bg-primary/5 px-3 py-2 text-xs leading-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{selectedModelProfile.name}</span>
+                          <span className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {PROVIDER_DEFAULTS[provider]?.label ?? selectedModelProfile.provider}
+                          </span>
+                          <span className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {modelProfileStatusLabel(selectedModelProfile.healthStatus)}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                          {selectedModelProfile.model}
                         </div>
                       </div>
-                    </label>
-                    <label
-                      className={cn(
-                        'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
-                        adapterKind === 'claude-code' && 'border-primary bg-primary/5',
-                      )}
-                    >
-                      <input
-                        type="radio"
-                        name="adapterKind"
-                        checked={adapterKind === 'claude-code'}
-                        onChange={() => handleAdapterKindChange('claude-code')}
-                        className="mt-0.5 accent-primary"
-                      />
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium">Claude Code SDK</div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          用 @anthropic-ai/claude-agent-sdk，自带 Bash / Read / Write / Edit / Grep / Glob / WebFetch / Task 子 agent 等一整套工具。
-                        </div>
+                    ) : (
+                      <div className="text-[10px] leading-4 text-muted-foreground">
+                        新 Agent 默认使用这里选中的模型。模型的 API Key、代理出口和连通性建议统一在左侧「模型管理」里维护。
                       </div>
-                    </label>
-                    <label
-                      className={cn(
-                        'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
-                        adapterKind === 'codex' && 'border-primary bg-primary/5',
-                      )}
-                    >
-                      <input
-                        type="radio"
-                        name="adapterKind"
-                        checked={adapterKind === 'codex'}
-                        onChange={() => handleAdapterKindChange('codex')}
-                        className="mt-0.5 accent-primary"
-                      />
-                      <div className="min-w-0">
-                        <div className="text-xs font-medium">Codex SDK</div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          用 @openai/codex-sdk，支持本地仓库读写、命令执行、线程续接和结构化事件流；需要 Codex/Responses 兼容后端。
-                        </div>
-                      </div>
-                    </label>
+                    )}
                   </div>
                 </div>
 
-                {adapterKind === 'custom' ? (
+                {!selectedModelProfile && (
                   <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                    <Label>底层模型</Label>
+                    <Label>手动模型</Label>
                     <div className="flex gap-2">
                       <select
                         value={provider}
-                        onChange={(e) => handleProviderChange(e.target.value as Provider)}
+                        onChange={(event) => handleProviderChange(event.target.value as Provider)}
                         className="rounded-md border bg-background px-2 py-1.5 text-sm"
                       >
-                        {(Object.keys(PROVIDER_DEFAULTS) as Provider[]).map((p) => (
-                          <option key={p} value={p}>
-                            {PROVIDER_DEFAULTS[p].label}
+                        {(Object.keys(PROVIDER_DEFAULTS) as Provider[]).map((item) => (
+                          <option key={item} value={item}>
+                            {PROVIDER_DEFAULTS[item].label}
                           </option>
                         ))}
                       </select>
                       <Input
                         value={modelId}
-                        onChange={(e) => setModelId(e.target.value)}
+                        onChange={(event) => {
+                          setSelectedModelProfileId(MANUAL_MODEL_VALUE)
+                          setAdapterKind('custom')
+                          setModelId(event.target.value)
+                        }}
                         placeholder="model id"
                         className="flex-1 font-mono text-xs"
                       />
                     </div>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                    <Label>Model ID</Label>
-                    <div>
-                      <Input
-                        value={modelId}
-                        onChange={(e) => setModelId(e.target.value)}
-                        placeholder={
-                          adapterKind === 'claude-code' ? CLAUDE_CODE_DEFAULT_MODEL : CODEX_DEFAULT_MODEL
-                        }
-                        className="font-mono text-xs"
-                      />
-                      <div className="mt-1 text-[10px] text-muted-foreground">
-                        {adapterKind === 'claude-code' ? (
-                          <>
-                            Claude 模型 id，例 <code className="font-mono">claude-opus-4-7</code> /{' '}
-                            <code className="font-mono">claude-sonnet-4-6</code>。留空走 SDK 默认。
-                          </>
-                        ) : (
-                          <>
-                            Codex 模型 id，例 <code className="font-mono">gpt-5-codex</code>。留空走 SDK 默认。
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 )}
 
-                {(adapterKind === 'claude-code' ||
-                  adapterKind === 'codex' ||
-                  (adapterKind === 'custom' && provider === 'openai-compatible')) && (
-                  <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                    <Label required={adapterKind === 'custom' && provider === 'openai-compatible'}>Base URL</Label>
-                    <div>
-                      <Input
-                        value={apiBaseUrl}
-                        onChange={(e) => setApiBaseUrl(e.target.value)}
-                        placeholder={
-                          adapterKind === 'claude-code'
-                            ? 'https://api.anthropic.com（默认）'
-                            : adapterKind === 'codex'
-                              ? 'https://api.openai.com/v1（默认，需支持 /responses）'
-                              : 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-                        }
-                        className="font-mono text-xs"
-                      />
-                      <div className="mt-1 text-[10px] text-muted-foreground">
-                        {adapterKind === 'claude-code' ? (
-                          <>
-                            指向第三方 Claude API 兼容网关（如 <code className="font-mono">https://anyrouter.top</code>）；留空走 Anthropic 官方 endpoint。配此项时下方 API Key 自动作为 <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code> 传给 SDK。
-                          </>
-                        ) : adapterKind === 'codex' ? (
-                          <>
-                            必须指向 Codex/Responses 兼容 endpoint；DeepSeek / 火山方舟等 Chat Completions 兼容接口请用 Custom adapter。留空走 Codex SDK 默认 endpoint。
-                          </>
-                        ) : (
-                          <>
-                            必须指向 OpenAI Chat Completions 兼容 endpoint，例如通义千问 compatible-mode、智谱 / MiniMax / OpenRouter / SiliconFlow 的 OpenAI 兼容地址。
-                          </>
-                        )}
+                <details className="rounded-md border bg-muted/20 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                    高级覆盖
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                      <Label>Base URL</Label>
+                      <div>
+                        <Input
+                          value={apiBaseUrl}
+                          onChange={(event) => setApiBaseUrl(event.target.value)}
+                          placeholder="留空则使用模型默认地址"
+                          className="font-mono text-xs"
+                        />
+                        <div className="mt-1 text-[10px] text-muted-foreground">
+                          只有临时覆盖模型出口时才需要填写；普通用户保持默认即可。
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
 
-                <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                  <Label>
-                    {adapterKind === 'claude-code' && apiBaseUrl.trim() ? 'Auth Token' : 'API Key'}
-                  </Label>
-                  <div>
-                    <div className="flex gap-2">
-                      <Input
-                        type={showApiKey ? 'text' : 'password'}
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={
-                          adapterKind === 'claude-code' && apiBaseUrl.trim()
-                            ? '第三方网关的 token'
-                            : adapterKind === 'codex' && apiBaseUrl.trim()
-                              ? 'Codex/Responses endpoint token'
-                              : adapterKind === 'custom' && provider === 'openai-compatible'
-                                ? 'OpenAI-compatible endpoint token'
-                              : '留空则使用环境变量'
-                        }
-                        className="flex-1 font-mono text-xs"
-                        autoComplete="off"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowApiKey((v) => !v)}
+                    <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                      <Label>API Key</Label>
+                      <div>
+                        <div className="flex gap-2">
+                          <Input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={apiKey}
+                            onChange={(event) => setApiKey(event.target.value)}
+                            placeholder="留空则使用系统设置或环境变量"
+                            className="flex-1 font-mono text-xs"
+                            autoComplete="off"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowApiKey((value) => !value)}
+                          >
+                            {showApiKey ? '隐藏' : '显示'}
+                          </Button>
+                        </div>
+                        <div className="mt-1 text-[10px] text-muted-foreground">
+                          这里只适合给单个 Agent 临时覆盖密钥；常用密钥请放到「模型管理」或系统设置。
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                      <Label>视觉</Label>
+                      <label
+                        className={cn(
+                          'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                          supportsVision && 'border-primary bg-primary/5',
+                        )}
                       >
-                        {showApiKey ? '隐藏' : '显示'}
-                      </Button>
-                    </div>
-                    <div className="mt-1 text-[10px] text-muted-foreground">
-                      {adapterKind === 'claude-code' && apiBaseUrl.trim() ? (
-                        <>填写后作为 <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code> 传给 SDK，路由到自定义 Base URL；留空则透传空 token（第三方网关可能拒绝）</>
-                      ) : adapterKind === 'codex' && apiBaseUrl.trim() ? (
-                        <>填写后作为 <code className="font-mono">CODEX_API_KEY</code> 传给 SDK，路由到自定义 Codex/Responses Base URL；留空则走 AgentHub 设置或环境变量</>
-                      ) : adapterKind === 'custom' && provider === 'openai-compatible' ? (
-                        <>OpenAI-compatible provider 需要为该 agent 单独填写 API Key；不会使用全局 OpenAI / DeepSeek / 火山方舟 key。</>
-                      ) : (
-                        <>
-                          填写后该 agent 优先用此 key；留空则 fallback 到{' '}
-                          <code className="font-mono">
-                            {adapterKind === 'claude-code'
-                              ? 'ANTHROPIC_API_KEY 环境变量 / 本机 ~/.claude OAuth 登录态'
-                              : adapterKind === 'codex'
-                                ? 'OPENAI_API_KEY / CODEX_API_KEY 环境变量'
-                              : provider === 'deepseek'
-                                ? 'DEEPSEEK_API_KEY'
-                                : provider === 'volcano-ark'
-                                  ? 'ARK_API_KEY'
-                                  : provider === 'openai'
-                                    ? 'OPENAI_API_KEY'
-                                    : provider === 'anthropic'
-                                      ? 'ANTHROPIC_API_KEY'
-                                      : '该 agent 的 API Key'}
-                          </code>
-                          {adapterKind === 'claude-code' || adapterKind === 'codex' ? '' : ' 环境变量'}
-                        </>
-                      )}
+                        <input
+                          type="checkbox"
+                          checked={supportsVision}
+                          onChange={(event) => setSupportsVision(event.target.checked)}
+                          className="mt-0.5 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium">允许这个 Agent 接收图片</div>
+                          <div className="mt-0.5 text-[10px] text-muted-foreground">
+                            只有所选模型本身支持多模态时才会生效。
+                          </div>
+                        </div>
+                      </label>
                     </div>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                  <Label>视觉</Label>
-                  <label
-                    className={cn(
-                      'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
-                      supportsVision && 'border-primary bg-primary/5',
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={supportsVision}
-                      onChange={(e) => setSupportsVision(e.target.checked)}
-                      className="mt-0.5 accent-primary"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium">该模型支持视觉（多模态）</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">
-                        {adapterKind === 'codex'
-                          ? '勾选后，发图片时会以本地图片输入传给 Codex SDK。模型不支持会被拒绝，请确认 modelId 支持视觉。'
-                          : '勾选后，发图片时会以 base64 注入 messages.content。模型不支持会被 API 拒绝 (400)，请确认你填的 modelId 真的支持视觉。'}
-                      </div>
-                    </div>
-                  </label>
-                </div>
+                </details>
               </TabsContent>
 
               <TabsContent value="toolsPrompt" className="mt-0 space-y-3 py-1">
-                {adapterKind === 'custom' ? (
-                  <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                    <Label>工具集</Label>
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {TOOL_PRESETS.map((preset) => {
-                          const active = isPresetActive(preset.tools)
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => applyToolPreset(preset.tools)}
-                              className={cn(
-                                'rounded-md border px-2.5 py-2 text-left transition hover:border-foreground/30',
-                                active && 'border-primary bg-primary/5',
-                              )}
-                            >
-                              <div className="text-xs font-medium">{preset.label}</div>
-                              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                                {preset.desc}
-                              </div>
-                            </button>
-                          )
-                        })}
+                <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                  <Label>可用能力</Label>
+                  <div className="space-y-2">
+                    {capabilityCatalogLoading ? (
+                      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
+                        <Loader2 className="size-3.5 animate-spin" />
+                        正在读取已配置能力
                       </div>
-                      {AVAILABLE_AGENT_TOOLS.map((t) => {
-                        const meta = TOOL_META[t]
-                        return (
-                          <label
-                            key={t}
-                            className={cn(
-                              'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
-                              toolNames.has(t) && 'border-primary bg-primary/5',
-                            )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={toolNames.has(t)}
-                              onChange={() => toggleTool(t)}
-                              className="mt-0.5 accent-primary"
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium">{meta.label}</span>
-                                <code className="font-mono text-[10px] text-muted-foreground">{t}</code>
-                              </div>
-                              <div className="mt-0.5 text-[10px] text-muted-foreground">{meta.desc}</div>
-                            </div>
-                          </label>
-                        )
-                      })}
-                    </div>
+                    ) : (
+                      <>
+                        <CapabilityPickGroup
+                          icon={<PackageCheck className="size-3.5" />}
+                          title="已安装 Skills"
+                          emptyText="还没有已安装技能，可先去「技能中心」安装。"
+                          items={capabilityCatalog.skills.map((skill) => ({
+                            id: skill.id,
+                            title: skill.name,
+                            description: skill.description,
+                            meta: skill.enabled ? '已启用' : '已禁用',
+                          }))}
+                          selectedIds={selectedSkillIds}
+                          onToggle={(id) => toggleSelectedId(setSelectedSkillIds, id)}
+                        />
+                        <CapabilityPickGroup
+                          icon={<Cable className="size-3.5" />}
+                          title="MCP 工具"
+                          emptyText="还没有 MCP 工具，可先去「工具连接」添加。"
+                          items={capabilityCatalog.mcpServers.map((server) => ({
+                            id: server.id,
+                            title: server.displayName,
+                            description: server.command ?? server.endpoint ?? 'MCP 工具连接',
+                            meta: server.enabled ? server.healthStatus : '已禁用',
+                          }))}
+                          selectedIds={selectedMcpServerIds}
+                          onToggle={(id) => toggleSelectedId(setSelectedMcpServerIds, id)}
+                        />
+                        <CapabilityPickGroup
+                          icon={<Terminal className="size-3.5" />}
+                          title="CLI 命令"
+                          emptyText="还没有 CLI，可先去「工具连接」接入。"
+                          items={capabilityCatalog.cliProfiles.map((cli) => ({
+                            id: cli.id,
+                            title: cli.name,
+                            description: `${cli.command} ${cli.argsTemplate}`.trim(),
+                            meta: cli.requiresApproval ? '需要审批' : '可直接运行',
+                          }))}
+                          selectedIds={selectedCliProfileIds}
+                          onToggle={(id) => toggleSelectedId(setSelectedCliProfileIds, id)}
+                        />
+                      </>
+                    )}
                   </div>
-                ) : (
-                  <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                    <Label>工具集</Label>
-                    <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
-                      {adapterKind === 'claude-code' ? (
-                        <>
-                          Claude Code agent 使用 SDK 内置工具集：Bash / Read / Write / Edit / Grep / Glob /
-                          WebFetch / WebSearch / Task / TodoWrite 等。审批 / 沙箱 / 黑名单仍由 AgentHub 接管。
-                        </>
-                      ) : (
-                        <>
-                          Codex agent 使用 Codex SDK 内置的本地命令、文件修改、MCP 调用和计划事件。
-                          Review 模式下以只读沙箱运行；Auto 模式下允许 workspace-write。运行时使用 AgentHub 隔离配置，不读取本机 ~/.codex。
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                </div>
 
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                   <Label required>System Prompt</Label>
@@ -812,7 +850,7 @@ function CreateModeChoice({
           <div className="min-w-0">
             <div className="text-sm font-medium">详细配置</div>
             <div className="mt-1 text-xs leading-5 text-muted-foreground">
-              直接编辑名称、模型、API Key、工具权限和 System Prompt。
+              直接编辑名称、模型、工具权限和提示词。
             </div>
           </div>
         </button>
@@ -824,6 +862,79 @@ function CreateModeChoice({
         </Button>
       </div>
     </div>
+  )
+}
+
+function CapabilityPickGroup({
+  icon,
+  title,
+  emptyText,
+  items,
+  selectedIds,
+  onToggle,
+}: {
+  icon: React.ReactNode
+  title: string
+  emptyText: string
+  items: Array<{
+    id: string
+    title: string
+    description: string
+    meta: string
+  }>
+  selectedIds: Set<string>
+  onToggle: (id: string) => void
+}) {
+  return (
+    <section className="rounded-md border bg-background">
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
+          {icon}
+          <span className="truncate">{title}</span>
+        </div>
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          已选 {selectedIds.size}
+        </span>
+      </div>
+      <div className="grid max-h-48 gap-1.5 overflow-y-auto p-2">
+        {items.length === 0 ? (
+          <div className="rounded-md border border-dashed bg-muted/20 px-3 py-3 text-center text-[11px] text-muted-foreground">
+            {emptyText}
+          </div>
+        ) : (
+          items.map((item) => {
+            const selected = selectedIds.has(item.id)
+            return (
+              <label
+                key={item.id}
+                className={cn(
+                  'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                  selected && 'border-primary bg-primary/5',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => onToggle(item.id)}
+                  className="mt-0.5 accent-primary"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-xs font-medium">{item.title}</span>
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {item.meta}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">
+                    {item.description}
+                  </div>
+                </div>
+              </label>
+            )
+          })
+        )}
+      </div>
+    </section>
   )
 }
 

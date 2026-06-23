@@ -3,10 +3,13 @@ import { rm as fsRm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { and, desc, eq, gt, gte, inArray } from 'drizzle-orm'
+import OpenAI from 'openai'
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
-import type { ConversationWithMeta, MessageRow } from '@/db/schema'
+import type { ConversationWithMeta, MessageRow, ModelProfileRow } from '@/db/schema'
 import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
+import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
@@ -23,6 +26,7 @@ import {
 } from './ids'
 import { pendingDispatchPlans } from './pending-dispatch-plans'
 import { IS_WINDOWS } from './platform'
+import { resolveSecretValue } from './security-service'
 import { isPathSafe } from './workspace-utils'
 
 // Electron 模式下 main 进程注入 AGENTHUB_DATA_DIR；web / dev 走 cwd 兜底（详见 Spec 12 §5）
@@ -30,6 +34,10 @@ const DATA_DIR =
   process.env.AGENTHUB_DATA_DIR ??
   path.resolve(/* turbopackIgnore: true */ process.cwd(), '.agenthub-data')
 const WORKSPACES_ROOT = path.join(DATA_DIR, 'workspaces')
+const MODEL_ONLY_SYSTEM_PROMPT =
+  '你是 AgentHub 中的普通模型聊天助手。只进行自然语言对话，不假装自己拥有智能体工具、电脑操作、文件读写或多 Agent 编排能力。默认使用中文回答，除非用户明确要求其他语言。'
+const APPEND_ONLY_MODEL_CHAT_LIMIT = 2000
+const DEFAULT_MODEL_CHAT_LIMIT = 30
 
 async function getAgentRunner() {
   return import('./agent-runner')
@@ -58,29 +66,52 @@ export interface CreateConversationArgs {
   title?: string
   mode: 'single' | 'group'
   agentIds: string[]
+  /** 普通模型对话绑定的模型配置；与 agentIds 互斥。 */
+  modelProfileId?: string | null
   /** 用户指定的本地绝对路径；不填走沙箱（默认） */
   boundPath?: string
 }
 
 export async function createConversation(args: CreateConversationArgs): Promise<ConversationWithMeta> {
-  if (args.agentIds.length === 0) {
-    throw new Error('At least one agent is required')
+  const modelProfileId = args.modelProfileId?.trim() || null
+  const isModelOnlyConversation = Boolean(modelProfileId)
+  if (isModelOnlyConversation && args.agentIds.length > 0) {
+    throw new Error('Model-only conversation cannot include agents')
   }
-  if (args.mode === 'single' && args.agentIds.length !== 1) {
-    throw new Error('Single conversation requires exactly one agent')
+  if (isModelOnlyConversation && args.mode !== 'single') {
+    throw new Error('Model-only conversation must be single mode')
   }
-  if (args.mode === 'group' && args.agentIds.length < 2) {
-    throw new Error('Group conversation requires at least two agents')
+  if (!isModelOnlyConversation) {
+    if (args.agentIds.length === 0) {
+      throw new Error('At least one agent is required')
+    }
+    if (args.mode === 'single' && args.agentIds.length !== 1) {
+      throw new Error('Single conversation requires exactly one agent')
+    }
+    if (args.mode === 'group' && args.agentIds.length < 2) {
+      throw new Error('Group conversation requires at least two agents')
+    }
   }
 
   // 校验 agent 都存在
-  const agents = await db.query.agents.findMany({
-    where: (a, { inArray }) => inArray(a.id, args.agentIds),
-  })
-  if (agents.length !== args.agentIds.length) {
-    const found = new Set(agents.map((a) => a.id))
-    const missing = args.agentIds.filter((id) => !found.has(id))
-    throw new Error(`Agents not found: ${missing.join(', ')}`)
+  let agents: Array<{ name: string; id: string }> = []
+  if (!isModelOnlyConversation) {
+    agents = await db.query.agents.findMany({
+      where: (a, { inArray }) => inArray(a.id, args.agentIds),
+    })
+    if (agents.length !== args.agentIds.length) {
+      const found = new Set(agents.map((a) => a.id))
+      const missing = args.agentIds.filter((id) => !found.has(id))
+      throw new Error(`Agents not found: ${missing.join(', ')}`)
+    }
+  }
+
+  let modelProfile: ModelProfileRow | null = null
+  if (modelProfileId) {
+    modelProfile = await db.query.modelProfiles.findFirst({
+      where: eq(schema.modelProfiles.id, modelProfileId),
+    }) ?? null
+    if (!modelProfile) throw new Error(`Model profile not found: ${modelProfileId}`)
   }
 
   // 解析 boundPath（如果提供）
@@ -125,7 +156,7 @@ export async function createConversation(args: CreateConversationArgs): Promise<
   // 内部 sandbox 目录无论 mode 都要 mkdir，用于 attachments 等内部文件
   mkdirSync(rootPath, { recursive: true })
 
-  const title = args.title ?? defaultTitleFor(agents)
+  const title = args.title ?? (modelProfile ? defaultModelTitleFor(modelProfile) : defaultTitleFor(agents))
 
   db.transaction((tx) => {
     tx.insert(schema.conversations)
@@ -134,6 +165,7 @@ export async function createConversation(args: CreateConversationArgs): Promise<
         title,
         mode: args.mode,
         agentIds: args.agentIds,
+        modelProfileId,
         pinnedMessageIds: [],
         bookmarkedMessageIds: [],
         archived: false,
@@ -158,6 +190,7 @@ export async function createConversation(args: CreateConversationArgs): Promise<
     title,
     mode: args.mode,
     agentIds: args.agentIds,
+    modelProfileId,
     pinnedMessageIds: [],
     bookmarkedMessageIds: [],
     archived: false,
@@ -173,6 +206,10 @@ export async function createConversation(args: CreateConversationArgs): Promise<
 function defaultTitleFor(agents: { name: string }[]): string {
   if (agents.length === 1) return `与 ${agents[0].name} 的对话`
   return agents.map((a) => a.name).join(' / ')
+}
+
+function defaultModelTitleFor(profile: ModelProfileRow): string {
+  return `与 ${profile.name} 的对话`
 }
 
 /** 给单条 Conversation 行附上 workspace mode / boundPath。 */
@@ -636,6 +673,15 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     return { messageId, runIds: [], messages: [deploy.message], deploy }
   }
 
+  if (conv.modelProfileId && conv.agentIds.length === 0) {
+    const modelMessage = await runModelOnlyConversationTurn({
+      conversationId: args.conversationId,
+      triggerMessageId: messageId,
+      modelProfileId: conv.modelProfileId,
+    })
+    return { messageId, runIds: [], messages: [modelMessage] }
+  }
+
   // 决定 responder
   const agentsInConv = await db.query.agents.findMany({
     where: (a, { inArray }) => inArray(a.id, conv.agentIds),
@@ -654,6 +700,285 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
   }
 
   return { messageId, runIds }
+}
+
+const MODEL_ONLY_COMPATIBLE_PROVIDERS = new Set<ModelProfileRow['provider']>([
+  'openai',
+  'deepseek',
+  'openrouter',
+  'ollama',
+  'custom',
+  'volcano-ark',
+  'openai-compatible',
+])
+
+async function runModelOnlyConversationTurn(args: {
+  conversationId: string
+  triggerMessageId: string
+  modelProfileId: string
+}): Promise<MessageRow> {
+  const profile = await db.query.modelProfiles.findFirst({
+    where: eq(schema.modelProfiles.id, args.modelProfileId),
+  })
+  if (!profile) throw new Error(`Model profile not found: ${args.modelProfileId}`)
+
+  const createdAt = Date.now()
+  const messageId = newMessageId()
+  let row: MessageRow
+  try {
+    const result = await callModelOnlyChat({
+      conversationId: args.conversationId,
+      triggerMessageId: args.triggerMessageId,
+      profile,
+    })
+    row = {
+      id: messageId,
+      conversationId: args.conversationId,
+      role: 'agent',
+      agentId: null,
+      parts: [{ type: 'text', content: result.text }],
+      status: 'complete',
+      parentMessageId: null,
+      mentionedAgentIds: [],
+      runId: null,
+      usage: result.usage,
+      createdAt,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    row = {
+      id: messageId,
+      conversationId: args.conversationId,
+      role: 'agent',
+      agentId: null,
+      parts: [{ type: 'text', content: `模型调用失败：${message}` }],
+      status: 'error',
+      parentMessageId: null,
+      mentionedAgentIds: [],
+      runId: null,
+      usage: null,
+      createdAt,
+    }
+  }
+
+  await db.insert(schema.messages).values(row)
+  await db
+    .update(schema.conversations)
+    .set({ updatedAt: createdAt })
+    .where(eq(schema.conversations.id, args.conversationId))
+
+  eventBus.publish({
+    type: 'message.added',
+    conversationId: args.conversationId,
+    timestamp: createdAt,
+    message: row,
+  })
+  return row
+}
+
+async function callModelOnlyChat(args: {
+  conversationId: string
+  triggerMessageId: string
+  profile: ModelProfileRow
+}): Promise<{
+  text: string
+  usage: MessageRow['usage']
+}> {
+  const profile = args.profile
+  if (!MODEL_ONLY_COMPATIBLE_PROVIDERS.has(profile.provider)) {
+    throw new Error(`普通模型对话暂不支持 ${profile.provider} 原生接口，请使用 OpenAI 兼容 Base URL`)
+  }
+  const apiKey = await resolveModelOnlyApiKey(profile)
+  if (!apiKey) {
+    throw new Error(`模型「${profile.name}」的 API Key 没有解析成功，请在模型管理里检查密钥引用`)
+  }
+
+  const messages = await buildModelOnlyChatMessages({
+    conversationId: args.conversationId,
+    triggerMessageId: args.triggerMessageId,
+    profile,
+  })
+  const client = new OpenAI({
+    apiKey,
+    baseURL: profile.baseUrl.trim(),
+    maxRetries: 1,
+  })
+  const completion = await client.chat.completions.create({
+    model: profile.model,
+    messages,
+  })
+  const content = completion.choices[0]?.message?.content
+  const text = typeof content === 'string' ? content.trim() : ''
+  const promptTokens = completion.usage?.prompt_tokens ?? 0
+  const cacheReadTokens = getNumericUsageValue(completion.usage, 'prompt_cache_hit_tokens')
+  const cacheMissTokens = getCacheMissTokens(completion.usage, promptTokens, cacheReadTokens)
+  const usage = completion.usage
+    ? {
+        inputTokens: cacheMissTokens,
+        outputTokens: completion.usage.completion_tokens ?? 0,
+        cacheReadTokens,
+      }
+    : null
+  return {
+    text: text || '模型没有返回文本。',
+    usage,
+  }
+}
+
+async function buildModelOnlyChatMessages(args: {
+  conversationId: string
+  triggerMessageId: string
+  profile: ModelProfileRow
+}): Promise<ChatCompletionMessageParam[]> {
+  const appendOnly = shouldPreferModelOnlyAppendOnly(args.profile)
+  const limit = appendOnly ? APPEND_ONLY_MODEL_CHAT_LIMIT : DEFAULT_MODEL_CHAT_LIMIT
+  const recent = await db.query.messages.findMany({
+    where: and(
+      eq(schema.messages.conversationId, args.conversationId),
+      eq(schema.messages.status, 'complete'),
+    ),
+    orderBy: [desc(schema.messages.createdAt)],
+    limit,
+  })
+  const messages: ChatCompletionMessageParam[] = [
+    {
+      role: 'system',
+      content: MODEL_ONLY_SYSTEM_PROMPT,
+    },
+  ]
+  for (const message of recent.reverse()) {
+    if (message.role === 'system') continue
+    if (message.role === 'user') {
+      const content = renderModelOnlyParts(message.parts)
+      if (content) messages.push({ role: 'user', content })
+    } else if (message.role === 'agent') {
+      const content = renderModelOnlyParts(message.parts)
+      if (content) messages.push({ role: 'assistant', content })
+    }
+  }
+  if (!messages.some((message) => message.role === 'user')) {
+    const trigger = await db.query.messages.findFirst({
+      where: eq(schema.messages.id, args.triggerMessageId),
+    })
+    const content = trigger ? renderModelOnlyParts(trigger.parts) : ''
+    if (content) messages.push({ role: 'user', content })
+  }
+  return appendOnly ? trimChatMessagesToModelWindow(messages, args.profile) : messages
+}
+
+function shouldPreferModelOnlyAppendOnly(profile: ModelProfileRow): boolean {
+  const normalizedProvider = profile.provider.toLowerCase()
+  const normalizedModel = profile.model.toLowerCase()
+  const normalizedBaseUrl = profile.baseUrl.toLowerCase()
+  const contextWindow = getModelProfileContextWindow(profile)
+  return (
+    normalizedProvider === 'deepseek' ||
+    normalizedModel.includes('deepseek') ||
+    (contextWindow >= 256_000 && normalizedBaseUrl.includes('deepseek'))
+  )
+}
+
+function getModelProfileContextWindow(profile: ModelProfileRow): number {
+  if (profile.contextWindow && profile.contextWindow > 0) return profile.contextWindow
+  const provider =
+    profile.provider === 'deepseek' ||
+    profile.provider === 'openai' ||
+    profile.provider === 'anthropic' ||
+    profile.provider === 'volcano-ark' ||
+    profile.provider === 'openai-compatible'
+      ? profile.provider
+      : profile.provider === 'custom' || profile.provider === 'openrouter' || profile.provider === 'ollama'
+        ? 'openai-compatible'
+        : undefined
+  return getModelLimits(provider, profile.model).contextWindow
+}
+
+function trimChatMessagesToModelWindow(
+  messages: ChatCompletionMessageParam[],
+  profile: ModelProfileRow,
+): ChatCompletionMessageParam[] {
+  const contextWindow = getModelProfileContextWindow(profile)
+  const reserve = Math.min(64_000, Math.max(4096, Math.floor(contextWindow * 0.08)))
+  const budget = Math.max(0, contextWindow - reserve)
+  let total = estimateChatMessages(messages)
+  if (total <= budget) return messages
+
+  const [systemMessage, ...history] = messages
+  const kept = [...history]
+  while (kept.length > 1 && total > budget) {
+    const removed = kept.shift()
+    if (!removed) break
+    total -= estimateChatMessage(removed)
+  }
+  return [systemMessage, ...kept]
+}
+
+function estimateChatMessages(messages: ChatCompletionMessageParam[]): number {
+  return messages.reduce((sum, message) => sum + estimateChatMessage(message), 0)
+}
+
+function estimateChatMessage(message: ChatCompletionMessageParam): number {
+  let text = message.role
+  const content = message.content
+  if (typeof content === 'string') {
+    text += content
+  } else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (part.type === 'text') text += part.text
+    }
+  }
+  return estimateTokens(text) + 4
+}
+
+function renderModelOnlyParts(parts: MessagePart[]): string {
+  const lines: string[] = []
+  for (const part of parts) {
+    switch (part.type) {
+      case 'text':
+      case 'thinking':
+        lines.push(part.content)
+        break
+      case 'code':
+        lines.push(['```' + (part.language ?? ''), part.content, '```'].join('\n'))
+        break
+      case 'image_attachment':
+        lines.push(`[图片附件: ${part.fileName}]`)
+        break
+      case 'file_attachment':
+        lines.push(`[文件附件: ${part.fileName}]`)
+        break
+      case 'artifact_ref':
+        lines.push(`[产物: ${part.artifactId}]`)
+        break
+      default:
+        break
+    }
+  }
+  return lines.join('\n').trim()
+}
+
+async function resolveModelOnlyApiKey(profile: ModelProfileRow): Promise<string | null> {
+  const ref = profile.apiKeyRef.trim()
+  if (!ref) return null
+  if (ref.startsWith('env:')) return process.env[ref.slice(4)] ?? null
+  if (/^[A-Z0-9_]+$/.test(ref)) return process.env[ref] ?? null
+  if (ref.startsWith('secret:')) return resolveSecretValue(ref.slice('secret:'.length))
+  if (ref.startsWith('vault:')) return resolveSecretValue(ref.slice('vault:'.length))
+  if (ref.startsWith('sec_')) return resolveSecretValue(ref)
+  return ref
+}
+
+function getNumericUsageValue(value: unknown, key: string): number {
+  if (!value || typeof value !== 'object') return 0
+  const found = (value as Record<string, unknown>)[key]
+  return typeof found === 'number' ? found : 0
+}
+
+function getCacheMissTokens(value: unknown, promptTokens: number, cacheReadTokens: number): number {
+  const explicitMiss = getNumericUsageValue(value, 'prompt_cache_miss_tokens')
+  if (explicitMiss > 0) return explicitMiss
+  if (cacheReadTokens > 0) return Math.max(0, promptTokens - cacheReadTokens)
+  return promptTokens
 }
 
 /**
@@ -848,6 +1173,7 @@ export async function withdrawLatestUserMessage(
 export interface EditAndResendResult extends WithdrawResult {
   newMessage: typeof schema.messages.$inferSelect
   runIds: string[]
+  messages?: MessageRow[]
 }
 
 // ─── 重新生成最后一次 agent 响应 ──────────────────────────
@@ -860,6 +1186,7 @@ export interface EditAndResendResult extends WithdrawResult {
 export interface RegenerateResult extends WithdrawResult {
   triggerMessageId: string
   runIds: string[]
+  messages?: MessageRow[]
 }
 export async function regenerateLatestResponse(
   conversationId: string,
@@ -944,6 +1271,21 @@ export async function regenerateLatestResponse(
     artifactIds: [...artifactIds],
   })
 
+  if (conv.modelProfileId && conv.agentIds.length === 0) {
+    const modelMessage = await runModelOnlyConversationTurn({
+      conversationId,
+      triggerMessageId: latestUser.id,
+      modelProfileId: conv.modelProfileId,
+    })
+    return {
+      deletedMessageIds: messageIds,
+      deletedArtifactIds: [...artifactIds],
+      triggerMessageId: latestUser.id,
+      runIds: [],
+      messages: [modelMessage],
+    }
+  }
+
   // 重新决定 responders（沿用 sendMessage 的 decideResponders）
   const agentsInConv = await db.query.agents.findMany({
     where: (a, { inArray: inArr }) => inArr(a.id, conv.agentIds),
@@ -1017,5 +1359,6 @@ export async function editAndResendLatestUserMessage(
     ...withdrawn,
     newMessage,
     runIds: sent.runIds,
+    messages: sent.messages,
   }
 }

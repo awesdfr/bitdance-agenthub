@@ -29,6 +29,9 @@ export interface CreateAgentArgs {
   modelId?: string
   /** SDK adapter 忽略此字段（SDK 内置工具集，不走 toolRegistry）*/
   toolNames: string[]
+  skillIds?: string[]
+  mcpServerIds?: string[]
+  cliProfileIds?: string[]
   supportsVision?: boolean
   apiKey?: string | null
   /** 自定义 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同；NULL 走默认 */
@@ -64,6 +67,9 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     apiBaseUrl: args.apiBaseUrl?.trim() || null,
     // SDK adapter 走各自内置工具集，不消费 toolNames；强制空数组避免 UI 残留
     toolNames: adapterName === 'custom' ? args.toolNames : [],
+    skillIds: args.skillIds ?? [],
+    mcpServerIds: args.mcpServerIds ?? [],
+    cliProfileIds: args.cliProfileIds ?? [],
     isBuiltin: false,
     isOrchestrator: false,
     supportsVision: args.supportsVision ?? false,
@@ -101,6 +107,9 @@ export interface UpdateAgentPatch {
   modelProvider?: ModelProvider
   modelId?: string | null
   toolNames?: string[]
+  skillIds?: string[]
+  mcpServerIds?: string[]
+  cliProfileIds?: string[]
   supportsVision?: boolean
   /** 传 null 显式清除自定义 key（fallback 回 env）；undefined 表示不动 */
   apiKey?: string | null
@@ -139,6 +148,9 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   if (patch.systemPrompt !== undefined) updates.systemPrompt = patch.systemPrompt
   if (patch.adapterName !== undefined) updates.adapterName = patch.adapterName
   if (patch.modelId !== undefined) updates.modelId = patch.modelId?.trim() || null
+  if (patch.skillIds !== undefined) updates.skillIds = patch.skillIds
+  if (patch.mcpServerIds !== undefined) updates.mcpServerIds = patch.mcpServerIds
+  if (patch.cliProfileIds !== undefined) updates.cliProfileIds = patch.cliProfileIds
   if (patch.supportsVision !== undefined) updates.supportsVision = patch.supportsVision
   if (patch.apiKey !== undefined) updates.apiKey = patch.apiKey?.trim() || null
   if (patch.apiBaseUrl !== undefined) updates.apiBaseUrl = patch.apiBaseUrl?.trim() || null

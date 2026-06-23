@@ -135,10 +135,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           const inp = usage.prompt_tokens ?? 0
           const out = usage.completion_tokens ?? 0
           const cached = usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
-          msgUsage.inputTokens += inp
+          const missed = usage.prompt_cache_miss_tokens ?? Math.max(0, inp - cached)
+          msgUsage.inputTokens += missed
           msgUsage.outputTokens += out
           msgUsage.cacheReadTokens += cached
-          runUsage.inputTokens += inp
+          runUsage.inputTokens += missed
           runUsage.outputTokens += out
           runUsage.cacheReadTokens += cached
           runUsage.lastInputTokens = inp

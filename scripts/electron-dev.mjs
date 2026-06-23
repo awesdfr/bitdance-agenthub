@@ -6,7 +6,11 @@ import { spawn } from 'node:child_process'
 
 const child = spawn('electron', ['dist-electron/main.js'], {
   stdio: 'inherit',
-  env: { ...process.env, AGENTHUB_DEV: '1' },
+  env: {
+    ...process.env,
+    AGENTHUB_DEV: '1',
+    AGENTHUB_DEV_URL: process.env.AGENTHUB_DEV_URL ?? 'http://localhost:3101',
+  },
   shell: process.platform === 'win32',
 })
 

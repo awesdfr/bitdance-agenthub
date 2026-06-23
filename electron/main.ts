@@ -4,7 +4,8 @@ import { setupDataDir } from './paths'
 import { startEmbeddedServer } from './server-bootstrap'
 
 const isDev = process.env.AGENTHUB_DEV === '1'
-const DEV_URL = 'http://localhost:3000'
+const DEV_URL = process.env.AGENTHUB_DEV_URL ??
+  `http://localhost:${process.env.PORT || '3000'}`
 
 // Electron 默认用 package.json 的 `name` 字段（'bytedance-agenthub'）作为 app 名，
 // 用户数据会落在 ~/Library/Application Support/bytedance-agenthub/。覆盖成 productName 'AgentHub'，

@@ -1,10 +1,11 @@
 'use client'
 
-import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Pencil, Plus, Settings2, Trash2, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
+import { EmployeeAgentFactory } from '@/components/employee-agent-factory'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,29 +21,43 @@ import { deleteAgent as deleteAgentAPI } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAgentList, useAppStore } from '@/stores/app-store'
 
-/**
- * AgentLibrary — 「Agents」tab 的内容。列出内置 + 自建 Agent，
- * 顶部入口创建新的，自建项 hover 显示编辑 / 删除。
- */
-export function AgentLibrary() {
+interface AgentLibraryProps {
+  defaultSettingsOpen?: boolean
+}
+
+export function AgentLibrary({ defaultSettingsOpen = false }: AgentLibraryProps) {
   const agents = useAgentList()
   const removeAgent = useAppStore((s) => s.removeAgent)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
+  const [settingsAgentId, setSettingsAgentId] = useState<string | null>(
+    defaultSettingsOpen ? '__first__' : null,
+  )
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const deleteTarget = deleteTargetId ? agents.find((a) => a.id === deleteTargetId) : null
+  const deleteTarget = deleteTargetId ? agents.find((agent) => agent.id === deleteTargetId) : null
+  const settingsAgent = useMemo(() => {
+    if (settingsAgentId === '__first__') return agents[0] ?? null
+    return settingsAgentId ? agents.find((agent) => agent.id === settingsAgentId) ?? null : null
+  }, [agents, settingsAgentId])
+  const settingsOpen = Boolean(settingsAgent)
 
   const openCreate = () => {
     setEditingAgent(null)
     setFormOpen(true)
   }
+
   const openEdit = (agent: AgentRow) => {
     setEditingAgent(agent)
     setFormOpen(true)
   }
+
+  const openSettings = (agent: AgentRow) => {
+    setSettingsAgentId(agent.id)
+  }
+
   const handleFormOpenChange = (open: boolean) => {
     setFormOpen(open)
     if (!open) setEditingAgent(null)
@@ -55,6 +70,7 @@ export function AgentLibrary() {
       await deleteAgentAPI(deleteTargetId)
       removeAgent(deleteTargetId)
       setDeleteTargetId(null)
+      if (settingsAgentId === deleteTargetId) setSettingsAgentId(null)
     } catch (err) {
       console.error('[AgentLibrary] delete failed', err)
     } finally {
@@ -63,84 +79,67 @@ export function AgentLibrary() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-3 pt-3">
-        <Button
-          className="w-full justify-start gap-2"
-          variant="outline"
-          onClick={openCreate}
-        >
-          <Plus className="size-4" />
-          创建 Agent
-        </Button>
+    <div className="flex min-h-0 flex-1 overflow-hidden max-lg:flex-col">
+      <div
+        className={cn(
+          'flex min-h-0 flex-col',
+          settingsOpen ? 'shrink-0 border-r lg:w-[22rem]' : 'flex-1',
+        )}
+      >
+        <div className="shrink-0 space-y-2 border-b px-3 py-3">
+          <Button className="w-full justify-start gap-2" variant="outline" onClick={openCreate}>
+            <Plus className="size-4" />
+            创建智能体
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            每个智能体旁边的齿轮就是设置入口，可以配置模型、工具、权限、记忆和运行能力。
+          </p>
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="space-y-2 p-2">
+            {agents.length === 0 ? (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                还没有智能体
+              </div>
+            ) : (
+              agents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  selected={settingsAgent?.id === agent.id}
+                  onEdit={() => openEdit(agent)}
+                  onSettings={() => openSettings(agent)}
+                  onDelete={() => setDeleteTargetId(agent.id)}
+                />
+              ))
+            )}
+          </div>
+        </ScrollArea>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-1 p-2">
-          {agents.length === 0 ? (
-            <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              没有 Agent
-            </div>
-          ) : (
-            agents.map((a) => (
-              <div
-                key={a.id}
-                className="group flex items-start gap-2 rounded-md border bg-card px-2 py-2 transition hover:border-foreground/20"
-              >
-                <AgentAvatar agent={a} size="md" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-xs font-medium">{a.name}</span>
-                    {a.isBuiltin && (
-                      <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[9px] text-muted-foreground">
-                        内置
-                      </span>
-                    )}
-                    {a.isOrchestrator && (
-                      <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[9px] text-primary">
-                        Orchestrator
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">
-                    {a.description}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[9px] text-muted-foreground">
-                    {a.adapterName}
-                    {a.modelId ? ` · ${a.modelId}` : ''}
-                  </div>
-                </div>
-                <div className="flex shrink-0 self-center gap-1 opacity-0 transition group-hover:opacity-100">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openEdit(a)
-                    }}
-                    title="编辑 Agent"
-                    className="text-muted-foreground transition hover:text-foreground"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                  {!a.isBuiltin && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setDeleteTargetId(a.id)
-                      }}
-                      title="删除 Agent"
-                      className={cn('text-muted-foreground transition hover:text-red-600')}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </ScrollArea>
+      {settingsOpen && settingsAgent && (
+        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col border-t bg-background lg:border-t-0">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="absolute right-3 top-3 z-10"
+            onClick={() => setSettingsAgentId(null)}
+            title="收起设置"
+          >
+            <X className="size-4" />
+          </Button>
+          <EmployeeAgentFactory
+            embedded
+            initialTab="agent"
+            initialAgentProfileId={settingsAgent.id}
+            initialAgentName={settingsAgent.name}
+            initialAgentDescription={settingsAgent.description}
+            title={`${settingsAgent.name} 设置`}
+            subtitle="这里配置这个智能体能用什么模型、工具、命令、软件和权限。"
+          />
+        </section>
+      )}
 
       <CreateAgentDialog
         open={formOpen}
@@ -151,25 +150,108 @@ export function AgentLibrary() {
       <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除 Agent</DialogTitle>
+            <DialogTitle>删除智能体</DialogTitle>
             <DialogDescription>
-              确定删除「{deleteTarget?.name}」吗？已使用该 Agent 的会话将无法继续使用它。该操作不可恢复。
+              确定删除「{deleteTarget?.name}」吗？已经使用这个智能体的会话将无法继续使用它。这个操作不可恢复。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
               取消
             </Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700"
-              onClick={() => void confirmDelete()}
-              disabled={deleting}
-            >
+            <Button className="bg-red-600 hover:bg-red-700" onClick={() => void confirmDelete()} disabled={deleting}>
               {deleting ? '删除中...' : '删除'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function AgentCard({
+  agent,
+  selected,
+  onEdit,
+  onSettings,
+  onDelete,
+}: {
+  agent: AgentRow
+  selected: boolean
+  onEdit: () => void
+  onSettings: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'group flex items-start gap-3 rounded-md border bg-card px-3 py-3 transition',
+        selected ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-foreground/20',
+      )}
+    >
+      <AgentAvatar agent={agent} size="md" />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium">{agent.name}</span>
+          {agent.isBuiltin && (
+            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+              内置
+            </span>
+          )}
+          {agent.isOrchestrator && (
+            <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[10px] text-primary">
+              调度
+            </span>
+          )}
+        </div>
+        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{agent.description}</div>
+        {agent.modelId && (
+          <div className="mt-1 truncate text-[11px] text-muted-foreground">
+            模型：<span className="font-mono">{agent.modelId}</span>
+          </div>
+        )}
+        {(agent.skillIds.length > 0 || agent.mcpServerIds.length > 0 || agent.cliProfileIds.length > 0) && (
+          <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+            {agent.skillIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">Skills {agent.skillIds.length}</span>}
+            {agent.mcpServerIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">MCP {agent.mcpServerIds.length}</span>}
+            {agent.cliProfileIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">CLI {agent.cliProfileIds.length}</span>}
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          size="icon"
+          variant={selected ? 'secondary' : 'ghost'}
+          className="size-8"
+          onClick={onSettings}
+          title="设置智能体"
+        >
+          <Settings2 className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-8 opacity-70 transition hover:opacity-100"
+          onClick={onEdit}
+          title="编辑基础信息"
+        >
+          <Pencil className="size-4" />
+        </Button>
+        {!agent.isBuiltin && (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-8 text-muted-foreground transition hover:text-red-600"
+            onClick={onDelete}
+            title="删除智能体"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

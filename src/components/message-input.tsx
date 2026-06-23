@@ -265,6 +265,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   // 计划待审批时，输入框改作「对计划提修改意见」用——即使 orchestrator run 仍在 running 也放开
   const planReview = usePendingPlanReviewForConversation(conversationId)
   const composerLocked = isRunning && !planReview
+  const isModelChat = Boolean(conversation?.modelProfileId && conversation.agentIds.length === 0)
   const pending = usePendingAttachments(conversationId)
   const addPendingAttachment = useAppStore((s) => s.addPendingAttachment)
   const removePendingAttachment = useAppStore((s) => s.removePendingAttachment)
@@ -283,7 +284,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     if (pendingQuote) textareaRef.current?.focus()
   }, [pendingQuote])
 
-  const isGroup = conversation?.mode === 'group'
+  const isGroup = !isModelChat && conversation?.mode === 'group'
 
   // 可被 @ 的 agent：群聊里所有成员，包含 Orchestrator
   // (@ Orchestrator 是合法语义：用户明确请求 Orchestrator 接手)
@@ -304,7 +305,9 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
   const slashCommands = useMemo<SlashCommandItem[]>(
     () =>
-      SLASH_COMMANDS.map((command) => {
+      SLASH_COMMANDS.filter((command) =>
+        isModelChat ? ['help', 'export', 'clear', 'settings'].includes(command.id) : true,
+      ).map((command) => {
         if (command.id === 'deploy') {
           return {
             ...command,
@@ -347,7 +350,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
         }
         return command
       }),
-    [clearingHistory, exporting, isRunning, pending.length, sending, uploading.length],
+    [clearingHistory, exporting, isModelChat, isRunning, pending.length, sending, uploading.length],
   )
 
   const filteredSlashCommands = useMemo(() => {
@@ -974,42 +977,44 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
           }}
         />
         {/* 辅助按钮组（紧贴）—— 让 Paperclip + 审批模式视觉成一组，与右侧主操作按钮 send 区分 */}
-        <div className="flex items-center">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isRunning}
-            title="附件 / 图片"
-          >
-            <Paperclip className="size-4" />
-          </Button>
-          {/* fs_write 审批模式开关：绿色 = Review（默认安全），红色 = Auto（直写） */}
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={() => void toggleApprovalMode()}
-            disabled={modeBusy}
-            title={
-              approvalMode === 'review'
-                ? 'Review 模式 · Agent 写入需审批（点击切到 Auto，直接生效 ⚠）'
-                : '⚠ Auto 模式 · Agent 写入直接生效（点击切回 Review）'
-            }
-            className={cn(
-              approvalMode === 'review'
-                ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400'
-                : 'text-[#FE3B25] hover:text-[#FE3B25] dark:text-[#FE3B25]',
-            )}
-          >
-            {approvalMode === 'review' ? (
-              <Shield className="size-4" />
-            ) : (
-              <Zap className="size-4" />
-            )}
-          </Button>
-        </div>
+        {!isModelChat && (
+          <div className="flex items-center">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isRunning}
+              title="附件 / 图片"
+            >
+              <Paperclip className="size-4" />
+            </Button>
+            {/* fs_write 审批模式开关：绿色 = Review（默认安全），红色 = Auto（直写） */}
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={() => void toggleApprovalMode()}
+              disabled={modeBusy}
+              title={
+                approvalMode === 'review'
+                  ? 'Review 模式 · Agent 写入需审批（点击切到 Auto，直接生效 ⚠）'
+                  : '⚠ Auto 模式 · Agent 写入直接生效（点击切回 Review）'
+              }
+              className={cn(
+                approvalMode === 'review'
+                  ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400'
+                  : 'text-[#FE3B25] hover:text-[#FE3B25] dark:text-[#FE3B25]',
+              )}
+            >
+              {approvalMode === 'review' ? (
+                <Shield className="size-4" />
+              ) : (
+                <Zap className="size-4" />
+              )}
+            </Button>
+          </div>
+        )}
         {composerLocked ? (
           <Button
             onClick={() => void abortAll()}

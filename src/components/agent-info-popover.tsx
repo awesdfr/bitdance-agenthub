@@ -101,18 +101,13 @@ export function AgentInfoPopover({
                 {agent.modelId ? ` · ${providerLabel ?? agent.modelProvider} / ${agent.modelId}` : ''}
               </span>
             </div>
-            {agent.toolNames.length > 0 && (
+            {(agent.skillIds.length > 0 || agent.mcpServerIds.length > 0 || agent.cliProfileIds.length > 0) && (
               <div className="flex items-start gap-1.5">
                 <Wrench className="mt-0.5 size-3 shrink-0" />
                 <div className="flex flex-wrap gap-1">
-                  {agent.toolNames.map((t) => (
-                    <code
-                      key={t}
-                      className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
-                    >
-                      {t}
-                    </code>
-                  ))}
+                  {agent.skillIds.length > 0 && <Badge tone="muted">Skills {agent.skillIds.length}</Badge>}
+                  {agent.mcpServerIds.length > 0 && <Badge tone="muted">MCP {agent.mcpServerIds.length}</Badge>}
+                  {agent.cliProfileIds.length > 0 && <Badge tone="muted">CLI {agent.cliProfileIds.length}</Badge>}
                 </div>
               </div>
             )}

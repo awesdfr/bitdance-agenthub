@@ -33,6 +33,7 @@ import {
 function MessageItemImpl({ message }: { message: MessageRow }) {
   const agentsMap = useAppStore((s) => s.agents)
   const agent = message.agentId ? agentsMap[message.agentId] : null
+  const conversation = useAppStore((s) => s.conversations[message.conversationId])
   const dispatch = useDispatchForMessage(message.id)
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
   const highlightMessage = useAppStore((s) => s.highlightMessage)
@@ -57,7 +58,8 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   const upsertMessage = useAppStore((s) => s.upsertMessage)
 
   const isUser = message.role === 'user'
-  const name = isUser ? '我' : message.role === 'system' ? '系统' : agent?.name ?? 'Unknown'
+  const isModelAssistant = message.role === 'agent' && !message.agentId && Boolean(conversation?.modelProfileId)
+  const name = isUser ? '我' : message.role === 'system' ? '系统' : isModelAssistant ? '模型助手' : agent?.name ?? 'Unknown'
   const isLatestUser = isUser && latestUserId === message.id
   const isLatestAgent = !isUser && latestAgentId === message.id
 
@@ -117,6 +119,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
       removeMessages(message.conversationId, result.deletedMessageIds)
       if (result.deletedArtifactIds.length > 0) removeArtifacts(result.deletedArtifactIds)
       upsertMessage(result.newMessage)
+      for (const returned of result.messages ?? []) upsertMessage(returned)
       setEditing(false)
     } catch (err) {
       console.error('[MessageItem] edit failed', err)
@@ -132,6 +135,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
       const result = await regenerateLastResponse(message.conversationId)
       removeMessages(message.conversationId, result.deletedMessageIds)
       if (result.deletedArtifactIds.length > 0) removeArtifacts(result.deletedArtifactIds)
+      for (const returned of result.messages ?? []) upsertMessage(returned)
       // 新 run 的事件会通过 SSE 流回来，store reducer 会插入新 message
     } catch (err) {
       console.error('[MessageItem] regenerate failed', err)
@@ -182,7 +186,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
       ) : (
         <Avatar className="size-8 shrink-0">
           <AvatarFallback className="text-sm">
-            {message.role === 'system' ? '系' : '?'}
+            {message.role === 'system' ? '系' : isModelAssistant ? '模' : '?'}
           </AvatarFallback>
         </Avatar>
       )}

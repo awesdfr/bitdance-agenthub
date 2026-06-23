@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, FilePenLine, FolderOpen, FolderTree, Layers, Menu, MessagesSquare, UserPlus, X } from 'lucide-react'
+import { AlertTriangle, FilePenLine, FolderOpen, FolderTree, Layers, Menu, MessagesSquare, Sparkles, UserPlus, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
@@ -107,6 +107,7 @@ export function ChatPanel() {
   }
 
   const participantAgents = conv.agentIds.map((id) => agents[id]).filter(Boolean)
+  const isModelChat = conv.agentIds.length === 0 && Boolean(conv.modelProfileId)
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -122,7 +123,7 @@ export function ChatPanel() {
           >
             <Menu className="size-4" />
           </Button>
-          <ParticipantStack agents={participantAgents} />
+          {isModelChat ? <ModelChatAvatar /> : <ParticipantStack agents={participantAgents} />}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="min-w-0 truncate text-sm font-medium">{conv.title}</span>
@@ -137,46 +138,52 @@ export function ChatPanel() {
               )}
             </div>
             <div className="truncate text-xs text-muted-foreground">
-              {conv.mode === 'single' ? '单聊' : '群聊'} · {participantAgents.length} 位 Agent
+              {isModelChat
+                ? '模型对话 · 单模型'
+                : `${conv.mode === 'single' ? '单聊' : '群聊'} · ${participantAgents.length} 位 Agent`}
             </div>
           </div>
         </div>
         <div className="flex min-w-0 max-w-[65%] shrink-0 items-center gap-1 overflow-x-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {/* 右侧面板切换（文件树 / 产物预览，互斥）。点同一个再关掉。 */}
-          <Button
-            size="icon-sm"
-            variant={fileExplorerOpen ? 'default' : 'ghost'}
-            onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
-            title={fileExplorerOpen ? '关闭文件树' : '打开文件树'}
-          >
-            <FolderTree className="size-4" />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant={artifactsOpen || previewArtifactId ? 'default' : 'ghost'}
-            onClick={() => setArtifactsOpen(true)}
-            title="本会话产物库"
-          >
-            <Layers className="size-4" />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setFilesOpen(true)}
-            title="会话文件库"
-          >
-            <FolderOpen className="size-4" />
-          </Button>
-          <ConversationOutline conversationId={conv.id} />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setAddOpen(true)}
-            title="添加 Agent"
-          >
-            <UserPlus className="size-4" />
-          </Button>
-          <UsageBadge conversationId={conv.id} />
+          {!isModelChat && (
+            <>
+              <Button
+                size="icon-sm"
+                variant={fileExplorerOpen ? 'default' : 'ghost'}
+                onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
+                title={fileExplorerOpen ? '关闭文件树' : '打开文件树'}
+              >
+                <FolderTree className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant={artifactsOpen || previewArtifactId ? 'default' : 'ghost'}
+                onClick={() => setArtifactsOpen(true)}
+                title="本会话产物库"
+              >
+                <Layers className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setFilesOpen(true)}
+                title="会话文件库"
+              >
+                <FolderOpen className="size-4" />
+              </Button>
+              <ConversationOutline conversationId={conv.id} />
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setAddOpen(true)}
+                title="添加 Agent"
+              >
+                <UserPlus className="size-4" />
+              </Button>
+              <UsageBadge conversationId={conv.id} />
+            </>
+          )}
           <Badge variant={streamConnected ? 'default' : 'outline'} className="gap-1 px-1.5 text-[11px]">
             <span
               className={`size-1.5 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-zinc-400'}`}
@@ -240,12 +247,14 @@ export function ChatPanel() {
         <FileTab conversationId={conv.id} relPath={activeTab} />
       )}
 
-      <AddAgentDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        conversationId={conv.id}
-        existingAgentIds={conv.agentIds}
-      />
+      {!isModelChat && (
+        <AddAgentDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          conversationId={conv.id}
+          existingAgentIds={conv.agentIds}
+        />
+      )}
 
       <FileLibraryDialog
         open={filesOpen}
@@ -268,8 +277,16 @@ export function ChatPanel() {
         </DialogContent>
       </Dialog>
 
-      <AskUserQuestionDialog conversationId={conv.id} />
+      {!isModelChat && <AskUserQuestionDialog conversationId={conv.id} />}
     </main>
+  )
+}
+
+function ModelChatAvatar() {
+  return (
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <Sparkles className="size-4" />
+    </div>
   )
 }
 

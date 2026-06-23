@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+
   // Electron 打包用：生成 .next/standalone 自包含 server（详见 Spec 12 §2 / §6）
   output: 'standalone',
 

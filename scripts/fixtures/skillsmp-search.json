@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "smoke-research-plus",
+      "name": "smoke-research-plus",
+      "description": "Smoke SkillsMP result for API-backed skill discovery.",
+      "repository": "example/smoke-research-plus",
+      "url": "/skills/smoke-research-plus",
+      "stars": 42,
+      "downloads": 128,
+      "category": "research",
+      "occupation": "operator",
+      "tags": ["web_research", "source_summarization"]
+    }
+  ],
+  "total": 1
+}

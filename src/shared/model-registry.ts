@@ -27,11 +27,12 @@ const DEFAULT_OUTPUT_RESERVE = 4096
 
 const KNOWN_MODELS: Record<string, { context: number; outputReserve?: number }> = {
   // DeepSeek
-  'deepseek-chat': { context: 64_000 },
-  'deepseek-v4-flash': { context: 64_000 },
-  'deepseek-v4': { context: 64_000 },
-  'deepseek-reasoner': { context: 128_000, outputReserve: 16_384 }, // R1 系列 thinking 吃 token
-  'deepseek-r1': { context: 128_000, outputReserve: 16_384 },
+  'deepseek-chat': { context: 1_000_000, outputReserve: 16_384 },
+  'deepseek-v4-flash': { context: 1_000_000, outputReserve: 16_384 },
+  'deepseek-v4-pro': { context: 1_000_000, outputReserve: 32_768 },
+  'deepseek-v4': { context: 1_000_000, outputReserve: 16_384 },
+  'deepseek-reasoner': { context: 1_000_000, outputReserve: 64_000 }, // thinking 模式会额外吃输出预算
+  'deepseek-r1': { context: 1_000_000, outputReserve: 64_000 },
 
   // OpenAI
   'gpt-4o': { context: 128_000 },

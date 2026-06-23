@@ -30,6 +30,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.next-dev-*.log
+dev-server*.log
+dev-server*.err
+electron*.log
+electron*.err
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -42,15 +47,23 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+
 # AgentHub runtime data
 /.agenthub-data/
 /.agenthub-data-e2e/
 /.tmp/
+/tmp/
 /drizzle/
 
 # Playwright
 /playwright-report/
 /test-results/
+/.playwright-cli/
+/output/
 
 # Electron build outputs
 /dist-electron/

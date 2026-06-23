@@ -31,20 +31,27 @@ export interface BuildHistoryOptions {
    * pinned 永远不被截断（即便整体超 budget）。
    */
   tokenBudget?: number
+  /**
+   * Prefix-cache 友好模式：尽量按会话真实顺序追加完整历史，不把旧历史替换成摘要。
+   * DeepSeek 这类服务端 prefix-cache 模型会复用上一轮完全相同的前缀。
+   */
+  appendOnly?: boolean
 }
 
 const DEFAULT_MAX_TURNS = 20
+const APPEND_ONLY_MAX_TURNS = 2000
 
 export async function buildHistoryFor(
   agentId: string,
   conversationId: string,
   options: BuildHistoryOptions = {},
 ): Promise<ChatCompletionMessageParam[]> {
-  const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS
-  const includePinned = options.includePinned ?? true
+  const appendOnly = options.appendOnly ?? false
+  const maxTurns = options.maxTurns ?? (appendOnly ? APPEND_ONLY_MAX_TURNS : DEFAULT_MAX_TURNS)
+  const includePinned = appendOnly ? false : (options.includePinned ?? true)
   const excludeMessageId = options.excludeMessageId
   const tokenBudget = options.tokenBudget
-  const latestSummary = await getLatestContextSummary(conversationId)
+  const latestSummary = appendOnly ? null : await getLatestContextSummary(conversationId)
 
   // 拉最近 N 条 complete 消息（按时间逆序取，下面再翻回正序）
   const recentWhereClauses = [

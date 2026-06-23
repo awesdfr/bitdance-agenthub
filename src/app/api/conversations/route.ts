@@ -6,7 +6,8 @@ import { createConversation, listConversations } from '@/server/conversation-ser
 const CreateBody = z.object({
   title: z.string().optional(),
   mode: z.enum(['single', 'group']),
-  agentIds: z.array(z.string()).min(1),
+  agentIds: z.array(z.string()).default([]),
+  modelProfileId: z.string().nullable().optional(),
   boundPath: z.string().optional(),
 })
 

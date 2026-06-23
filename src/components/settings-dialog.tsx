@@ -55,6 +55,8 @@ interface SettingsForm {
   deploymentPublicBaseUrl: string
 }
 
+const MOBILE_CONNECTION_ENABLED = false
+
 /**
  * 全局 API key / endpoint 设置面板。
  *
@@ -104,6 +106,10 @@ export function SettingsDialog({
   })
 
   useEffect(() => {
+    if (!MOBILE_CONNECTION_ENABLED && tab === 'mobile') setTab('keys')
+  }, [tab])
+
+  useEffect(() => {
     if (!open) return
     let cancelled = false
 
@@ -129,7 +135,7 @@ export function SettingsDialog({
   }, [open])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !MOBILE_CONNECTION_ENABLED) return
     let cancelled = false
 
     void Promise.resolve()
@@ -161,8 +167,8 @@ export function SettingsDialog({
         openaiApiKey: form.openaiApiKey.trim() || null,
         deepseekApiKey: form.deepseekApiKey.trim() || null,
         arkApiKey: form.arkApiKey.trim() || null,
-        companionMode: form.companionMode,
-        mobileDeviceToken: form.mobileDeviceToken.trim() || null,
+        companionMode: MOBILE_CONNECTION_ENABLED ? form.companionMode : 'off',
+        mobileDeviceToken: MOBILE_CONNECTION_ENABLED ? form.mobileDeviceToken.trim() || null : null,
         deploymentPublishEnabled: form.deploymentPublishEnabled,
         deploymentPublishDir: form.deploymentPublishDir.trim() || null,
         deploymentPublicBaseUrl: form.deploymentPublicBaseUrl.trim() || null,
@@ -262,10 +268,12 @@ export function SettingsDialog({
                   <KeyRound className="size-3.5" />
                   供应商 Key
                 </TabsTrigger>
-                <TabsTrigger value="mobile">
-                  <Smartphone className="size-3.5" />
-                  移动端
-                </TabsTrigger>
+                {MOBILE_CONNECTION_ENABLED && (
+                  <TabsTrigger value="mobile">
+                    <Smartphone className="size-3.5" />
+                    移动端
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="publish">
                   <FolderUp className="size-3.5" />
                   发布
@@ -333,23 +341,25 @@ export function SettingsDialog({
                 />
               </TabsContent>
 
-              <TabsContent value="mobile" className="mt-0 py-1">
-                <MobileConnectionHints
-                  hints={connectionHints}
-                  loading={hintsLoading}
-                  copiedUrl={copiedUrl}
-                  companionMode={form.companionMode}
-                  mobileDeviceToken={form.mobileDeviceToken}
-                  busy={busy}
-                  tokenBusy={tokenBusy}
-                  restartRequired={restartRequired}
-                  onCopy={(hint) => void handleCopyHint(hint)}
-                  onCopyText={(value) => void handleCopyText(value)}
-                  onEnable={() => void handleEnableCompanion()}
-                  onDisable={() => void handleDisableCompanion()}
-                  onRegenerateToken={() => void handleRegenerateToken()}
-                />
-              </TabsContent>
+              {MOBILE_CONNECTION_ENABLED && (
+                <TabsContent value="mobile" className="mt-0 py-1">
+                  <MobileConnectionHints
+                    hints={connectionHints}
+                    loading={hintsLoading}
+                    copiedUrl={copiedUrl}
+                    companionMode={form.companionMode}
+                    mobileDeviceToken={form.mobileDeviceToken}
+                    busy={busy}
+                    tokenBusy={tokenBusy}
+                    restartRequired={restartRequired}
+                    onCopy={(hint) => void handleCopyHint(hint)}
+                    onCopyText={(value) => void handleCopyText(value)}
+                    onEnable={() => void handleEnableCompanion()}
+                    onDisable={() => void handleDisableCompanion()}
+                    onRegenerateToken={() => void handleRegenerateToken()}
+                  />
+                </TabsContent>
+              )}
 
               <TabsContent value="publish" className="mt-0 py-1">
                 <DeploymentPublishSettings
