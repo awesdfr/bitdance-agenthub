@@ -144,7 +144,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const agents = useAppStore((s) => s.agents)
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogIntent, setDialogIntent] = useState<'conversation' | 'work-area'>('conversation')
   const [collapsed, setCollapsed] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [search, setSearch] = useState('')
@@ -202,7 +201,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   }
 
   const openWorkAreaDialog = () => {
-    setDialogIntent('work-area')
     setDialogOpen(true)
   }
 
@@ -388,7 +386,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
         <NewConversationDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
-          intent={dialogIntent}
         />
       </aside>
     </>
