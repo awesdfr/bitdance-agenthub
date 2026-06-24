@@ -1325,6 +1325,11 @@ export function ToolControlCenter() {
                       </div>
                     </div>
 
+                    <SoftwareStoreModeSummary
+                      item={selectedStoreItem}
+                      mode={selectedStoreDetailMode}
+                    />
+
                     <div className="mt-4 space-y-3">
                       {(selectedStoreDetailMode === 'overview' || selectedStoreDetailMode === 'cli') && (
                         <StoreModeSection
@@ -3037,6 +3042,82 @@ function StoreDetailModeButton({
       {label}
     </button>
   )
+}
+
+function SoftwareStoreModeSummary({
+  item,
+  mode,
+}: {
+  item: SoftwareStoreItem
+  mode: StoreDetailMode
+}) {
+  const meta = softwareStoreModeSummary(item, mode)
+  return (
+    <section
+      data-testid="software-store-mode-summary"
+      className="mt-3 rounded-lg border bg-primary/5 p-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{meta.title}</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{meta.description}</p>
+        </div>
+        <Badge variant={meta.ready ? 'default' : 'outline'} className="shrink-0">
+          {meta.badge}
+        </Badge>
+      </div>
+    </section>
+  )
+}
+
+function softwareStoreModeSummary(
+  item: SoftwareStoreItem,
+  mode: StoreDetailMode,
+): { title: string; description: string; badge: string; ready: boolean } {
+  if (mode === 'cli') {
+    const count = item.cliProfiles.length
+    return {
+      title: `${item.name} 的 CLI 接入`,
+      description:
+        count > 0
+          ? `已经有 ${count} 个 CLI。智能体可以通过终端命令、本地脚本或软件命令调用这个软件，适合代码、文件处理和本地交付类任务。`
+          : '还没有 CLI。创建 CLI 接入后，智能体就能像调用命令一样使用这个软件。',
+      badge: count > 0 ? `${count} 个 CLI` : '待接入',
+      ready: count > 0,
+    }
+  }
+  if (mode === 'mcp') {
+    const count = item.mcpServers.length
+    return {
+      title: `${item.name} 的 MCP 接入`,
+      description:
+        count > 0
+          ? `已经有 ${count} 个 MCP 服务。智能体可以看到结构化工具、参数和返回结果，适合稳定的外部能力调用。`
+          : '还没有 MCP。注册 MCP 后，用户不需要理解底层协议，智能体会把它当作工具连接使用。',
+      badge: count > 0 ? `${count} 个 MCP` : '待接入',
+      ready: count > 0,
+    }
+  }
+  if (mode === 'commands') {
+    const count = item.softwareCommands.length
+    return {
+      title: `${item.name} 的可用命令`,
+      description:
+        count > 0
+          ? `已经封装了 ${count} 个可直接调用的动作。复杂的软件操作可以继续录制或封装成命令，让智能体按需选择。`
+          : '还没有封装命令。后续可以把常用操作封装成一个动作，例如导出、生成报告、打开项目或处理素材。',
+      badge: count > 0 ? `${count} 个命令` : '待封装',
+      ready: count > 0,
+    }
+  }
+  const ready = getStoreModeCount(item) > 0 || item.softwareCommands.length > 0
+  return {
+    title: `${item.name} 的接入概览`,
+    description:
+      '这里按软件聚合它已有的 CLI、MCP 和封装命令。用户只需要先选软件，再决定把哪种能力分配给智能体。',
+    badge: ready ? '可分配' : '待接入',
+    ready,
+  }
 }
 
 function StoreModeSection({
