@@ -2242,6 +2242,11 @@ function CustomerDeliverablesPanel({
         <EmptyLine text="还没有设置客户可见的交付物" />
       ) : (
         <>
+          <CustomerDeliverySummaryCard
+            nodes={deliverables}
+            nodeRunByNodeId={nodeRunByNodeId}
+            artifactValidations={artifactValidations}
+          />
           <div className="grid grid-cols-4 gap-1">
             <MiniMetric label="交付物" value={deliverables.length} />
             <MiniMetric label="类型" value={typeCounts.length} />
@@ -2278,6 +2283,74 @@ function CustomerDeliverablesPanel({
       )}
       </Section>
     </section>
+  )
+}
+
+function CustomerDeliverySummaryCard({
+  nodes,
+  nodeRunByNodeId,
+  artifactValidations,
+}: {
+  nodes: DraftNode[]
+  nodeRunByNodeId: Map<string, WorkflowNodeRunRow>
+  artifactValidations: ArtifactValidationRow[]
+}) {
+  const primaryNode =
+    nodes.find((node) => nodeRunByNodeId.get(node.id)?.status === 'complete') ?? nodes[0]
+  const primaryType = artifactTypeOf(primaryNode)
+  const completed = nodes.filter((node) => nodeRunByNodeId.get(node.id)?.status === 'complete').length
+  const typeCounts = countDeliverablesByType(nodes)
+  const nextStep =
+    completed === nodes.length
+      ? '进入客户验收'
+      : completed > 0
+        ? '继续补齐剩余产物'
+        : '等待智能体产出'
+
+  return (
+    <div
+      data-testid="canvas-customer-delivery-summary"
+      className="overflow-hidden rounded-md border bg-primary/5"
+    >
+      <div className="border-b bg-background/70 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold">
+            <Eye className="size-3.5 text-primary" />
+            <span className="truncate">客户交付总览</span>
+          </div>
+          <Badge variant={completed === nodes.length ? 'default' : 'outline'} className="h-5 px-1.5 text-[9px]">
+            {completed}/{nodes.length} 已产出
+          </Badge>
+        </div>
+      </div>
+
+      <div className="space-y-2 p-2.5">
+        <div className="rounded-md border bg-background px-2 py-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium text-muted-foreground">主交付</div>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs font-semibold">
+                {artifactTypeIcon(primaryType, 'size-3.5 shrink-0 text-primary')}
+                <span className="truncate">{deliveryTitleOf(primaryNode)}</span>
+              </div>
+            </div>
+            <Badge variant="outline" className="h-5 shrink-0 gap-1 px-1.5 text-[9px]">
+              {artifactTypeLabel(primaryType)}
+            </Badge>
+          </div>
+          <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+            {deliveryDescriptionOf(primaryNode)}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <DeliveryDatum label="客户拿到" value={artifactExpectedFile(primaryType)} />
+          <DeliveryDatum label="验收下一步" value={nextStep} />
+          <DeliveryDatum label="校验记录" value={`${artifactValidations.length} 条`} />
+          <DeliveryDatum label="交付类型" value={typeCounts.map(({ type, count }) => `${artifactTypeLabel(type)} ${count}`).join(' / ')} />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -2872,7 +2945,7 @@ function CanvasQuickEditor({
             value={artifactTypeOf(node)}
             onChange={(value) =>
               onUpdateNode(node.id, {
-                outputContract: { ...node.outputContract, artifactType: value },
+                outputContract: updateOutputContractArtifactType(node.outputContract, value),
               })
             }
             options={ARTIFACT_TYPE_OPTIONS}
@@ -2883,7 +2956,7 @@ function CanvasQuickEditor({
           value={artifactTypeOf(node)}
           onChange={(value) =>
             onUpdateNode(node.id, {
-              outputContract: { ...node.outputContract, artifactType: value },
+              outputContract: updateOutputContractArtifactType(node.outputContract, value),
             })
           }
         />
@@ -3143,7 +3216,7 @@ function NodeInspector({
               value={artifactTypeOf(node)}
               onChange={(value) =>
                 onUpdateNode(node.id, {
-                  outputContract: { ...node.outputContract, artifactType: value },
+                  outputContract: updateOutputContractArtifactType(node.outputContract, value),
                 })
               }
               options={ARTIFACT_TYPE_OPTIONS}
@@ -3156,7 +3229,7 @@ function NodeInspector({
           value={artifactTypeOf(node)}
           onChange={(value) =>
             onUpdateNode(node.id, {
-              outputContract: { ...node.outputContract, artifactType: value },
+              outputContract: updateOutputContractArtifactType(node.outputContract, value),
             })
           }
         />
@@ -4138,6 +4211,26 @@ function normalizedOutputContract(node: DraftNode): JsonObject {
     customerVisible: customerVisibleOf(node),
     deliverableTitle: deliveryTitleOf(node),
     deliveryDescription: deliveryDescriptionOf(node),
+  }
+}
+
+function updateOutputContractArtifactType(base: JsonObject, nextType: string): JsonObject {
+  const previousType = typeof base.artifactType === 'string' && base.artifactType ? base.artifactType : nextType
+  const previousDefault = `${artifactTypeLabel(previousType)} · ${artifactFileHint(previousType)}`
+  const nextDefault = `${artifactTypeLabel(nextType)} · ${artifactFileHint(nextType)}`
+  const currentDescription = typeof base.description === 'string' ? base.description : ''
+  const currentDeliveryDescription = typeof base.deliveryDescription === 'string' ? base.deliveryDescription : ''
+  const shouldUpdateDescription = !currentDescription || currentDescription === previousDefault
+  const shouldUpdateDeliveryDescription =
+    !currentDeliveryDescription ||
+    currentDeliveryDescription === currentDescription ||
+    currentDeliveryDescription === previousDefault
+
+  return {
+    ...base,
+    artifactType: nextType,
+    description: shouldUpdateDescription ? nextDefault : currentDescription,
+    deliveryDescription: shouldUpdateDeliveryDescription ? nextDefault : currentDeliveryDescription,
   }
 }
 
