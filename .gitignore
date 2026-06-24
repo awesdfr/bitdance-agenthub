@@ -69,6 +69,7 @@ __pycache__/
 /dist-electron/
 /release/
 /release-latest/
+/release-*/
 /.electron-package/
 
 # Mobile app build outputs
