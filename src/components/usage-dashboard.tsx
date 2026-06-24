@@ -91,7 +91,7 @@ export function UsageDashboard() {
           <div>
             <div className="flex items-center gap-1.5 text-base font-semibold">
               <BarChart3 className="size-4 text-primary" />
-              费用分析
+              数据分析
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
               看清每个模型实际消耗、费用、缓存命中和上下文压力。

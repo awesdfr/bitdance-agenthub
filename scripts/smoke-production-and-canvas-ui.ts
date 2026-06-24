@@ -1,4 +1,4 @@
-import { chromium, type Locator, type Page } from '@playwright/test'
+﻿import { chromium, type Locator, type Page } from '@playwright/test'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 
@@ -71,9 +71,14 @@ const uiText = {
 
   agentsNav: '\u667a\u80fd\u4f53',
   oldFactoryNav: '\u667a\u80fd\u4f53\u5de5\u5382',
-  createAgent: '\u521b\u5efa\u667a\u80fd\u4f53',
+  createAgent: '\u65b0\u5efa',
   agentSettingsButtonTitle: '\u8bbe\u7f6e\u667a\u80fd\u4f53',
-  agentAbilityTab: '\u667a\u80fd\u4f53\u80fd\u529b',
+  agentOpenFullConfig: '\u6253\u5f00\u5b8c\u6574\u914d\u7f6e',
+  agentLightSkills: '\u6280\u80fd\u4e0e\u5de5\u5177',
+  agentLightMemory: '\u8bb0\u5fc6\u4e0e\u4e0a\u4e0b\u6587',
+  agentLightSafety: '\u6743\u9650\u4e0e\u5b89\u5168',
+  agentLightDelivery: '\u4ea4\u4ed8\u7269',
+  agentAbilityTab: '\u80fd\u529b\u8bbe\u7f6e',
   agentIdentitySection: '\u8eab\u4efd\u4e0e\u4ea7\u7269',
   agentMemoryContextSection: '\u8bb0\u5fc6\u3001\u4e0a\u4e0b\u6587\u4e0e\u534f\u4f5c',
   agentSecuritySection: '\u5b89\u5168\u6743\u9650\u4e0e\u81ea\u4e3b\u6027',
@@ -99,9 +104,9 @@ const uiText = {
   newAgentProfile: '\u65b0\u5efa\u914d\u7f6e',
   detailedConfig: '\u8be6\u7ec6\u914d\u7f6e',
   abilityPromptTab: '\u80fd\u529b\u4e0e\u63d0\u793a\u8bcd',
-  installedSkills: '\u5df2\u5b89\u88c5 Skills',
+  installedSkills: '\u5df2\u5b89\u88c5\u6280\u80fd',
   mcpTools: 'MCP \u5de5\u5177',
-  cliCommands: 'CLI \u547d\u4ee4',
+  cliCommands: '\u547d\u4ee4\u884c\u5de5\u5177',
 
   toolsNav: '\u5de5\u5177\u8fde\u63a5',
   toolsTitle: '\u8f6f\u4ef6\u80fd\u529b\u5546\u5e97',
@@ -152,6 +157,8 @@ const uiText = {
   canvasNav: '\u7f16\u6392\u753b\u5e03',
   canvasTitle: '\u667a\u80fd\u4f53\u7f16\u6392\u753b\u5e03',
   addAgent: '\u6dfb\u52a0\u667a\u80fd\u4f53',
+  canvasCustomerFinal: '\u5ba2\u6237\u6700\u7ec8\u80fd\u770b\u5230',
+  artifactQuickPicker: '\u62a5\u544a',
   inlineEditor: '\u753b\u5e03\u5185\u7f16\u8f91',
   nodeName: '\u8282\u70b9\u540d\u79f0',
   customerDeliverables: '\u5ba2\u6237\u4ea4\u4ed8\u7269',
@@ -176,8 +183,8 @@ const uiText = {
   runWorkflow: '\u8fd0\u884c',
   advancedSettings: '\u9ad8\u7ea7\u8bbe\u7f6e',
   runMonitor: '\u8fd0\u884c\u4e0e\u76d1\u63a7',
-  analyticsNav: '\u8d39\u7528\u5206\u6790',
-  analyticsTitle: '\u8d39\u7528\u5206\u6790',
+  analyticsNav: '\u6570\u636e\u5206\u6790',
+  analyticsTitle: '\u6570\u636e\u5206\u6790',
   costCommandCenter: '\u6210\u672c\u9a7e\u9a76\u8231',
   modelSpendRanking: '\u6a21\u578b\u82b1\u8d39\u6392\u884c',
   agentSpendRanking: 'Agent \u6d88\u8017\u6392\u884c',
@@ -204,8 +211,8 @@ const uiText = {
   appendOnlyContext: '\u8ffd\u52a0\u5f0f\u4e0a\u4e0b\u6587',
   targetCacheHit: '\u76ee\u6807\u547d\u4e2d',
   projectContext: '\u5de5\u7a0b\u6587\u4ef6\u4e0a\u4e0b\u6587',
-  schedulerNav: '\u81ea\u52a8\u4efb\u52a1',
-  schedulerTitle: '\u81ea\u52a8\u4efb\u52a1',
+  schedulerNav: '\u4efb\u52a1\u8c03\u5ea6',
+  schedulerTitle: '\u4efb\u52a1\u8c03\u5ea6',
   schedulerQueue: '\u4efb\u52a1\u961f\u5217',
   schedulerRules: '\u5b9a\u65f6\u89c4\u5219',
   schedulerQuickActions: '\u5feb\u901f\u64cd\u4f5c',
@@ -412,8 +419,7 @@ async function main() {
   }
 
   const smokeModelName = `UI temp model ${Date.now()}`
-  await clickSidebarButton(sidebar, uiText.modelsNav)
-  await page.locator('main').getByText(uiText.modelsTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  await openSidebarModeAndWait(page, sidebar, uiText.modelsNav, uiText.modelsTitle)
   await page.getByTestId('model-profile-card').first().waitFor({ timeout: 90_000 })
   await page.locator('main button', { hasText: uiText.addModel }).first().click()
   const modelDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.addModel }).first()
@@ -454,6 +460,13 @@ async function main() {
   const firstSettingsButton = settingsButtons.first()
   await firstSettingsButton.waitFor({ timeout: 90_000 })
   await firstSettingsButton.click()
+  await page.getByText(uiText.agentOpenFullConfig, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.agentLightSkills, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.agentLightMemory, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.agentLightSafety, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.agentLightDelivery, { exact: true }).waitFor({ timeout: 90_000 })
+  const agentLightBodyText = await page.locator('body').innerText()
+  await page.getByText(uiText.agentOpenFullConfig, { exact: true }).click()
   await page.getByText(uiText.agentAbilityTab, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.agentIdentitySection, { exact: true }).waitFor({ timeout: 120_000 })
   await page.getByText(uiText.agentEmployeeControl, { exact: true }).waitFor({ timeout: 120_000 })
@@ -470,6 +483,10 @@ async function main() {
     oldFactoryNavHidden: oldFactoryNavCount === 0,
     settingsGear: (await settingsButtons.count()) > 0,
     agentCardToolbox: (await page.getByTestId('agent-card-toolbox').count()) > 0,
+    lightSkills: agentLightBodyText.includes(uiText.agentLightSkills),
+    lightMemory: agentLightBodyText.includes(uiText.agentLightMemory),
+    lightSafety: agentLightBodyText.includes(uiText.agentLightSafety),
+    lightDelivery: agentLightBodyText.includes(uiText.agentLightDelivery),
     settingsPanel: agentBodyText.includes(uiText.agentAbilityTab),
     currentSummary: agentBodyText.includes(uiText.agentCurrentSummary),
     employeeNameLabel: agentBodyText.includes(uiText.agentEmployeeName),
@@ -500,7 +517,7 @@ async function main() {
     if (!value) throw new Error(`Agent unified settings UI check failed: ${key}.`)
   }
 
-  await page.locator('main button', { hasText: uiText.createAgent }).first().click()
+  await page.locator('main').getByRole('button', { name: uiText.createAgent, exact: true }).first().click()
   await page.getByText(uiText.detailedConfig, { exact: true }).click()
   await page.getByText(uiText.abilityPromptTab, { exact: true }).click()
   await page.getByText(uiText.installedSkills, { exact: true }).waitFor({ timeout: 90_000 })
@@ -719,19 +736,28 @@ async function main() {
   await page.getByText(uiText.inlineEditor, { exact: true }).waitFor({ timeout: 30_000 })
   const quickEditor = page.getByTestId('canvas-quick-editor')
   await quickEditor.waitFor({ timeout: 30_000 })
+  const nodeNameInputVisible = await quickEditor.getByPlaceholder(uiText.nodeName).isVisible()
+  await page.getByTestId('artifact-type-quick-picker').first().getByText(uiText.artifactQuickPicker).waitFor({
+    timeout: 30_000,
+  })
+  const artifactQuickPickerVisible = await page.getByTestId('artifact-type-quick-picker').first().isVisible()
   await quickEditor.locator('select').nth(1).selectOption('video')
+  await page.getByTestId('canvas-delivery-overview-bar').getByText(uiText.canvasCustomerFinal).waitFor({
+    timeout: 30_000,
+  })
   await page.getByTestId('canvas-customer-delivery-dock').getByText(uiText.videoArtifact).first().waitFor({
     timeout: 30_000,
   })
-  await page
-    .getByTestId('canvas-quick-editor-collapse')
-    .evaluate((element) => (element as HTMLButtonElement).click())
+  const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
+  await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
+  await collapseQuickEditorButton.click()
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
   await quickEditorCollapsed.waitFor({ timeout: 30_000 })
   const quickEditorCollapsedVisible = await quickEditorCollapsed.isVisible()
   await quickEditorCollapsed.evaluate((element) => (element as HTMLButtonElement).click())
   await quickEditor.waitFor({ timeout: 30_000 })
   const quickEditorExpandedAgain = await quickEditor.isVisible()
+  const quickEditorOpened = quickEditorExpandedAgain
   const canvasSurface = page.getByTestId('workflow-canvas-surface')
   const findBlankCanvasPoint = async () => {
     return canvasSurface.evaluate((surface) => {
@@ -961,8 +987,8 @@ async function main() {
   const canvasBodyText = await page.locator('main').innerText()
   const canvasChecks = {
     canvasTitle: await page.getByText(uiText.canvasTitle, { exact: true }).isVisible(),
-    inlineEditor: await page.getByText(uiText.inlineEditor, { exact: true }).isVisible(),
-    nodeNameInput: await page.getByPlaceholder(uiText.nodeName).isVisible(),
+    inlineEditor: quickEditorOpened,
+    nodeNameInput: nodeNameInputVisible,
     quickEditorCollapsed: quickEditorCollapsedVisible,
     quickEditorExpandedAgain,
     nodePaletteCreatedNode: paletteCreatedNode,
@@ -970,6 +996,9 @@ async function main() {
     connectingPaletteHint: connectedPaletteHint,
     connectionDragPreview: dragPreviewVisible,
     connectionDragEdge: dragConnectedEdge,
+    deliveryOverviewBar: await page.getByTestId('canvas-delivery-overview-bar').isVisible(),
+    deliveryOverviewText: canvasBodyText.includes(uiText.canvasCustomerFinal),
+    artifactQuickPicker: artifactQuickPickerVisible,
     customerDeliverableDock: await page.getByTestId('canvas-customer-delivery-dock').isVisible(),
     customerDeliverablesPanel: await page.getByTestId('canvas-customer-deliverables-panel').isVisible(),
     nodeProgress: await page.getByTestId('canvas-node-progress').first().isVisible(),
@@ -1231,6 +1260,17 @@ async function clickSidebarButton(sidebar: Locator, label: string) {
   await button.first().click({ force: true })
 }
 
+async function openSidebarModeAndWait(page: Page, sidebar: Locator, label: string, mainText: string) {
+  await clickSidebarButton(sidebar, label)
+  const target = page.locator('main').getByText(mainText, { exact: true })
+  try {
+    await target.waitFor({ timeout: 30_000 })
+  } catch {
+    await clickSidebarButton(sidebar, label)
+    await target.waitFor({ timeout: 90_000 })
+  }
+}
+
 async function cleanupSmokeModels(page: Page, baseUrl: string) {
   const response = await page.request.get(`${baseUrl}/api/model-profiles`)
   if (!response.ok()) return
@@ -1245,3 +1285,4 @@ async function cleanupSmokeModels(page: Page, baseUrl: string) {
     await page.request.delete(`${baseUrl}/api/model-profiles/${model.id}`)
   }
 }
+

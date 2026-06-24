@@ -143,6 +143,16 @@ const ARTIFACT_TYPE_OPTIONS = [
   'software_result',
 ]
 
+const CUSTOMER_ARTIFACT_QUICK_TYPES = [
+  'report',
+  'code',
+  'image',
+  'video',
+  'document',
+  'spreadsheet',
+  'file_bundle',
+]
+
 const ARTIFACT_TYPE_LABELS: Record<string, string> = {
   report: '报告',
   json: '结构化数据',
@@ -1319,6 +1329,12 @@ export function AgentWorkflowCanvas() {
             </div>
           </div>
 
+          <DeliveryOverviewBar
+            nodes={customerDeliverableNodes}
+            nodeRunByNodeId={nodeRunByNodeId}
+            onSelectNode={setSelectedNodeId}
+          />
+
           <div
             data-testid="workflow-canvas-surface"
             className={cn(
@@ -2128,6 +2144,82 @@ function CustomerDeliveryDock({
   )
 }
 
+function DeliveryOverviewBar({
+  nodes,
+  nodeRunByNodeId,
+  onSelectNode,
+}: {
+  nodes: DraftNode[]
+  nodeRunByNodeId: Map<string, WorkflowNodeRunRow>
+  onSelectNode: (nodeId: string) => void
+}) {
+  const typeCounts = countDeliverablesByType(nodes)
+  const completed = nodes.filter((node) => nodeRunByNodeId.get(node.id)?.status === 'complete').length
+  const running = nodes.filter((node) => nodeRunByNodeId.get(node.id)?.status === 'running').length
+
+  return (
+    <div
+      data-testid="canvas-delivery-overview-bar"
+      className="shrink-0 border-b bg-background/95 px-3 py-2"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-1.5 text-xs font-semibold">
+          <Share2 className="size-3.5 text-primary" />
+          <span>客户最终能看到</span>
+        </div>
+        {nodes.length === 0 ? (
+          <div className="truncate text-xs text-muted-foreground">
+            还没有客户可见产物。选中节点后，把“客户可见”打开并选择报告、代码、图片、视频或文件包。
+          </div>
+        ) : (
+          <>
+            <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+              <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
+                {nodes.length} 个交付物
+              </Badge>
+              <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
+                已产出 {completed}
+              </Badge>
+              {running > 0 && (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[9px]">
+                  生成中 {running}
+                </Badge>
+              )}
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:thin]">
+              {nodes.map((node) => {
+                const type = artifactTypeOf(node)
+                const state = deliveryStateLabel(nodeRunByNodeId.get(node.id) ?? null)
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    className="flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-md border bg-card px-2 text-[10px] transition hover:border-primary/60"
+                    onClick={() => onSelectNode(node.id)}
+                    title={`${deliveryTitleOf(node)} · ${deliveryDescriptionOf(node)}`}
+                  >
+                    {artifactTypeIcon(type, 'size-3 shrink-0 text-primary')}
+                    <span className="truncate font-medium">{deliveryTitleOf(node)}</span>
+                    <span className="shrink-0 text-muted-foreground">{state}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="hidden shrink-0 items-center gap-1 xl:flex">
+              {typeCounts.slice(0, 4).map(({ type, count }) => (
+                <Badge key={type} variant="outline" className="h-5 gap-1 px-1.5 text-[9px]">
+                  {artifactTypeIcon(type, 'size-3')}
+                  {artifactTypeLabel(type)} {count}
+                </Badge>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function CustomerDeliverablesPanel({
   nodes,
   nodeRunByNodeId,
@@ -2181,6 +2273,36 @@ function CustomerDeliverablesPanel({
       )}
       </Section>
     </section>
+  )
+}
+
+function ArtifactTypeQuickPicker({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1" data-testid="artifact-type-quick-picker">
+      {CUSTOMER_ARTIFACT_QUICK_TYPES.map((type) => (
+        <button
+          key={type}
+          type="button"
+          className={cn(
+            'flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] transition hover:border-primary/60',
+            value === type
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'bg-background text-muted-foreground',
+          )}
+          onClick={() => onChange(type)}
+          title={`交付 ${artifactTypeLabel(type)}，通常是${artifactFileHint(type)}`}
+        >
+          {artifactTypeIcon(type, 'size-3')}
+          <span>{artifactTypeLabel(type)}</span>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -2675,6 +2797,14 @@ function CanvasQuickEditor({
             labels={ARTIFACT_TYPE_LABELS}
           />
         </div>
+        <ArtifactTypeQuickPicker
+          value={artifactTypeOf(node)}
+          onChange={(value) =>
+            onUpdateNode(node.id, {
+              outputContract: { ...node.outputContract, artifactType: value },
+            })
+          }
+        />
         <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
           <input
             type="checkbox"
@@ -2939,6 +3069,15 @@ function NodeInspector({
             />
           </div>
         </div>
+
+        <ArtifactTypeQuickPicker
+          value={artifactTypeOf(node)}
+          onChange={(value) =>
+            onUpdateNode(node.id, {
+              outputContract: { ...node.outputContract, artifactType: value },
+            })
+          }
+        />
 
         <div className="rounded-md border bg-muted/20 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">

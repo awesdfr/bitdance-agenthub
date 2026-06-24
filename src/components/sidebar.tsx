@@ -76,7 +76,7 @@ const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> 
   { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
   { mode: 'scheduler', label: '自动任务', icon: <Clock3 className="size-4" /> },
   { mode: 'monitor', label: '运行现场', icon: <Activity className="size-4" /> },
-  { mode: 'analytics', label: '费用分析', icon: <BarChart3 className="size-4" /> },
+  { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
 ]
 
 const hiddenNavLabels = new Map<SidebarMode, string>([
@@ -103,7 +103,7 @@ const cleanNavLabels: Record<SidebarMode, string> = {
   configops: '配置管理',
   production: '交付检查',
   agents: '智能体',
-  analytics: '费用分析',
+  analytics: '数据分析',
 }
 
 const navDisplayLabels: Record<SidebarMode, string> = {

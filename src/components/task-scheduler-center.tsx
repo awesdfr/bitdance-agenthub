@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import {
   CalendarClock,
@@ -264,7 +264,7 @@ export function TaskSchedulerCenter() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Clock3 className="size-4" />
-              <span className="truncate">自动任务</span>
+              <span className="truncate">任务调度</span>
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
               用来让智能体按时间自动处理队列任务。普通使用只看规则和任务，高级参数已经收在下面。
@@ -698,3 +698,4 @@ function badgeTone(status: string): 'default' | 'secondary' | 'destructive' | 'o
 function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
