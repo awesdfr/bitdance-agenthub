@@ -22,6 +22,7 @@ const eslintConfig = defineConfig([
     "learn-claude-code/**",
     "release/**",
     "release-latest/**",
+    "release-*/**",
     ".electron-package/**",
     "apps/mobile/android/**/build/**",
     "apps/mobile/android/app/src/main/assets/**",

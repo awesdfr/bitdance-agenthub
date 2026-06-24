@@ -1320,6 +1320,8 @@ export function EmployeeAgentFactory({
       if (selectedRunId) await refreshRunSnapshot(selectedRunId)
     })
 
+  const visibleActiveTab = embedded && activeTab === 'control' ? 'agent' : activeTab
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b px-3 py-3">
@@ -1363,20 +1365,22 @@ export function EmployeeAgentFactory({
       </div>
 
       <Tabs
-        value={activeTab}
+        value={visibleActiveTab}
         onValueChange={(value) => setActiveTab(value as FactoryTab)}
         className="flex min-h-0 flex-1 flex-col"
       >
         <div className="shrink-0 border-b px-3 py-2">
-          <TabsList className="grid h-8 w-full grid-cols-3">
-            <TabsTrigger value="control" className="text-xs">
-              基础配置
-            </TabsTrigger>
+          <TabsList className={cn('grid h-8 w-full', embedded ? 'grid-cols-2' : 'grid-cols-3')}>
+            {!embedded && (
+              <TabsTrigger value="control" className="text-xs">
+                系统配置
+              </TabsTrigger>
+            )}
             <TabsTrigger value="agent" className="text-xs">
-              智能体能力
+              能力设置
             </TabsTrigger>
             <TabsTrigger value="run" className="text-xs">
-              运行监控
+              运行记录
             </TabsTrigger>
           </TabsList>
         </div>
@@ -1389,41 +1393,49 @@ export function EmployeeAgentFactory({
             </div>
           ) : (
             <div className="p-3">
-              <TabsContent value="control" className="mt-0 space-y-3">
-                <ControlPlaneForms
-                  networkDraft={networkDraft}
-                  setNetworkDraft={setNetworkDraft}
-                  modelDraft={modelDraft}
-                  setModelDraft={setModelDraft}
-                  cliDraft={cliDraft}
-                  setCliDraft={setCliDraft}
-                  toolDraft={toolDraft}
-                  setToolDraft={setToolDraft}
-                  mcpDraft={mcpDraft}
-                  setMcpDraft={setMcpDraft}
-                  promptTemplateDraft={promptTemplateDraft}
-                  setPromptTemplateDraft={setPromptTemplateDraft}
-                  softwareDraft={softwareDraft}
-                  setSoftwareDraft={setSoftwareDraft}
-                  softwareCommandDraft={softwareCommandDraft}
-                  setSoftwareCommandDraft={setSoftwareCommandDraft}
-                  styleGuideDraft={styleGuideDraft}
-                  setStyleGuideDraft={setStyleGuideDraft}
-                  data={data}
-                  saving={saving}
-                  onCreateNetwork={createNetwork}
-                  onCreateModel={createModel}
-                  onCreateCli={createCli}
-                  onCreateMcp={createMcp}
-                  onCreatePrompt={createPrompt}
-                  onCreateTool={createTool}
-                  onCreateSoftware={createSoftware}
-                  onCreateCommand={createCommand}
-                  onCreateStyleGuide={createGuide}
-                />
-              </TabsContent>
+              {!embedded && (
+                <TabsContent value="control" className="mt-0 space-y-3">
+                  <ControlPlaneForms
+                    networkDraft={networkDraft}
+                    setNetworkDraft={setNetworkDraft}
+                    modelDraft={modelDraft}
+                    setModelDraft={setModelDraft}
+                    cliDraft={cliDraft}
+                    setCliDraft={setCliDraft}
+                    toolDraft={toolDraft}
+                    setToolDraft={setToolDraft}
+                    mcpDraft={mcpDraft}
+                    setMcpDraft={setMcpDraft}
+                    promptTemplateDraft={promptTemplateDraft}
+                    setPromptTemplateDraft={setPromptTemplateDraft}
+                    softwareDraft={softwareDraft}
+                    setSoftwareDraft={setSoftwareDraft}
+                    softwareCommandDraft={softwareCommandDraft}
+                    setSoftwareCommandDraft={setSoftwareCommandDraft}
+                    styleGuideDraft={styleGuideDraft}
+                    setStyleGuideDraft={setStyleGuideDraft}
+                    data={data}
+                    saving={saving}
+                    onCreateNetwork={createNetwork}
+                    onCreateModel={createModel}
+                    onCreateCli={createCli}
+                    onCreateMcp={createMcp}
+                    onCreatePrompt={createPrompt}
+                    onCreateTool={createTool}
+                    onCreateSoftware={createSoftware}
+                    onCreateCommand={createCommand}
+                    onCreateStyleGuide={createGuide}
+                  />
+                </TabsContent>
+              )}
 
               <TabsContent value="agent" className="mt-0 space-y-3">
+                {embedded && (
+                  <div className="rounded-md border bg-muted/25 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                    这里专门管理当前智能体。模型、技能、命令行工具和软件能力先在左侧对应页面接入，
+                    回到这里直接勾选给这个智能体使用。
+                  </div>
+                )}
                 {!embedded && (
                   <FirstLessonPanel
                     onAgentReady={setSelectedAgentId}
