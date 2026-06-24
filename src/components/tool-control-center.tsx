@@ -489,6 +489,44 @@ function getStoreModeLabel(item: SoftwareStoreItem): string {
   return modes.length > 0 ? modes.join(' / ') : '未接入'
 }
 
+function getSoftwareStoreRecommendedMode(item: SoftwareStoreItem): {
+  mode: StoreDetailMode
+  label: string
+  reason: string
+  action: string
+} {
+  if (item.cliProfiles.length > 0) {
+    return {
+      mode: 'cli',
+      label: '优先用 CLI',
+      reason: '适合终端命令、本地脚本、代码交付和桌面软件自动化。',
+      action: '查看 CLI 或 MCP，确认能检测成功后分配给智能体。',
+    }
+  }
+  if (item.mcpServers.length > 0) {
+    return {
+      mode: 'mcp',
+      label: '优先用 MCP',
+      reason: '适合结构化工具调用、外部服务、数据库、浏览器和文件能力。',
+      action: '查看 MCP 工具列表，检测通过后分配给智能体。',
+    }
+  }
+  if (item.softwareCommands.length > 0) {
+    return {
+      mode: 'commands',
+      label: '优先用封装命令',
+      reason: '适合把复杂软件操作做成一个可重复调用的动作。',
+      action: '查看可用命令，再把命令加入智能体工具包。',
+    }
+  }
+  return {
+    mode: 'overview',
+    label: '先创建接入',
+    reason: '这个软件还没有 CLI、MCP 或封装命令，暂时不能直接交给智能体使用。',
+    action: '进入高级配置创建 CLI、MCP 或软件配置。',
+  }
+}
+
 function guessCliCommand(item: SoftwareStoreItem): string {
   const normalized = normalizeSoftwareText(item.name)
   if (normalized.includes('codex')) return 'codex'
@@ -1180,6 +1218,17 @@ export function ToolControlCenter() {
         <div className="min-h-0 flex-1 overflow-auto p-5">
           <div className="mx-auto grid max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
             <section className="min-w-0 space-y-4">
+              <SoftwareAccessAssistant
+                selectedItem={selectedStoreItem}
+                connectedSoftwareCount={connectedSoftwareCount}
+                totalModeCount={totalModeCount}
+                commandCount={softwareCommands.length + mcpTools.length}
+                activeCategory={storeCategory}
+                onQuickCategory={setStoreCategory}
+                onOpenMode={setSelectedStoreDetailMode}
+                onOpenAdvanced={() => setShowAdvancedTools(true)}
+              />
+
               <div className="grid gap-3 md:grid-cols-3">
                 <SoftwareStoreStat label="已接入软件" value={connectedSoftwareCount} />
                 <SoftwareStoreStat label="CLI / MCP 模式" value={totalModeCount} />
@@ -2702,6 +2751,148 @@ function SoftwareStoreMiniStat({ label, value }: { label: string; value: number 
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
     </div>
+  )
+}
+
+function SoftwareAccessAssistant({
+  selectedItem,
+  connectedSoftwareCount,
+  totalModeCount,
+  commandCount,
+  activeCategory,
+  onQuickCategory,
+  onOpenMode,
+  onOpenAdvanced,
+}: {
+  selectedItem: SoftwareStoreItem | null
+  connectedSoftwareCount: number
+  totalModeCount: number
+  commandCount: number
+  activeCategory: SoftwareStoreCategory
+  onQuickCategory: (category: SoftwareStoreCategory) => void
+  onOpenMode: (mode: StoreDetailMode) => void
+  onOpenAdvanced: () => void
+}) {
+  const recommended = selectedItem ? getSoftwareStoreRecommendedMode(selectedItem) : null
+  const fit = selectedItem ? inferSoftwareAgentFit(selectedItem) : null
+  const quickCategories: Array<{ category: SoftwareStoreCategory; label: string; detail: string }> = [
+    { category: '开发工具', label: '代码和仓库', detail: 'Codex、Claude Code、GitHub' },
+    { category: '办公协作', label: '沟通协作', detail: '微信、飞书、Notion' },
+    { category: '浏览器网页', label: '浏览器网页', detail: 'Chrome、SkillsMP、网页工具' },
+    { category: '视频创作', label: '视频剪辑', detail: '剪映、CapCut、素材处理' },
+  ]
+
+  return (
+    <section
+      data-testid="software-access-assistant"
+      className="rounded-lg border bg-background p-4 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Wrench className="size-4 text-primary" />
+            <h3 className="text-base font-semibold">软件接入助手</h3>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+            先选软件，再看它有没有 CLI、MCP 或封装命令。接入后，直接在智能体设置里勾选使用。
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <SoftwareStoreMiniStat label="已接入" value={connectedSoftwareCount} />
+          <SoftwareStoreMiniStat label="CLI/MCP" value={totalModeCount} />
+          <SoftwareStoreMiniStat label="命令" value={commandCount} />
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+        <div className="space-y-3">
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground">一键找软件</div>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              {quickCategories.map((item) => (
+                <button
+                  key={item.category}
+                  type="button"
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition hover:border-primary/50 hover:bg-primary/5',
+                    activeCategory === item.category ? 'border-primary bg-primary/5' : 'bg-muted/10',
+                  )}
+                  onClick={() => onQuickCategory(item.category)}
+                >
+                  <div className="text-sm font-semibold">{item.label}</div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-4">
+            {softwareUseSteps.map((step, index) => (
+              <div key={step.title} className="rounded-lg border bg-muted/10 px-3 py-2">
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                    {index + 1}
+                  </span>
+                  {step.title}
+                </div>
+                <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{step.detail}</div>
+              </div>
+            ))}
+            <div className="rounded-lg border bg-muted/10 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                  4
+                </span>
+                上线使用
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                智能体运行时会自动调用对应 CLI、MCP 或软件命令。
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-muted/10 p-3">
+          <div className="text-xs font-semibold text-muted-foreground">当前软件</div>
+          <div className="mt-2 flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              {selectedItem ? renderSoftwareStoreIcon(selectedItem.icon, 'size-4') : <Package className="size-4" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{selectedItem?.name ?? '先选择一个软件'}</div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                {selectedItem?.description ?? '点击下面的软件卡片后，这里会显示它的 CLI、MCP、命令和适合哪类智能体。'}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-2">
+            <SoftwareAssignmentRow label="推荐接入方式" value={recommended?.label ?? '先选择软件'} />
+            <SoftwareAssignmentRow label="适合智能体" value={fit?.role ?? '选择软件后自动判断'} />
+            <SoftwareAssignmentRow label="下一步" value={recommended?.action ?? '从软件列表里选择一个要接入的工具'} />
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              className="gap-2"
+              disabled={!selectedItem}
+              onClick={() => {
+                if (recommended) onOpenMode(recommended.mode)
+              }}
+            >
+              <Terminal className="size-4" />
+              查看 CLI 或 MCP
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="gap-2" onClick={onOpenAdvanced}>
+              <Settings2 className="size-4" />
+              进入高级配置
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
