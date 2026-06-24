@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/*': [
       'scripts/agenthub-codex-mcp.mjs',
+      'scripts/local-desktop-app-cli.mjs',
       // pdf-parse loads pdf.worker.mjs at runtime; keep worker assets in standalone/Electron.
       'node_modules/pdf-parse/dist/**/*',
       'node_modules/pdfjs-dist/**/*',

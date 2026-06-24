@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
@@ -588,12 +590,15 @@ export async function testSoftwareCommand(id: string): Promise<TestResult> {
   if (!row) throw new Error(`Software command not found: ${id}`)
   const checkedAt = Date.now()
   const implementationType = typeof row.implementation.type === 'string' ? row.implementation.type : null
-  const ok = Boolean(row.name.trim() && implementationType)
+  const cliResult = implementationType === 'cli' ? runCliSoftwareCommandTest(row) : null
+  const ok = Boolean(row.name.trim() && implementationType) && (cliResult?.ok ?? true)
   const result: TestResult = {
     status: ok ? 'ok' : 'failed',
-    message: ok
-      ? `Software command is structurally valid for ${implementationType}; no software was launched.`
-      : 'Software command requires a name and implementation.type.',
+    message: cliResult
+      ? cliResult.message
+      : ok
+        ? `Software command is structurally valid for ${implementationType}; no software was launched.`
+        : 'Software command requires a name and implementation.type.',
     checkedAt,
   }
   await db
@@ -606,6 +611,124 @@ export async function testSoftwareCommand(id: string): Promise<TestResult> {
     })
     .where(eq(schema.softwareCommands.id, id))
   return result
+}
+
+function runCliSoftwareCommandTest(row: SoftwareCommandRow): { ok: boolean; message: string } | null {
+  const testCommandTemplate = stringFromObject(row.implementation, 'testCommandTemplate')
+  const commandTemplate = stringFromObject(row.implementation, 'commandTemplate')
+  const runnableTemplate =
+    testCommandTemplate ??
+    (!row.requiresApproval && row.riskLevel === 'low' ? commandTemplate : null)
+  if (!runnableTemplate) {
+    return {
+      ok: true,
+      message:
+        'CLI software command is structurally valid; live test skipped because this command requires input or approval.',
+    }
+  }
+  if (/\{\{\s*[\w.-]+\s*\}\}/.test(runnableTemplate)) {
+    return {
+      ok: true,
+      message:
+        'CLI software command is structurally valid; live test skipped because the test command still contains input placeholders.',
+    }
+  }
+  const argv = splitCommandLine(runnableTemplate)
+  const command = argv[0]
+  if (!command) {
+    return { ok: false, message: 'CLI software command test has an empty command line.' }
+  }
+  const result = spawnSync(command, argv.slice(1), {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PYTHONUTF8: process.env.PYTHONUTF8 ?? '1',
+      PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? 'utf-8',
+    },
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15000,
+    maxBuffer: 2 * 1024 * 1024,
+  })
+  if (result.error) {
+    return { ok: false, message: `CLI software command test failed: ${result.error.message}` }
+  }
+  const stdout = firstLine(result.stdout)
+  const stderr = firstLine(result.stderr)
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message: `CLI software command test exited ${result.status}: ${stderr ?? stdout ?? 'no output'}`,
+    }
+  }
+  const summary = summarizeCliTestOutput(result.stdout)
+  return {
+    ok: true,
+    message: `CLI software command test passed: ${summary ?? stdout ?? 'command exited 0'}`,
+  }
+}
+
+function stringFromObject(value: JsonObject, key: string): string | null {
+  const field = value[key]
+  return typeof field === 'string' && field.trim() ? field.trim() : null
+}
+
+function splitCommandLine(input: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index]
+    if (char === '\\' && quote === '"' && input[index + 1] === '"') {
+      current += '"'
+      index += 1
+      continue
+    }
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote ? null : char
+      continue
+    }
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        parts.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += char
+  }
+  if (current) parts.push(current)
+  return parts
+}
+
+function firstLine(value: unknown): string | null {
+  return String(value ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? null
+}
+
+function summarizeCliTestOutput(value: unknown): string | null {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (Array.isArray(parsed)) return `${parsed.length} item(s)`
+    if (!parsed || typeof parsed !== 'object') return String(parsed)
+    const record = parsed as Record<string, unknown>
+    const parts = [
+      record.ok === false ? 'ok=false' : null,
+      typeof record.found === 'boolean' ? `found=${record.found}` : null,
+      typeof record.path === 'string' ? `path=${record.path}` : null,
+      typeof record.running === 'boolean' ? `running=${record.running}` : null,
+      typeof record.process_count === 'number' ? `processes=${record.process_count}` : null,
+      typeof record.window_count === 'number' ? `windows=${record.window_count}` : null,
+      Array.isArray(record.draft_roots) ? `draftRoots=${record.draft_roots.length}` : null,
+    ].filter(Boolean)
+    return parts.length > 0 ? parts.join(', ') : `${Object.keys(record).length} field(s)`
+  } catch {
+    return firstLine(text)
+  }
 }
 
 async function getRequiredSoftwareProfile(id: string): Promise<SoftwareProfileRow> {
