@@ -12,7 +12,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
@@ -52,6 +52,7 @@ export function AgentLibrary({
     defaultSettingsOpen ? '__first__' : null,
   )
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(defaultSettingsOpen)
+  const [settingsDismissed, setSettingsDismissed] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -63,9 +64,15 @@ export function AgentLibrary({
   const settingsOpen = Boolean(settingsAgent)
 
   useEffect(() => {
+    if (settingsDismissed || settingsAgentId || agents.length === 0) return
+    setSettingsAgentId(agents[0].id)
+  }, [agents, settingsAgentId, settingsDismissed])
+
+  useEffect(() => {
     if (settingsRequestKey <= 0) return
     setSettingsAgentId('__first__')
     setAdvancedSettingsOpen(true)
+    setSettingsDismissed(false)
   }, [settingsRequestKey])
 
   const openCreate = () => {
@@ -81,6 +88,13 @@ export function AgentLibrary({
   const openSettings = (agent: AgentRow) => {
     setSettingsAgentId(agent.id)
     setAdvancedSettingsOpen(false)
+    setSettingsDismissed(false)
+  }
+
+  const closeSettings = () => {
+    setSettingsAgentId(null)
+    setAdvancedSettingsOpen(false)
+    setSettingsDismissed(true)
   }
 
   const handleFormOpenChange = (open: boolean) => {
@@ -108,7 +122,7 @@ export function AgentLibrary({
       <div
         className={cn(
           'flex min-h-0 flex-col',
-          settingsOpen ? 'shrink-0 border-r lg:w-[24rem]' : 'flex-1',
+          'shrink-0 border-r lg:w-[25rem]',
         )}
       >
         <div className="shrink-0 border-b px-3 py-3">
@@ -116,7 +130,7 @@ export function AgentLibrary({
             <div className="min-w-0">
               <h2 className="truncate text-base font-semibold">智能体</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                在这里创建员工智能体，并直接配置它能用的模型、技能、工具、命令和权限。
+                这里就是智能体设置入口。点卡片或齿轮，右侧直接配置模型、技能、工具、命令和权限。
               </p>
             </div>
             <Button className="shrink-0 gap-2" onClick={openCreate}>
@@ -154,7 +168,7 @@ export function AgentLibrary({
             size="icon"
             variant="ghost"
             className="absolute right-3 top-3 z-10"
-            onClick={() => setSettingsAgentId(null)}
+            onClick={closeSettings}
             title="收起设置"
           >
             <X className="size-4" />
@@ -214,6 +228,26 @@ export function AgentLibrary({
               </div>
             </ScrollArea>
           )}
+        </section>
+      )}
+
+      {!settingsOpen && (
+        <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background p-6">
+          <div className="max-w-md rounded-md border bg-card p-5 shadow-sm" data-testid="agent-settings-empty">
+            <div className="flex size-11 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Settings2 className="size-5" />
+            </div>
+            <h3 className="mt-4 text-base font-semibold">选择一个智能体开始设置</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              不再单独维护“智能体工厂”。每个智能体自己的模型、技能、MCP、CLI、记忆、权限和交付物都在这里配置。
+            </p>
+            <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+              <div className="rounded-md border bg-muted/20 px-3 py-2">1. 点左侧智能体卡片</div>
+              <div className="rounded-md border bg-muted/20 px-3 py-2">2. 打开右侧设置</div>
+              <div className="rounded-md border bg-muted/20 px-3 py-2">3. 勾选模型和能力</div>
+              <div className="rounded-md border bg-muted/20 px-3 py-2">4. 保存后交给画布运行</div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -384,13 +418,24 @@ function AgentCard({
   onDelete: () => void
 }) {
   const capabilityCount = agent.skillIds.length + agent.mcpServerIds.length + agent.cliProfileIds.length
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onSettings()
+  }
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={onSettings}
+      onKeyDown={handleCardKeyDown}
+      data-testid="agent-card"
       className={cn(
-        'group flex items-start gap-3 rounded-md border bg-card px-3 py-3 transition',
-        selected ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-foreground/20',
+        'group flex cursor-pointer items-start gap-3 rounded-md border bg-card px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        selected ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-primary/50 hover:bg-muted/20',
       )}
+      aria-label={`设置智能体 ${agent.name}`}
     >
       <AgentAvatar agent={agent} size="md" />
       <div className="min-w-0 flex-1">
@@ -434,9 +479,12 @@ function AgentCard({
         <Button
           type="button"
           size="sm"
-          variant={selected ? 'secondary' : 'ghost'}
+          variant={selected ? 'default' : 'secondary'}
           className="h-8 gap-1.5 px-2.5"
-          onClick={onSettings}
+          onClick={(event) => {
+            event.stopPropagation()
+            onSettings()
+          }}
           title="设置智能体"
         >
           <Settings2 className="size-4" />
@@ -447,7 +495,10 @@ function AgentCard({
           size="icon"
           variant="ghost"
           className="size-8 opacity-70 transition hover:opacity-100"
-          onClick={onEdit}
+          onClick={(event) => {
+            event.stopPropagation()
+            onEdit()
+          }}
           title="编辑基础信息"
         >
           <Pencil className="size-4" />
@@ -458,7 +509,10 @@ function AgentCard({
             size="icon"
             variant="ghost"
             className="size-8 text-muted-foreground transition hover:text-red-600"
-            onClick={onDelete}
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete()
+            }}
             title="删除智能体"
           >
             <Trash2 className="size-4" />
