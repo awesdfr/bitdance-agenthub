@@ -951,7 +951,10 @@ export function ModelControlCenter() {
         <ScrollArea className="min-h-0">
           <div className="space-y-3 p-3">
             <Section title="模型列表">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="mb-2 rounded-md border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                模型在这里统一管理。添加一次之后，普通对话和每个智能体都可以直接选择使用。
+              </div>
+              <div className="grid gap-2 xl:grid-cols-2">
                 {models.length === 0 ? (
                   <EmptyState label="暂无模型配置" />
                 ) : (
@@ -976,130 +979,134 @@ export function ModelControlCenter() {
               </div>
             </Section>
 
-            <Section title="网络出口">
-              <div className="grid grid-cols-2 gap-2">
-                {networks.length === 0 ? (
-                  <EmptyState label="暂无网络出口" />
-                ) : (
-                  networks.map((network) => (
-                    <NetworkRow
-                      key={network.id}
-                      network={network}
-                      selected={network.id === selectedNetworkId}
-                      modelCount={modelsByNetwork.get(network.id) ?? 0}
-                      saving={saving === `network:${network.id}`}
-                      onSelect={() => setSelectedNetworkId(network.id)}
-                      onTest={() => void runNetworkTest(network)}
+            {showConfigPanel && (
+              <>
+                <Section title="网络出口">
+                  <div className="grid gap-2 xl:grid-cols-2">
+                    {networks.length === 0 ? (
+                      <EmptyState label="暂无网络出口" />
+                    ) : (
+                      networks.map((network) => (
+                        <NetworkRow
+                          key={network.id}
+                          network={network}
+                          selected={network.id === selectedNetworkId}
+                          modelCount={modelsByNetwork.get(network.id) ?? 0}
+                          saving={saving === `network:${network.id}`}
+                          onSelect={() => setSelectedNetworkId(network.id)}
+                          onTest={() => void runNetworkTest(network)}
+                        />
+                      ))
+                    )}
+                  </div>
+                </Section>
+
+                <Section title="路由预览">
+                  <div className="grid grid-cols-[1fr_8rem_8rem] gap-2">
+                    <select
+                      value={routeAgentId}
+                      onChange={(event) => setRouteAgentId(event.target.value)}
+                      className="h-8 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                    >
+                      <option value="">全部模型</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      value={inputTokens}
+                      onChange={(event) => setInputTokens(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="输入"
                     />
-                  ))
-                )}
-              </div>
-            </Section>
+                    <Input
+                      value={outputTokens}
+                      onChange={(event) => setOutputTokens(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="输出"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <Toggle label="视觉" checked={routeNeedsVision} onChange={setRouteNeedsVision} />
+                    <Toggle label="工具" checked={routeNeedsTools} onChange={setRouteNeedsTools} />
+                    <Toggle label="JSON" checked={routeNeedsJson} onChange={setRouteNeedsJson} />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1"
+                      onClick={() => void runRoutePreview()}
+                      disabled={saving !== null}
+                    >
+                      {saving === 'route' ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Route className="size-3.5" />
+                      )}
+                      预览
+                    </Button>
+                  </div>
+                </Section>
 
-            <Section title="路由预览">
-              <div className="grid grid-cols-[1fr_8rem_8rem] gap-2">
-                <select
-                  value={routeAgentId}
-                  onChange={(event) => setRouteAgentId(event.target.value)}
-                  className="h-8 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
-                >
-                  <option value="">全部模型</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  value={inputTokens}
-                  onChange={(event) => setInputTokens(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="输入"
-                />
-                <Input
-                  value={outputTokens}
-                  onChange={(event) => setOutputTokens(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="输出"
-                />
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                <Toggle label="视觉" checked={routeNeedsVision} onChange={setRouteNeedsVision} />
-                <Toggle label="工具" checked={routeNeedsTools} onChange={setRouteNeedsTools} />
-                <Toggle label="JSON" checked={routeNeedsJson} onChange={setRouteNeedsJson} />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1"
-                  onClick={() => void runRoutePreview()}
-                  disabled={saving !== null}
-                >
-                  {saving === 'route' ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Route className="size-3.5" />
-                  )}
-                  预览
-                </Button>
-              </div>
-            </Section>
+                <Section title="连接与推理测试">
+                  <div className="space-y-2">
+                    {connectionTests.length === 0 ? (
+                      <EmptyState label="暂无测试记录" />
+                    ) : (
+                      connectionTests.slice(0, 20).map((test) => (
+                        <RuntimeRow
+                          key={test.id}
+                          title={connectionTestTitle(test)}
+                          subtitle={test.message}
+                          badge={test.status}
+                          meta={`${test.latencyMs ?? 0}ms · ${formatTime(test.createdAt)}`}
+                        />
+                      ))
+                    )}
+                  </div>
+                </Section>
 
-            <Section title="连接与推理测试">
-              <div className="space-y-2">
-                {connectionTests.length === 0 ? (
-                  <EmptyState label="暂无测试记录" />
-                ) : (
-                  connectionTests.slice(0, 20).map((test) => (
+                <Section title="路由决策">
+                  <div className="space-y-2">
+                    {routeDecisions.length === 0 ? (
+                      <EmptyState label="暂无路由决策" />
+                    ) : (
+                      routeDecisions.slice(0, 20).map((decision) => (
+                        <RuntimeRow
+                          key={decision.id}
+                          title={statusLabel(decision.status)}
+                          subtitle={decision.reason}
+                          badge={decision.status}
+                          meta={`${decision.estimatedCostCents}c · ${formatTime(decision.createdAt)}`}
+                        />
+                      ))
+                    )}
+                  </div>
+                </Section>
+
+                {selectedModel && (
+                  <Section title="当前模型">
                     <RuntimeRow
-                      key={test.id}
-                      title={connectionTestTitle(test)}
-                      subtitle={test.message}
-                      badge={test.status}
-                      meta={`${test.latencyMs ?? 0}ms · ${formatTime(test.createdAt)}`}
+                      title={selectedModel.name}
+                      subtitle={`${selectedModel.provider} · ${selectedModel.model}`}
+                      badge={selectedModel.healthStatus}
+                      meta={selectedModel.lastTestResult ?? selectedModel.id}
                     />
-                  ))
+                  </Section>
                 )}
-              </div>
-            </Section>
 
-            <Section title="路由决策">
-              <div className="space-y-2">
-                {routeDecisions.length === 0 ? (
-                  <EmptyState label="暂无路由决策" />
-                ) : (
-                  routeDecisions.slice(0, 20).map((decision) => (
+                {selectedNetwork && (
+                  <Section title="当前出口">
                     <RuntimeRow
-                      key={decision.id}
-                      title={statusLabel(decision.status)}
-                      subtitle={decision.reason}
-                      badge={decision.status}
-                      meta={`${decision.estimatedCostCents}c · ${formatTime(decision.createdAt)}`}
+                      title={selectedNetwork.name}
+                      subtitle={`${networkModeLabel(selectedNetwork.mode)} · ${networkTargetLabel(selectedNetwork.appliesTo)}`}
+                      badge={selectedNetwork.healthStatus}
+                      meta={selectedNetwork.lastTestResult ?? selectedNetwork.id}
                     />
-                  ))
+                  </Section>
                 )}
-              </div>
-            </Section>
-
-            {selectedModel && (
-              <Section title="当前模型">
-                <RuntimeRow
-                  title={selectedModel.name}
-                  subtitle={`${selectedModel.provider} · ${selectedModel.model}`}
-                  badge={selectedModel.healthStatus}
-                  meta={selectedModel.lastTestResult ?? selectedModel.id}
-                />
-              </Section>
-            )}
-
-            {selectedNetwork && (
-              <Section title="当前出口">
-                <RuntimeRow
-                  title={selectedNetwork.name}
-                  subtitle={`${networkModeLabel(selectedNetwork.mode)} · ${networkTargetLabel(selectedNetwork.appliesTo)}`}
-                  badge={selectedNetwork.healthStatus}
-                  meta={selectedNetwork.lastTestResult ?? selectedNetwork.id}
-                />
-              </Section>
+              </>
             )}
           </div>
         </ScrollArea>
