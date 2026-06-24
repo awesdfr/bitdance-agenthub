@@ -1,8 +1,11 @@
 {
   "name": "bytedance-agenthub",
   "version": "0.1.0",
+  "description": "Desktop-first local Agent employee workbench for multi-agent orchestration.",
   "license": "AGPL-3.0-only",
+  "author": "AgentHub contributors",
   "private": false,
+  "packageManager": "pnpm@10.26.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "sqlite:ensure:node": "node scripts/ensure-node-sqlite.mjs",
@@ -25,7 +28,7 @@
     "electron:rebuild": "node scripts/rebuild-electron-sqlite.mjs",
     "electron:prebuild": "node scripts/electron-prebuild.mjs",
     "electron:dev": "concurrently -k -n NEXT,TSC,ELECTRON -c blue,yellow,magenta \"corepack pnpm dev -- -p 3101\" \"corepack pnpm electron:tsc:watch\" \"wait-on -d 200 tcp:127.0.0.1:3101 file:./dist-electron/main.js && node scripts/electron-dev.mjs\"",
-    "electron:build": "corepack pnpm build && corepack pnpm electron:prebuild && corepack pnpm electron:tsc && electron-builder",
+    "electron:build": "corepack pnpm build && corepack pnpm electron:prebuild && corepack pnpm electron:tsc && node scripts/electron-package.mjs",
     "mobile:dev": "corepack pnpm --filter @agenthub/mobile dev",
     "mobile:build": "corepack pnpm --filter @agenthub/mobile build",
     "mobile:sync": "corepack pnpm --filter @agenthub/mobile cap:sync",
@@ -112,6 +115,10 @@
       "package.json"
     ],
     "npmRebuild": false,
+    "extraMetadata": {
+      "dependencies": {},
+      "devDependencies": {}
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
