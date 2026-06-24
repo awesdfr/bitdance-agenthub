@@ -1038,8 +1038,13 @@ export function AgentWorkflowCanvas() {
   }
 
   const handleCanvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || event.target !== event.currentTarget) return
+    const wantsPrimaryPan = event.button === 0 && !isCanvasInteractiveTarget(event.target)
+    const wantsMiddlePan = event.button === 1 && !isCanvasFormTarget(event.target)
+    if (!wantsPrimaryPan && !wantsMiddlePan) return
+    event.preventDefault()
     setNodePalette(null)
+    setConnectingFromNodeId('')
+    setSelectedNodeId('')
     event.currentTarget.setPointerCapture(event.pointerId)
     setPan({
       pointerId: event.pointerId,
@@ -1061,11 +1066,11 @@ export function AgentWorkflowCanvas() {
       return
     }
     if (pan?.pointerId === event.pointerId) {
-      setViewport({
+      setViewport((current) => ({
         x: pan.originX + event.clientX - pan.startX,
         y: pan.originY + event.clientY - pan.startY,
-        scale: viewport.scale,
-      })
+        scale: current.scale,
+      }))
       return
     }
     if (!drag) return
@@ -1102,12 +1107,12 @@ export function AgentWorkflowCanvas() {
   }
 
   const handleCanvasDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) return
+    if (isCanvasInteractiveTarget(event.target)) return
     openNodePalette(event)
   }
 
   const handleCanvasContextMenu = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) return
+    if (isCanvasInteractiveTarget(event.target)) return
     event.preventDefault()
     openNodePalette(event)
   }
@@ -1433,6 +1438,7 @@ export function AgentWorkflowCanvas() {
                       role="button"
                       tabIndex={0}
                       data-testid="workflow-canvas-node"
+                      data-canvas-interactive="true"
                       data-node-id={node.id}
                       data-run-state={runState}
                       onClick={() => handleNodeClick(node)}
@@ -1808,6 +1814,7 @@ function CanvasViewportControls({
   return (
     <div
       data-testid="canvas-viewport-controls"
+      data-canvas-interactive="true"
       className="pointer-events-auto absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-md border bg-card/95 p-1 shadow-sm backdrop-blur"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -1868,6 +1875,7 @@ function CanvasNodePalette({
   return (
     <div
       data-testid="canvas-node-palette"
+      data-canvas-interactive="true"
       className="pointer-events-auto absolute z-50 w-56 rounded-md border bg-card/95 p-2 shadow-lg backdrop-blur"
       style={{ left: palette.x, top: palette.y }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -1962,6 +1970,7 @@ function CanvasMiniMap({
   return (
     <div
       data-testid="canvas-minimap"
+      data-canvas-interactive="true"
       className="pointer-events-auto absolute bottom-14 right-3 z-30 rounded-md border bg-card/95 p-2 shadow-sm backdrop-blur"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -2086,7 +2095,11 @@ function CustomerDeliveryDock({
   return (
     <div
       data-testid="canvas-customer-delivery-dock"
+      data-canvas-interactive="true"
       className="pointer-events-auto absolute bottom-3 left-3 z-30 w-[min(27rem,calc(100%-1.5rem))] rounded-md border bg-card/95 p-2.5 shadow-lg backdrop-blur"
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold">
@@ -2582,6 +2595,7 @@ function CanvasQuickEditor({
       <button
         type="button"
         data-testid="canvas-quick-editor-collapsed"
+        data-canvas-interactive="true"
         className="pointer-events-auto absolute right-3 top-3 z-40 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-md border bg-card/95 px-3 py-2 text-left text-xs shadow-sm backdrop-blur transition hover:border-primary/50"
         onPointerDown={(event) => event.stopPropagation()}
         onDoubleClick={(event) => event.stopPropagation()}
@@ -2604,6 +2618,7 @@ function CanvasQuickEditor({
   return (
     <div
       data-testid="canvas-quick-editor"
+      data-canvas-interactive="true"
       className="pointer-events-auto absolute right-3 top-3 z-40 w-80 max-w-[calc(100%-1.5rem)] rounded-md border bg-card/95 p-3 shadow-lg backdrop-blur"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -3999,6 +4014,28 @@ function mergeRuns(current: WorkflowRunRow[], incoming: WorkflowRunRow[]): Workf
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function isCanvasInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(
+    target.closest(
+      [
+        '[data-canvas-interactive="true"]',
+        'button',
+        'input',
+        'textarea',
+        'select',
+        'a',
+        '[role="button"]',
+      ].join(','),
+    ),
+  )
+}
+
+function isCanvasFormTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
 }
 
 function formatError(err: unknown): string {
