@@ -21,6 +21,8 @@ const eslintConfig = defineConfig([
     ".understand-anything/**",
     "learn-claude-code/**",
     "release/**",
+    "release-latest/**",
+    ".electron-package/**",
     "apps/mobile/android/**/build/**",
     "apps/mobile/android/app/src/main/assets/**",
     "apps/mobile/dist/**",

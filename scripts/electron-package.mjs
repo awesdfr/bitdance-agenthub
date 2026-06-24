@@ -4,7 +4,9 @@ import path from 'node:path'
 
 const root = process.cwd()
 const stageDir = path.join(root, '.electron-package')
-const releaseDir = path.join(root, 'release')
+const releaseDir = process.env.AGENTHUB_RELEASE_DIR
+  ? path.resolve(root, process.env.AGENTHUB_RELEASE_DIR)
+  : path.join(root, 'release')
 
 function assertInsideRoot(target, label) {
   const resolvedRoot = path.resolve(root)
@@ -48,6 +50,9 @@ const builderCli = path.join(
 )
 
 resetDir(stageDir, 'Electron staging directory')
+if (process.env.AGENTHUB_RELEASE_DIR) {
+  resetDir(releaseDir, 'Electron release directory')
+}
 
 copyDir(path.join(root, 'dist-electron'), path.join(stageDir, 'dist-electron'), 'dist-electron')
 fs.mkdirSync(path.join(stageDir, '.next'), { recursive: true })
@@ -61,6 +66,7 @@ const buildConfig = {
   appId: rootPkg.build?.appId ?? 'com.agenthub.app',
   productName: rootPkg.build?.productName ?? 'AgentHub',
   electronVersion: electronPkg.version,
+  compression: process.env.AGENTHUB_ELECTRON_COMPRESSION ?? rootPkg.build?.compression ?? 'store',
   directories: {
     output: releaseDir,
     buildResources: path.join(root, 'build'),
