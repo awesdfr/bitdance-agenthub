@@ -54,6 +54,9 @@ const uiText = {
   conversationNav: '\u5bf9\u8bdd',
   newConversation: '\u65b0\u5efa\u5bf9\u8bdd',
   workArea: '\u5de5\u4f5c\u5bf9\u8bdd\u533a',
+  plainModelConversationSection: '\u666e\u901a\u6a21\u578b\u5bf9\u8bdd',
+  plainModelChatLabel: '\u666e\u901a\u5bf9\u8bdd \u00b7 \u6a21\u578b\u804a\u5929',
+  workAreaNotModelChat: '\u4e0d\u662f\u666e\u901a\u6a21\u578b\u804a\u5929',
   modelPicker: '\u9009\u62e9\u6a21\u578b',
   chatInput: '\u8f93\u5165\u6d88\u606f',
   modelConversationCopy: '\u5355\u72ec\u7684\u666e\u901a\u804a\u5929\u7a97\u53e3',
@@ -448,9 +451,12 @@ async function main() {
   }
   const directConversationScreenshot = path.join(outDir, 'new-conversation-direct-chat.png')
   await page.screenshot({ path: directConversationScreenshot, fullPage: true })
+  const directConversationBodyText = await page.locator('body').innerText()
   const directConversationChecks = {
     chatInputVisible: await page.locator(`textarea[placeholder*="${uiText.chatInput}"]`).isVisible(),
     noModelPickerDialog: modelPickerDialogCount === 0,
+    modelConversationSection: directConversationBodyText.includes(uiText.plainModelConversationSection),
+    plainModelChatLabel: directConversationBodyText.includes(uiText.plainModelChatLabel),
   }
   for (const [key, value] of Object.entries(directConversationChecks)) {
     if (!value) throw new Error(`Direct new conversation check failed: ${key}.`)
@@ -494,9 +500,10 @@ async function main() {
   }
 
   await clickSidebarButton(sidebar, uiText.conversationNav)
-  await page.getByRole('button', { name: uiText.workArea }).click()
+  await sidebar.locator('button[title="新建工作对话区"]').click()
   const dialog = page.locator('[role="dialog"]')
   await dialog.getByText(uiText.workAreaCopy).waitFor({ timeout: 90_000 })
+  await dialog.getByText(uiText.workAreaNotModelChat).waitFor({ timeout: 90_000 })
   await dialog.getByText(uiText.workspaceDirectory, { exact: true }).waitFor({ timeout: 90_000 })
   await dialog.getByRole('button', { name: '\u53d6\u6d88' }).click()
   await dialog.waitFor({ state: 'hidden', timeout: 10_000 })

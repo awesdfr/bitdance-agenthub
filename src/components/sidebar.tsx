@@ -155,6 +155,20 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
     if (!q) return active
     return active.filter((conversation) => conversation.title.toLowerCase().includes(q))
   }, [conversations, search])
+  const visibleModelConversations = useMemo(
+    () =>
+      visibleConversations.filter(
+        (conversation) => conversation.agentIds.length === 0 && Boolean(conversation.modelProfileId),
+      ),
+    [visibleConversations],
+  )
+  const visibleWorkConversations = useMemo(
+    () =>
+      visibleConversations.filter(
+        (conversation) => conversation.agentIds.length > 0 || !conversation.modelProfileId,
+      ),
+    [visibleConversations],
+  )
 
   useEffect(() => {
     fetchConversations().then(setConversations).catch(console.error)
@@ -354,7 +368,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                       {search.trim() ? '没有匹配的对话' : '还没有对话'}
                     </div>
                   )
-                ) : (
+                ) : collapsed ? (
                   visibleConversations.map((conversation) => (
                     <ConversationItem
                       key={conversation.id}
@@ -368,6 +382,31 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                       }}
                     />
                   ))
+                ) : (
+                  <>
+                    <ConversationSection
+                      title="普通模型对话"
+                      description="只和一个模型聊天"
+                      conversations={visibleModelConversations}
+                      agents={agents}
+                      activeId={activeId}
+                      onSelect={(id) => {
+                        setActive(id)
+                        onModeChange('conversations')
+                      }}
+                    />
+                    <ConversationSection
+                      title="工作对话区"
+                      description="多智能体协作任务"
+                      conversations={visibleWorkConversations}
+                      agents={agents}
+                      activeId={activeId}
+                      onSelect={(id) => {
+                        setActive(id)
+                        onModeChange('conversations')
+                      }}
+                    />
+                  </>
                 )}
               </div>
             </ScrollArea>
@@ -468,11 +507,54 @@ function ConversationItem({
         <div className="truncate text-sm font-medium">{conversation.title}</div>
         <div className="truncate text-xs text-muted-foreground">
           {isModelConversation
-            ? '模型对话 · 1 个模型'
-            : `${conversation.mode === 'single' ? '单人协作' : '团队协作'} · ${conversation.agentIds.length} 个智能体`}
+            ? '普通对话 · 模型聊天'
+            : conversation.mode === 'single'
+              ? `智能体对话 · ${conversation.agentIds.length} 个智能体`
+              : `工作对话区 · ${conversation.agentIds.length} 个智能体`}
         </div>
       </div>
     </button>
+  )
+}
+
+function ConversationSection({
+  title,
+  description,
+  conversations,
+  agents,
+  activeId,
+  onSelect,
+}: {
+  title: string
+  description: string
+  conversations: ConversationRow[]
+  agents: Record<string, AgentRow>
+  activeId: string | null
+  onSelect: (id: string) => void
+}) {
+  if (conversations.length === 0) return null
+  return (
+    <section className="space-y-1" data-testid={`conversation-section-${title}`}>
+      <div className="flex items-center justify-between gap-2 px-2 pt-2">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] font-semibold text-foreground">{title}</div>
+          <div className="truncate text-[10px] text-muted-foreground">{description}</div>
+        </div>
+        <span className="shrink-0 rounded-full border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          {conversations.length}
+        </span>
+      </div>
+      {conversations.map((conversation) => (
+        <ConversationItem
+          key={conversation.id}
+          conversation={conversation}
+          firstAgent={conversation.agentIds[0] ? agents[conversation.agentIds[0]] : null}
+          active={activeId === conversation.id}
+          collapsed={false}
+          onClick={() => onSelect(conversation.id)}
+        />
+      ))}
+    </section>
   )
 }
 

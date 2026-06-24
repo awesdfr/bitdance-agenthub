@@ -96,9 +96,9 @@ export function ChatPanel() {
             <MessagesSquare className="size-7 text-muted-foreground" />
           </div>
           <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">开始你的多 Agent 协作</h2>
+            <h2 className="text-lg font-semibold">选择一种对话方式</h2>
             <p className="text-sm leading-6 text-muted-foreground">
-              从左侧选择一个会话继续聊天，或点击「+ 新建对话」选择一个或多个 Agent 开始
+              「新建对话」只和模型聊天；「工作对话区」用于多个智能体一起完成任务。
             </p>
           </div>
         </div>
@@ -139,8 +139,10 @@ export function ChatPanel() {
             </div>
             <div className="truncate text-xs text-muted-foreground">
               {isModelChat
-                ? '模型对话 · 单模型'
-                : `${conv.mode === 'single' ? '单聊' : '群聊'} · ${participantAgents.length} 位 Agent`}
+                ? '普通对话 · 模型聊天'
+                : conv.mode === 'single'
+                  ? `智能体对话 · ${participantAgents.length} 位智能体`
+                  : `工作对话区 · ${participantAgents.length} 位智能体协作`}
             </div>
           </div>
         </div>

@@ -109,7 +109,7 @@ export function NewConversationDialog({
         <DialogHeader>
           <DialogTitle>新建工作对话区</DialogTitle>
           <DialogDescription>
-            选择 2 个或更多智能体，创建一个多智能体协作的工作对话区域。
+            这里用于多智能体协作任务，不是普通模型聊天。选择 2 个或更多智能体后，它们会在同一个工作区里分工推进。
           </DialogDescription>
         </DialogHeader>
 
