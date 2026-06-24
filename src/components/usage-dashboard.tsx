@@ -147,6 +147,12 @@ export function UsageDashboard() {
             />
           </section>
 
+          <ModelSpendLedgerBoard
+            models={data.byModel}
+            totalCost={totalModelCost}
+            totalSaved={totalModelSaved}
+          />
+
           <CostCommandCenter
             data={data}
             totalModelCost={totalModelCost}
@@ -564,6 +570,148 @@ function ModelBillSummaryCard({
       <div className="mt-2 rounded-md border bg-muted/10 px-2.5 py-2">
         <div className="text-[11px] font-semibold">优化建议</div>
         <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{modelBillAdvice(model)}</div>
+      </div>
+    </article>
+  )
+}
+
+function ModelSpendLedgerBoard({
+  models,
+  totalCost,
+  totalSaved,
+}: {
+  models: UsageSummary['byModel']
+  totalCost: number
+  totalSaved: number
+}) {
+  if (models.length === 0) return null
+
+  const topModel = models[0]
+  const totalRuns = models.reduce((sum, model) => sum + model.runs, 0)
+  const totalTokens = models.reduce((sum, model) => sum + model.totalTokens, 0)
+  const lowestCacheModel = models.reduce((current, model) => {
+    if (model.totalTokens <= 0) return current
+    if (!current) return model
+    return model.cacheHitRate < current.cacheHitRate ? model : current
+  }, null as UsageSummary['byModel'][number] | null)
+
+  return (
+    <section className="rounded-md border bg-card p-3 shadow-sm" data-testid="model-spend-ledger-board">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ReceiptText className="size-4 text-primary" />
+            <span>模型实付账单看板</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            每个模型实际花费、费用占比、请求均价、缓存命中和已省费用集中在这里。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <BadgeLike label="实际总花费" value={formatUsd(totalCost)} />
+          <BadgeLike label="覆盖模型" value={formatInteger(models.length)} />
+          <BadgeLike label="已省费用" value={formatUsd(totalSaved)} tone="good" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="grid gap-2 lg:grid-cols-2">
+          {models.slice(0, 8).map((model) => (
+            <ModelSpendLedgerRow
+              key={model.model}
+              model={model}
+              totalCost={totalCost}
+            />
+          ))}
+        </div>
+
+        <aside className="rounded-md border bg-background p-3">
+          <div className="text-sm font-semibold">账单解读</div>
+          <div className="mt-2 grid gap-2">
+            <BillReadingTip
+              label="最该盯的模型"
+              value={topModel?.model ?? '暂无'}
+              detail={
+                topModel
+                  ? `当前实付 ${formatUsd(topModel.estimatedCostUsd)}，占总费用 ${formatPercent(
+                      totalCost > 0 ? (topModel.estimatedCostUsd / totalCost) * 100 : 0,
+                    )}。`
+                  : '还没有模型费用。'
+              }
+            />
+            <BillReadingTip
+              label="缓存最弱模型"
+              value={lowestCacheModel?.model ?? '暂无'}
+              detail={
+                lowestCacheModel
+                  ? `缓存命中 ${formatPercent(lowestCacheModel.cacheHitRate * 100)}，长会话可优先检查它。`
+                  : '暂无可判断模型。'
+              }
+            />
+            <BillReadingTip
+              label="总体请求"
+              value={`${formatInteger(totalRuns)} 次`}
+              detail={`${formatTokens(totalTokens)} tokens 已按模型拆分，后续可以继续加预算提醒。`}
+            />
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
+}
+
+function ModelSpendLedgerRow({
+  model,
+  totalCost,
+}: {
+  model: UsageSummary['byModel'][number]
+  totalCost: number
+}) {
+  const costShare = totalCost > 0 ? (model.estimatedCostUsd / totalCost) * 100 : 0
+  const averageCost = model.estimatedCostUsd / Math.max(1, model.runs)
+  const cacheHit = model.cacheReadTokens > 0 ? model.cacheHitRate * 100 : 0
+
+  return (
+    <article className="rounded-md border bg-background p-3" data-testid="model-spend-ledger-row">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{model.model}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {model.provider ?? '未绑定提供商'} · {formatInteger(model.runs)} 次请求
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-base font-semibold">{formatUsd(model.estimatedCostUsd)}</div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">实际花费</div>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          <span>费用占比</span>
+          <span className="font-mono">{formatPercent(costShare)}</span>
+        </div>
+        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary"
+            style={{ width: `${Math.max(2, Math.min(100, costShare))}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <MiniMetric label="请求均价" value={formatUsd(averageCost)} />
+        <MiniMetric label="总 token" value={formatTokens(model.totalTokens)} />
+        <MiniMetric
+          label="缓存命中"
+          value={model.cacheReadTokens > 0 ? formatPercent(cacheHit) : '-'}
+          color={cacheHit >= 50 ? 'bg-emerald-500' : undefined}
+        />
+        <MiniMetric
+          label="已省费用"
+          value={formatUsd(model.estimatedSavedUsd)}
+          color={model.estimatedSavedUsd > 0 ? 'bg-emerald-500' : undefined}
+        />
       </div>
     </article>
   )
