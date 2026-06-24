@@ -1654,6 +1654,7 @@ export function AgentWorkflowCanvas() {
                 运行
               </Button>
             </div>
+            <PresetPreview preset={selectedPreset} />
             <PreflightSummary preflight={latestPreflight} />
           </Section>
 
@@ -3195,6 +3196,39 @@ function PreflightSummary({ preflight }: { preflight: WorkflowPreflightRow | nul
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function PresetPreview({ preset }: { preset: WorkflowPresetDto | null }) {
+  if (!preset) return <EmptyLine text="选择一个模板后，这里会显示它会产出哪些交付物" />
+  const visibleSteps = preset.steps.filter((step) => step.customerVisible !== false)
+  return (
+    <div className="rounded-md border bg-muted/20 px-2 py-2 text-[11px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold">{preset.title}</div>
+          <div className="mt-1 line-clamp-2 text-muted-foreground">{preset.description}</div>
+        </div>
+        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+          {visibleSteps.length} 个交付物
+        </Badge>
+      </div>
+      <div className="mt-2 grid gap-1">
+        {preset.steps.map((step, index) => (
+          <div key={`${preset.id}-${step.title}-${index}`} className="rounded-md border bg-background px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-medium">
+                {index + 1}. {step.deliverableTitle ?? step.title}
+              </span>
+              <ArtifactChip type={step.artifactType} compact />
+            </div>
+            <div className="mt-1 line-clamp-1 text-muted-foreground">
+              {step.deliveryDescription ?? step.instruction}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

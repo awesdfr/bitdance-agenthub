@@ -5000,6 +5000,9 @@ export interface WorkflowPresetDto {
     title: string
     instruction: string
     artifactType: string
+    deliverableTitle?: string
+    deliveryDescription?: string
+    customerVisible?: boolean
   }>
 }
 

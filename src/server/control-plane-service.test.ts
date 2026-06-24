@@ -8744,9 +8744,10 @@ describe('control plane service', () => {
         'meeting_notes_to_tasks',
         'competitor_research',
         'downloads_file_organizer',
+        'jianying_video_delivery',
       ]),
     )
-    expect(presets).toHaveLength(6)
+    expect(presets).toHaveLength(7)
 
     const installed = await workflowPresetService.installWorkflowPreset('weekly_sales_report', {
       name: 'Installed weekly report preset',
@@ -8768,10 +8769,23 @@ describe('control plane service', () => {
     expect(installed.nodes[0].config).toMatchObject({
       presetId: 'weekly_sales_report',
       category: 'data_report',
-      title: 'Query data',
+      title: '收集销售数据',
     })
     expect(installed.nodes[3].outputContract).toMatchObject({
       artifactType: 'document',
+      customerVisible: true,
+      deliverableTitle: '销售周报',
+    })
+
+    const videoDelivery = await workflowPresetService.installWorkflowPreset('jianying_video_delivery', {
+      name: 'Installed video delivery preset',
+    })
+    created.workflows.push(videoDelivery.workflow.id)
+    expect(videoDelivery.nodes).toHaveLength(4)
+    expect(videoDelivery.nodes[3].outputContract).toMatchObject({
+      artifactType: 'video',
+      customerVisible: true,
+      deliverableTitle: '视频成片',
     })
 
     const result = await workflowPresetService.runWorkflowPreset('pull_request_review', {
@@ -8780,7 +8794,7 @@ describe('control plane service', () => {
     created.workflows.push(result.workflow.id)
     expect(result.workflow).toMatchObject({
       status: 'active',
-      name: 'Pull Request Review',
+      name: '代码审查交付流',
     })
     expect(result.workflowRun).toMatchObject({
       workflowId: result.workflow.id,
