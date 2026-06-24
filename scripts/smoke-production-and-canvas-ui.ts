@@ -196,6 +196,10 @@ const uiText = {
   agentSpendRanking: 'Agent \u6d88\u8017\u6392\u884c',
   inputCostReducedTo: '\u8f93\u5165\u6210\u672c\u964d\u81f3',
   topSpendingModel: '\u6700\u70e7\u94b1\u6a21\u578b',
+  modelBillOverview: '\u6a21\u578b\u8d26\u5355\u603b\u89c8',
+  modelBillMonthlyProjection: '\u6708\u8d26\u5355\u9884\u4f30',
+  modelAverageRequestCost: '\u6bcf\u6b21\u8bf7\u6c42\u5747\u4ef7',
+  modelOptimizationAdvice: '\u4f18\u5316\u5efa\u8bae',
   modelActualUsage: '\u6a21\u578b\u5b9e\u9645\u6d88\u8017',
   modelBillRanking: '\u6a21\u578b\u8d39\u7528\u6392\u884c',
   modelCostDiagnosis: '\u6a21\u578b\u8d39\u7528\u8bca\u65ad',
@@ -812,11 +816,25 @@ async function main() {
   const paletteCreatedNode = (await page.getByTestId('workflow-canvas-node').count()) > nodesBeforePalette
 
   const firstCanvasNodeForConnect = page.getByTestId('workflow-canvas-node').first()
-  await firstCanvasNodeForConnect.getByTitle(uiText.startCanvasConnection).last().click()
-  const connectedPaletteOpenPoint = await findBlankCanvasPoint()
-  await openCanvasPaletteAt(connectedPaletteOpenPoint)
-  await nodePalette.waitFor({ timeout: 30_000 })
-  const connectedPaletteHint = await nodePalette.getByText(uiText.connectingPaletteHint).isVisible()
+  const openConnectingPalette = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await firstCanvasNodeForConnect
+        .getByTitle(uiText.startCanvasConnection)
+        .last()
+        .evaluate((element) => (element as HTMLButtonElement).click())
+      const connectedPaletteOpenPoint = await findBlankCanvasPoint()
+      await openCanvasPaletteAt(connectedPaletteOpenPoint)
+      await nodePalette.waitFor({ timeout: 30_000 })
+      const hintVisible = await nodePalette
+        .getByText(uiText.connectingPaletteHint)
+        .isVisible()
+        .catch(() => false)
+      if (hintVisible) return true
+      await page.keyboard.press('Escape')
+    }
+    return false
+  }
+  const connectedPaletteHint = await openConnectingPalette()
   await nodePalette.getByRole('button', { name: /产物/ }).click()
   await page.waitForFunction((previous) => {
     return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
@@ -1176,6 +1194,12 @@ async function main() {
     inputCostReducedTo: analyticsBodyText.includes(uiText.inputCostReducedTo),
     topSpendingModel: analyticsBodyText.includes(uiText.topSpendingModel),
     costCommandCenterNode: await page.getByTestId('cost-command-center').isVisible(),
+    modelBillOverview: analyticsBodyText.includes(uiText.modelBillOverview),
+    modelBillCommandPanel: await page.getByTestId('model-bill-command-panel').isVisible(),
+    modelBillSummaryRows: (await page.getByTestId('model-bill-summary-row').count()) > 0,
+    modelBillMonthlyProjection: analyticsBodyText.includes(uiText.modelBillMonthlyProjection),
+    modelAverageRequestCost: analyticsBodyText.includes(uiText.modelAverageRequestCost),
+    modelOptimizationAdvice: analyticsBodyText.includes(uiText.modelOptimizationAdvice),
     modelActualUsage: analyticsBodyText.includes(uiText.modelActualUsage),
     modelBillRanking: analyticsBodyText.includes(uiText.modelBillRanking),
     modelCostDiagnosis: analyticsBodyText.includes(uiText.modelCostDiagnosis),

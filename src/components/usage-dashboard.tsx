@@ -153,6 +153,8 @@ export function UsageDashboard() {
             totalModelSaved={totalModelSaved}
           />
 
+          <ModelBillCommandPanel models={data.byModel} totalCost={totalModelCost} />
+
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="space-y-3">
               <Panel
@@ -432,6 +434,171 @@ function SpendBar({
       </div>
     </div>
   )
+}
+
+function ModelBillCommandPanel({
+  models,
+  totalCost,
+}: {
+  models: UsageSummary['byModel']
+  totalCost: number
+}) {
+  if (models.length === 0) return null
+
+  const monthlyProjection = models.reduce((sum, model) => sum + model.projectedMonthlyCostUsd, 0)
+  const topModel = models[0]
+  const lowestCacheModel = models.reduce((current, model) => {
+    if (model.totalTokens <= 0) return current
+    return !current || model.cacheHitRate < current.cacheHitRate ? model : current
+  }, null as UsageSummary['byModel'][number] | null)
+
+  return (
+    <section className="rounded-md border bg-card p-3 shadow-sm" data-testid="model-bill-command-panel">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ReceiptText className="size-4 text-primary" />
+            <span>模型账单总览</span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            每个模型实际花了多少钱、未来一个月可能花多少、哪里还能省，直接放在这里看。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <BadgeLike label="当前总账" value={formatUsd(totalCost)} />
+          <BadgeLike label="月账单预估" value={formatUsd(monthlyProjection)} />
+          <BadgeLike label="最该关注" value={topModel?.model ?? '暂无'} />
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="grid gap-2 lg:grid-cols-2">
+          {models.slice(0, 6).map((model) => (
+            <ModelBillSummaryCard key={model.model} model={model} totalCost={totalCost} />
+          ))}
+        </div>
+
+        <aside className="rounded-md border bg-background p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+            <CheckCircle2 className="size-4 text-emerald-500" />
+            先看哪里
+          </div>
+          <div className="space-y-2">
+            <BillReadingTip
+              label="第一优先"
+              value={topModel?.model ?? '暂无'}
+              detail={
+                topModel
+                  ? `当前实际花费最高：${formatUsd(topModel.estimatedCostUsd)}。`
+                  : '还没有模型账单。'
+              }
+            />
+            <BillReadingTip
+              label="月账单预警"
+              value={formatUsd(monthlyProjection)}
+              detail="按最近 7 天费用折算，适合提前判断预算压力。"
+            />
+            <BillReadingTip
+              label="缓存优化"
+              value={lowestCacheModel?.model ?? '暂无'}
+              detail={
+                lowestCacheModel
+                  ? `命中率 ${formatPercent(lowestCacheModel.cacheHitRate * 100)}，可以检查长会话前缀是否稳定。`
+                  : '暂无可判断模型。'
+              }
+            />
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
+}
+
+function ModelBillSummaryCard({
+  model,
+  totalCost,
+}: {
+  model: UsageSummary['byModel'][number]
+  totalCost: number
+}) {
+  const costShare = totalCost > 0 ? (model.estimatedCostUsd / totalCost) * 100 : 0
+  const averageCost = model.estimatedCostUsd / Math.max(1, model.runs)
+  const savingRate =
+    model.estimatedUncachedPromptCostUsd > 0
+      ? (model.estimatedSavedUsd / model.estimatedUncachedPromptCostUsd) * 100
+      : 0
+
+  return (
+    <article className="rounded-md border bg-background p-3" data-testid="model-bill-summary-row">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{model.model}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {model.provider ?? '未绑定提供商'} · {formatInteger(model.runs)} 次请求
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-sm font-semibold">{formatUsd(model.estimatedCostUsd)}</div>
+          <div className="mt-1 text-[10px] text-muted-foreground">实际花费</div>
+        </div>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary"
+          style={{ width: `${Math.max(2, Math.min(100, costShare))}%` }}
+        />
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <MiniMetric label="成本占比" value={formatPercent(costShare)} />
+        <MiniMetric label="月账单预估" value={formatUsd(model.projectedMonthlyCostUsd)} strong />
+        <MiniMetric label="每次请求均价" value={formatUsd(averageCost)} />
+        <MiniMetric
+          label="缓存省钱率"
+          value={formatPercent(savingRate)}
+          color={savingRate > 0 ? 'bg-emerald-500' : undefined}
+        />
+      </div>
+
+      <div className="mt-2 rounded-md border bg-muted/10 px-2.5 py-2">
+        <div className="text-[11px] font-semibold">优化建议</div>
+        <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{modelBillAdvice(model)}</div>
+      </div>
+    </article>
+  )
+}
+
+function BillReadingTip({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <div className="rounded-md border bg-muted/10 p-2.5">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+      <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{detail}</div>
+    </div>
+  )
+}
+
+function modelBillAdvice(model: UsageSummary['byModel'][number]): string {
+  const averageCost = model.estimatedCostUsd / Math.max(1, model.runs)
+  if (model.cacheHitRate < 0.5 && model.totalTokens > 0) {
+    return '优先检查长会话是否保持 append-only 稳定前缀，提高 prefix cache 命中率。'
+  }
+  if (averageCost > 0.01) {
+    return '单次请求成本偏高，适合拆分任务、减少一次性上下文或换成更便宜的模型。'
+  }
+  if (model.projectedMonthlyCostUsd > model.estimatedCostUsd * 3 && model.projectedMonthlyCostUsd > 0.01) {
+    return '最近 7 天增长较快，建议设置预算提醒或限制高频自动任务。'
+  }
+  return '当前账单结构健康，继续保持缓存复用和按需加载工程文件。'
 }
 
 function HeroMetric({
