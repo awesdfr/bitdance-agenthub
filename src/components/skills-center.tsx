@@ -1,7 +1,6 @@
 'use client'
 
 import {
-  ArrowRight,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -13,7 +12,6 @@ import {
   Package,
   Power,
   RefreshCw,
-  Search,
   Settings2,
   Sparkles,
   UploadCloud,
@@ -38,10 +36,8 @@ import {
   installSkill,
   publishSkillSdkManifest,
   scaffoldSkillSdkProject,
-  searchSkillsMpCli,
   setSkillEnabled,
   type SkillsCenterData,
-  type SkillsMpCliSearchResult,
   type SkillsMpCliSkillResult,
 } from '@/lib/api'
 import { emitUiCommand } from '@/lib/ui-command-events'
@@ -74,12 +70,10 @@ const emptyData: SkillsCenterData = {
   marketplaceUrl: 'about:blank',
 }
 
-const quickSkillQueries = ['代码审查', '浏览器自动化', '视频剪辑', '运营文案', '数据分析', '文件处理']
-
 const skillUseSteps = [
   {
-    title: '搜索技能',
-    detail: '通过内置 SkillsMP CLI 找到适合岗位的技能。',
+    title: '选择推荐技能',
+    detail: '从推荐技能里选择一个适合当前智能体岗位的能力。',
   },
   {
     title: '安装到本地',
@@ -88,29 +82,6 @@ const skillUseSteps = [
   {
     title: '分配给智能体',
     detail: '打开智能体设置，把技能加入员工工具包。',
-  },
-]
-
-const skillMarketCategories = [
-  {
-    title: '代码开发',
-    query: 'code review',
-    detail: '审查、测试、仓库理解',
-  },
-  {
-    title: '浏览器研究',
-    query: 'browser automation',
-    detail: '网页检索、资料总结、来源归档',
-  },
-  {
-    title: '视频制作',
-    query: 'video editing',
-    detail: '素材整理、剪辑步骤、交付检查',
-  },
-  {
-    title: '运营数据',
-    query: 'data analysis',
-    detail: '表格、报告、数据分析',
   },
 ]
 
@@ -186,15 +157,9 @@ export function SkillsCenter() {
   const [saving, setSaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [installedQuery, setInstalledQuery] = useState('')
   const [manualInstallOpen, setManualInstallOpen] = useState(false)
   const [installHistoryOpen, setInstallHistoryOpen] = useState(false)
   const [developerToolsOpen, setDeveloperToolsOpen] = useState(false)
-  const [marketplaceQuery, setMarketplaceQuery] = useState('code review')
-  const [marketplaceSort, setMarketplaceSort] = useState<'recent' | 'stars'>('recent')
-  const [marketplaceLoading, setMarketplaceLoading] = useState(false)
-  const [marketplaceError, setMarketplaceError] = useState<string | null>(null)
-  const [marketplaceResult, setMarketplaceResult] = useState<SkillsMpCliSearchResult | null>(null)
   const [selectedMarketplaceSkillId, setSelectedMarketplaceSkillId] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
@@ -215,15 +180,7 @@ export function SkillsCenter() {
 
   const visibleSkills = useMemo(() => dedupeSkills(data.skills), [data.skills])
 
-  const filteredSkills = useMemo(() => {
-    const query = installedQuery.trim().toLowerCase()
-    if (!query) return visibleSkills
-    return visibleSkills.filter((skill) =>
-      [skill.name, skill.description, skill.source, skill.status].some((value) =>
-        String(value ?? '').toLowerCase().includes(query),
-      ),
-    )
-  }, [visibleSkills, installedQuery])
+  const filteredSkills = visibleSkills
 
   const installedSkillNames = useMemo(
     () => new Set(data.skills.map((skill) => skill.name.toLowerCase())),
@@ -232,8 +189,8 @@ export function SkillsCenter() {
 
   const enabledCount = visibleSkills.filter((skill) => skill.enabled).length
   const duplicateSkillCount = Math.max(0, data.skills.length - visibleSkills.length)
-  const marketplaceItems = marketplaceResult?.items ?? featuredMarketplaceSkills
-  const marketplaceCount = marketplaceResult?.total ?? marketplaceItems.length
+  const marketplaceItems = featuredMarketplaceSkills
+  const marketplaceCount = marketplaceItems.length
   const selectedMarketplaceSkill = useMemo(() => {
     return (
       marketplaceItems.find((skill) => skill.id === selectedMarketplaceSkillId) ??
@@ -330,30 +287,6 @@ export function SkillsCenter() {
     }
   }
 
-  const searchMarketplace = async (queryOverride?: string) => {
-    const query = (queryOverride ?? marketplaceQuery).trim()
-    if (!query) {
-      setMarketplaceError('请输入要搜索的技能关键词')
-      return
-    }
-    setMarketplaceLoading(true)
-    setMarketplaceError(null)
-    setNotice(null)
-    try {
-      setMarketplaceResult(
-        await searchSkillsMpCli({
-          query,
-          limit: 12,
-          sortBy: marketplaceSort,
-        }),
-      )
-    } catch (err) {
-      setMarketplaceError(formatError(err))
-    } finally {
-      setMarketplaceLoading(false)
-    }
-  }
-
   const installMarketplaceSkill = async (skill: SkillsMpCliSkillResult) => {
     const url = skill.sourceUrl ?? skill.skillUrl ?? data.marketplaceUrl
     setSaving(`marketplace:${skill.id}`)
@@ -374,11 +307,6 @@ export function SkillsCenter() {
     } finally {
       setSaving(null)
     }
-  }
-
-  const quickSearch = (query: string) => {
-    setMarketplaceQuery(query)
-    void searchMarketplace(query)
   }
 
   return (
@@ -447,15 +375,6 @@ export function SkillsCenter() {
                     data-testid="installed-skills-agent-hint"
                   >
                     已安装技能会出现在智能体设置里，给某个员工勾选后才会进入它的工具包。
-                  </div>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      className="h-9 pl-8"
-                      value={installedQuery}
-                      onChange={(event) => setInstalledQuery(event.target.value)}
-                      placeholder="搜索已安装技能"
-                    />
                   </div>
                   <SkillList skills={filteredSkills} saving={saving} onToggle={toggleSkill} />
                 </div>
@@ -542,7 +461,7 @@ export function SkillsCenter() {
                     SkillsMP CLI
                   </Badge>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">搜索、安装、分配给智能体</div>
+                <div className="mt-1 text-xs text-muted-foreground">推荐、安装、分配给智能体</div>
               </div>
             </div>
 
@@ -551,51 +470,7 @@ export function SkillsCenter() {
               installed={selectedMarketplaceSkillInstalled}
               installedCount={visibleSkills.length}
               enabledCount={enabledCount}
-              loading={marketplaceLoading}
-              onSearch={quickSearch}
             />
-
-            <div className="mt-4 grid grid-cols-[minmax(0,1fr)_8rem_6rem] gap-2">
-              <div className="relative min-w-0">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="h-10 pl-9"
-                  value={marketplaceQuery}
-                  onChange={(event) => setMarketplaceQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') void searchMarketplace()
-                  }}
-                  placeholder="搜索技能，比如：写代码、运营、浏览器、视频"
-                />
-              </div>
-              <select
-                value={marketplaceSort}
-                onChange={(event) => setMarketplaceSort(event.target.value as 'recent' | 'stars')}
-                className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30"
-              >
-                <option value="recent">最新</option>
-                <option value="stars">最热门</option>
-              </select>
-              <Button className="h-10 gap-1" onClick={() => void searchMarketplace()} disabled={marketplaceLoading}>
-                {marketplaceLoading ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                搜索
-              </Button>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">热门搜索</span>
-              {quickSkillQueries.map((query) => (
-                <Button
-                  key={query}
-                  className="h-7 rounded-full px-3 text-xs"
-                  variant="outline"
-                  onClick={() => quickSearch(query)}
-                  disabled={marketplaceLoading}
-                >
-                  {query}
-                </Button>
-              ))}
-            </div>
 
             <SkillUsePath
               selectedSkill={selectedMarketplaceSkill}
@@ -604,42 +479,18 @@ export function SkillsCenter() {
               onInstall={installMarketplaceSkill}
             />
 
-            {(marketplaceError || marketplaceResult) && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                {marketplaceError ? (
-                  <span className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive">
-                    {marketplaceError}
-                  </span>
-                ) : (
-                  <>
-                    <span className="rounded-lg border bg-muted/40 px-2 py-1">
-                      来源：{marketplaceResult?.source === 'fixture' ? '本地测试数据' : 'SkillsMP 官方 API'}
-                    </span>
-                    <span className="rounded-lg border bg-muted/40 px-2 py-1">结果：{marketplaceResult?.total ?? 0}</span>
-                    {marketplaceResult?.rateLimit?.dailyRemaining && (
-                      <span className="rounded-lg border bg-muted/40 px-2 py-1">
-                        今日剩余额度：{marketplaceResult.rateLimit.dailyRemaining}
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
             <ScrollArea className="min-h-0 bg-muted/10">
               <SkillsMpResultList
                 items={marketplaceItems}
-                result={marketplaceResult}
-                loading={marketplaceLoading}
                 saving={saving}
                 fallbackUrl={data.marketplaceUrl}
                 installedSkillNames={installedSkillNames}
                 selectedSkillId={selectedMarketplaceSkillId}
                 onSelect={setSelectedMarketplaceSkillId}
                 onInstall={installMarketplaceSkill}
-                onSearch={quickSearch}
               />
             </ScrollArea>
             <aside className="min-h-0 border-l bg-background">
@@ -699,15 +550,11 @@ function SkillInstallAssistant({
   installed,
   installedCount,
   enabledCount,
-  loading,
-  onSearch,
 }: {
   selectedSkill: SkillsMpCliSkillResult | null
   installed: boolean
   installedCount: number
   enabledCount: number
-  loading: boolean
-  onSearch: (query: string) => void
 }) {
   const fit = selectedSkill ? inferSkillAgentFit(selectedSkill) : null
   return (
@@ -722,7 +569,7 @@ function SkillInstallAssistant({
             技能安装助手
           </div>
           <div className="mt-1 text-xs leading-5 text-muted-foreground">
-            先选智能体要做的工作，系统会帮你找技能。安装以后，回到智能体设置里勾选即可。
+            选择一个推荐技能，安装以后回到智能体设置里勾选即可。
           </div>
         </div>
         <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
@@ -731,28 +578,7 @@ function SkillInstallAssistant({
         </div>
       </div>
 
-      <div className="mt-3 grid gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {skillMarketCategories.map((category) => (
-            <button
-              key={category.title}
-              type="button"
-              className="group min-h-24 rounded-md border bg-background px-3 py-2 text-left transition hover:border-primary/60 hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={loading}
-              onClick={() => onSearch(category.query)}
-            >
-              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-                <span>{category.title}</span>
-                <ArrowRight className="size-3.5 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-              </div>
-              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{category.detail}</div>
-              <div className="mt-2 inline-flex rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
-                一键找技能
-              </div>
-            </button>
-          ))}
-        </div>
-
+      <div className="mt-3">
         <div className="rounded-md border bg-background p-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -776,7 +602,7 @@ function SkillInstallAssistant({
             <AssistantStep done={installed} label="分配给智能体" />
           </div>
           <div className="mt-3 rounded-md border bg-muted/30 px-2.5 py-2 text-xs leading-5 text-muted-foreground">
-            下一步：{selectedSkill ? (installed ? '打开智能体设置，把技能勾选给对应员工。' : '点击安装到本地。') : '按岗位搜索并选择一个技能。'}
+            下一步：{selectedSkill ? (installed ? '打开智能体设置，把技能勾选给对应员工。' : '点击安装到本地。') : '从推荐技能里选择一个。'}
           </div>
         </div>
       </div>
@@ -905,115 +731,41 @@ function SkillUsePath({
   )
 }
 
-function SkillMarketCategoryShelf({
-  loading,
-  onSearch,
-}: {
-  loading: boolean
-  onSearch: (query: string) => void
-}) {
-  const icons = [Code2, Search, Package, Sparkles]
-  return (
-    <section
-      data-testid="skills-market-category-shelf"
-      className="rounded-lg border bg-background p-3"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold">按岗位找技能</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            不用记关键词，直接按智能体要做的工作找能力。
-          </div>
-        </div>
-        <Badge variant="outline">技能商店</Badge>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        {skillMarketCategories.map((category, index) => {
-          const Icon = icons[index] ?? Package
-          return (
-            <button
-              key={category.title}
-              type="button"
-              className="group flex min-h-20 items-start gap-3 rounded-lg border bg-muted/10 p-3 text-left transition hover:border-primary/60 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => onSearch(category.query)}
-              disabled={loading}
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                <Icon className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1 text-sm font-semibold">
-                  {category.title}
-                  <ArrowRight className="size-3.5 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-                </span>
-                <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
-                  {category.detail}
-                </span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
 function SkillsMpResultList({
   items,
-  result,
-  loading,
   saving,
   fallbackUrl,
   installedSkillNames,
   selectedSkillId,
   onSelect,
   onInstall,
-  onSearch,
 }: {
   items: SkillsMpCliSkillResult[]
-  result: SkillsMpCliSearchResult | null
-  loading: boolean
   saving: string | null
   fallbackUrl: string
   installedSkillNames: Set<string>
   selectedSkillId: string | null
   onSelect: (id: string) => void
   onInstall: (skill: SkillsMpCliSkillResult) => Promise<void>
-  onSearch: (query: string) => void
 }) {
-  if (loading && items.length === 0) {
-    return (
-      <div className="grid min-h-72 place-items-center p-6 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <Loader2 className="size-4 animate-spin" />
-          正在搜索技能
-        </div>
-      </div>
-    )
-  }
   if (items.length === 0) {
     return (
       <div className="grid min-h-72 place-items-center p-6">
-        <EmptyLine text="输入关键词后点击搜索，就能从 SkillsMP 查找可安装技能" />
+        <EmptyLine text="还没有推荐技能" />
       </div>
     )
   }
   return (
     <div className="grid gap-3 p-4">
-      <SkillMarketCategoryShelf loading={loading} onSearch={onSearch} />
       <section
         data-testid="skillsmp-featured-market"
         className="rounded-lg border bg-background p-3"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-semibold">
-              {result ? '搜索结果' : '推荐技能'}
-            </div>
+            <div className="text-sm font-semibold">推荐技能</div>
             <div className="mt-1 text-xs text-muted-foreground">
-              {result
-                ? '从 SkillsMP CLI 返回的可安装技能，点卡片查看详情。'
-                : '先给常见智能体准备几类高频技能；也可以上方搜索 SkillsMP。'}
+              这里展示可安装的推荐技能，点卡片查看详情。
             </div>
           </div>
           <Badge variant="outline">{items.length} 个技能</Badge>
@@ -1126,7 +878,7 @@ function SkillDetailPanel({
   if (!skill) {
     return (
       <div className="p-4">
-        <EmptyLine text="搜索并选择一个技能后，这里会显示用途、来源和安装入口" />
+        <EmptyLine text="选择一个推荐技能后，这里会显示用途、来源和安装入口" />
       </div>
     )
   }

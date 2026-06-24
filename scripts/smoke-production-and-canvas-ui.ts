@@ -160,24 +160,22 @@ const uiText = {
   skillsNav: '\u6280\u80fd\u4e2d\u5fc3',
   skillsMarket: 'SkillsMP \u6280\u80fd\u5e02\u573a',
   skillsCli: 'SkillsMP CLI',
-  skillsSearchPlaceholder: '\u641c\u7d22\u6280\u80fd\uff0c\u6bd4\u5982\uff1a\u5199\u4ee3\u7801\u3001\u8fd0\u8425\u3001\u6d4f\u89c8\u5668\u3001\u89c6\u9891',
+  removedSkillsSearchPlaceholder: '\u641c\u7d22\u6280\u80fd\uff0c\u6bd4\u5982\uff1a\u5199\u4ee3\u7801\u3001\u8fd0\u8425\u3001\u6d4f\u89c8\u5668\u3001\u89c6\u9891',
   skillsCommandBar: '\u6280\u80fd\u5e02\u573a\u5de5\u4f5c\u53f0',
   skillsInstallAssistant: '\u6280\u80fd\u5b89\u88c5\u52a9\u624b',
-  skillsChooseByJob: '\u5148\u9009\u667a\u80fd\u4f53\u8981\u505a\u7684\u5de5\u4f5c',
-  skillsOneClickFind: '\u4e00\u952e\u627e\u6280\u80fd',
+  skillsChooseRecommended: '\u9009\u62e9\u4e00\u4e2a\u63a8\u8350\u6280\u80fd',
   skillsSelectedSkill: '\u5f53\u524d\u9009\u4e2d\u6280\u80fd',
   skillsNextStep: '\u4e0b\u4e00\u6b65',
-  skillsCategoryShelf: '\u6309\u5c97\u4f4d\u627e\u6280\u80fd',
   skillsCurrentSkill: '\u5f53\u524d\u6280\u80fd',
   skillsRecommendAgent: '\u63a8\u8350\u7ed9',
   skillsFeatured: '\u63a8\u8350\u6280\u80fd',
   skillsUsePath: '\u6280\u80fd\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
-  skillsStepSearch: '\u641c\u7d22\u6280\u80fd',
+  skillsStepChooseRecommended: '\u9009\u62e9\u63a8\u8350\u6280\u80fd',
   skillsStepInstall: '\u5b89\u88c5\u5230\u672c\u5730',
   skillsStepAssign: '\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
   skillsInstalledHint: '\u5df2\u5b89\u88c5\u6280\u80fd\u4f1a\u51fa\u73b0\u5728\u667a\u80fd\u4f53\u8bbe\u7f6e\u91cc',
   skillsAssignmentPlan: '\u5206\u914d\u5efa\u8bae',
-  skillsSmokeResult: 'smoke-research-plus',
+  skillsSmokeResult: 'code-review-plus',
   skillsDetailHero: '\u6280\u80fd\u540d\u7247',
   skillsMarketSignal: '\u5e02\u573a\u70ed\u5ea6',
   skillsInstallAssignPath: '\u5b89\u88c5\u4e0e\u5206\u914d\u8def\u5f84',
@@ -756,11 +754,9 @@ async function main() {
   })
   await clickSidebarButton(sidebar, uiText.skillsNav)
   await page.getByText(uiText.skillsMarket, { exact: true }).waitFor({ timeout: 90_000 })
-  await page.getByPlaceholder(uiText.skillsSearchPlaceholder).waitFor({ timeout: 90_000 })
   await page.getByTestId('skillsmp-featured-market').getByText(uiText.skillsFeatured, { exact: true }).waitFor({
     timeout: 90_000,
   })
-  await page.locator('main button', { hasText: '\u641c\u7d22' }).click()
   const smokeSkillCard = page.getByTestId('skillsmp-result-card').filter({ hasText: uiText.skillsSmokeResult }).first()
   await smokeSkillCard.waitFor({ timeout: 90_000 })
   await smokeSkillCard.click()
@@ -775,22 +771,21 @@ async function main() {
   const skillsChecks = {
     title: skillsBodyText.includes(uiText.skillsMarket),
     cliBadge: skillsBodyText.includes(uiText.skillsCli),
-    searchInput: await page.getByPlaceholder(uiText.skillsSearchPlaceholder).isVisible(),
+    noSearchInput: (await page.getByPlaceholder(uiText.removedSkillsSearchPlaceholder).count()) === 0,
+    noSearchButton: (await page.locator('main button', { hasText: '\u641c\u7d22' }).count()) === 0,
     installAssistantNode: await page.getByTestId('skills-install-assistant').isVisible(),
     installAssistantText: skillsBodyText.includes(uiText.skillsInstallAssistant),
-    chooseByJob: skillsBodyText.includes(uiText.skillsChooseByJob),
-    oneClickFind: skillsBodyText.includes(uiText.skillsOneClickFind),
+    chooseRecommended: skillsBodyText.includes(uiText.skillsChooseRecommended),
     selectedSkillSummary: skillsBodyText.includes(uiText.skillsSelectedSkill),
     nextStepHint: skillsBodyText.includes(uiText.skillsNextStep),
     commandBarNode: await page.getByTestId('skills-market-command-bar').isVisible(),
     commandBarText: skillsBodyText.includes(uiText.skillsCommandBar),
     currentSkillText: skillsBodyText.includes(uiText.skillsCurrentSkill),
     recommendAgentText: skillsBodyText.includes(uiText.skillsRecommendAgent),
-    categoryShelfNode: await page.getByTestId('skills-market-category-shelf').isVisible(),
-    categoryShelfText: skillsBodyText.includes(uiText.skillsCategoryShelf),
+    noCategoryShelf: (await page.getByTestId('skills-market-category-shelf').count()) === 0,
     usePathNode: await page.getByTestId('skills-use-path').isVisible(),
     usePathText: skillsBodyText.includes(uiText.skillsUsePath),
-    usePathSearch: skillsBodyText.includes(uiText.skillsStepSearch),
+    usePathChooseRecommended: skillsBodyText.includes(uiText.skillsStepChooseRecommended),
     usePathInstall: skillsBodyText.includes(uiText.skillsStepInstall),
     usePathAssign: skillsBodyText.includes(uiText.skillsStepAssign),
     installedAgentHint: skillsBodyText.includes(uiText.skillsInstalledHint),
