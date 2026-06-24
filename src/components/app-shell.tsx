@@ -23,7 +23,7 @@ export function AppShell() {
   const [agentSettingsRequestKey, setAgentSettingsRequestKey] = useState(0)
 
   const handleModeChange = useCallback((nextMode: SidebarMode) => {
-    setMode(nextMode)
+    setMode(normalizeWorkspaceMode(nextMode))
   }, [])
 
   useEffect(() => {
@@ -44,6 +44,22 @@ export function AppShell() {
       />
     </div>
   )
+}
+
+function normalizeWorkspaceMode(mode: SidebarMode): SidebarMode {
+  if (
+    [
+      'employee-factory',
+      'memory',
+      'context',
+      'capabilities',
+      'collaboration',
+      'governance',
+    ].includes(mode)
+  ) {
+    return 'agents'
+  }
+  return mode
 }
 
 function WorkspaceMain({

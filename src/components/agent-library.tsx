@@ -94,24 +94,29 @@ export function AgentLibrary({
       <div
         className={cn(
           'flex min-h-0 flex-col',
-          settingsOpen ? 'shrink-0 border-r lg:w-[22rem]' : 'flex-1',
+          settingsOpen ? 'shrink-0 border-r lg:w-[24rem]' : 'flex-1',
         )}
       >
-        <div className="shrink-0 space-y-2 border-b px-3 py-3">
-          <Button className="w-full justify-start gap-2" variant="outline" onClick={openCreate}>
-            <Plus className="size-4" />
-            创建智能体
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            每个智能体旁边的齿轮就是设置入口，可以配置模型、工具、权限、记忆和运行能力。
-          </p>
+        <div className="shrink-0 border-b px-3 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold">智能体</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                在这里创建员工智能体，并直接配置它能用的模型、技能、工具、命令和权限。
+              </p>
+            </div>
+            <Button className="shrink-0 gap-2" onClick={openCreate}>
+              <Plus className="size-4" />
+              新建
+            </Button>
+          </div>
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-2 p-2">
             {agents.length === 0 ? (
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                还没有智能体
+                还没有智能体，点击右上角新建一个。
               </div>
             ) : (
               agents.map((agent) => (
@@ -147,8 +152,8 @@ export function AgentLibrary({
             initialAgentProfileId={settingsAgent.id}
             initialAgentName={settingsAgent.name}
             initialAgentDescription={settingsAgent.description}
-            title={`${settingsAgent.name} 设置`}
-            subtitle="这里配置这个智能体能用什么模型、工具、命令、软件和权限。"
+            title={`${settingsAgent.name} 的能力设置`}
+            subtitle="把已经接入的模型、技能、MCP、CLI 和软件能力分配给这个智能体。"
           />
         </section>
       )}
@@ -244,13 +249,14 @@ function AgentCard({
       <div className="flex shrink-0 items-center gap-1">
         <Button
           type="button"
-          size="icon"
+          size="sm"
           variant={selected ? 'secondary' : 'ghost'}
-          className="size-8"
+          className="h-8 gap-1.5 px-2.5"
           onClick={onSettings}
           title="设置智能体"
         >
           <Settings2 className="size-4" />
+          <span>设置</span>
         </Button>
         <Button
           type="button"
