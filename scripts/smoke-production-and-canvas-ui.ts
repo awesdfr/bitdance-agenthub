@@ -138,6 +138,10 @@ const uiText = {
   skillsMarket: 'SkillsMP \u6280\u80fd\u5e02\u573a',
   skillsCli: 'SkillsMP CLI',
   skillsSearchPlaceholder: '\u641c\u7d22\u6280\u80fd\uff0c\u6bd4\u5982\uff1a\u5199\u4ee3\u7801\u3001\u8fd0\u8425\u3001\u6d4f\u89c8\u5668\u3001\u89c6\u9891',
+  skillsCommandBar: '\u6280\u80fd\u5e02\u573a\u5de5\u4f5c\u53f0',
+  skillsCategoryShelf: '\u6309\u5c97\u4f4d\u627e\u6280\u80fd',
+  skillsCurrentSkill: '\u5f53\u524d\u6280\u80fd',
+  skillsRecommendAgent: '\u63a8\u8350\u7ed9',
   skillsFeatured: '\u63a8\u8350\u6280\u80fd',
   skillsUsePath: '\u6280\u80fd\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
   skillsStepSearch: '\u641c\u7d22\u6280\u80fd',
@@ -678,6 +682,12 @@ async function main() {
     title: skillsBodyText.includes(uiText.skillsMarket),
     cliBadge: skillsBodyText.includes(uiText.skillsCli),
     searchInput: await page.getByPlaceholder(uiText.skillsSearchPlaceholder).isVisible(),
+    commandBarNode: await page.getByTestId('skills-market-command-bar').isVisible(),
+    commandBarText: skillsBodyText.includes(uiText.skillsCommandBar),
+    currentSkillText: skillsBodyText.includes(uiText.skillsCurrentSkill),
+    recommendAgentText: skillsBodyText.includes(uiText.skillsRecommendAgent),
+    categoryShelfNode: await page.getByTestId('skills-market-category-shelf').isVisible(),
+    categoryShelfText: skillsBodyText.includes(uiText.skillsCategoryShelf),
     usePathNode: await page.getByTestId('skills-use-path').isVisible(),
     usePathText: skillsBodyText.includes(uiText.skillsUsePath),
     usePathSearch: skillsBodyText.includes(uiText.skillsStepSearch),
@@ -750,7 +760,7 @@ async function main() {
   })
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
-  await collapseQuickEditorButton.click()
+  await collapseQuickEditorButton.evaluate((element) => (element as HTMLButtonElement).click())
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
   await quickEditorCollapsed.waitFor({ timeout: 30_000 })
   const quickEditorCollapsedVisible = await quickEditorCollapsed.isVisible()

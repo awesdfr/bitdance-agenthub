@@ -1,11 +1,13 @@
 'use client'
 
 import {
+  ArrowRight,
   Bot,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Code2,
+  DownloadCloud,
   ExternalLink,
   Loader2,
   Package,
@@ -13,7 +15,9 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  Sparkles,
   UploadCloud,
+  UserCheck,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -84,6 +88,29 @@ const skillUseSteps = [
   {
     title: '分配给智能体',
     detail: '打开智能体设置，把技能加入员工工具包。',
+  },
+]
+
+const skillMarketCategories = [
+  {
+    title: '代码开发',
+    query: 'code review',
+    detail: '审查、测试、仓库理解',
+  },
+  {
+    title: '浏览器研究',
+    query: 'browser automation',
+    detail: '网页检索、资料总结、来源归档',
+  },
+  {
+    title: '视频制作',
+    query: 'video editing',
+    detail: '素材整理、剪辑步骤、交付检查',
+  },
+  {
+    title: '运营数据',
+    query: 'data analysis',
+    detail: '表格、报告、数据分析',
   },
 ]
 
@@ -214,6 +241,9 @@ export function SkillsCenter() {
       null
     )
   }, [marketplaceItems, selectedMarketplaceSkillId])
+  const selectedMarketplaceSkillInstalled = selectedMarketplaceSkill
+    ? installedSkillNames.has(selectedMarketplaceSkill.name.toLowerCase())
+    : false
 
   useEffect(() => {
     setSelectedMarketplaceSkillId((current) => {
@@ -560,11 +590,9 @@ export function SkillsCenter() {
 
             <SkillUsePath
               selectedSkill={selectedMarketplaceSkill}
-              installed={
-                selectedMarketplaceSkill
-                  ? installedSkillNames.has(selectedMarketplaceSkill.name.toLowerCase())
-                  : false
-              }
+              installed={selectedMarketplaceSkillInstalled}
+              saving={saving}
+              onInstall={installMarketplaceSkill}
             />
 
             {(marketplaceError || marketplaceResult) && (
@@ -602,6 +630,7 @@ export function SkillsCenter() {
                 selectedSkillId={selectedMarketplaceSkillId}
                 onSelect={setSelectedMarketplaceSkillId}
                 onInstall={installMarketplaceSkill}
+                onSearch={quickSearch}
               />
             </ScrollArea>
             <aside className="min-h-0 border-l bg-background">
@@ -609,11 +638,7 @@ export function SkillsCenter() {
                 <SkillDetailPanel
                   skill={selectedMarketplaceSkill}
                   saving={saving}
-                  installed={
-                    selectedMarketplaceSkill
-                      ? installedSkillNames.has(selectedMarketplaceSkill.name.toLowerCase())
-                      : false
-                  }
+                  installed={selectedMarketplaceSkillInstalled}
                   fallbackUrl={data.marketplaceUrl}
                   onInstall={installMarketplaceSkill}
                 />
@@ -663,16 +688,86 @@ export function SkillsCenter() {
 function SkillUsePath({
   selectedSkill,
   installed,
+  saving,
+  onInstall,
 }: {
   selectedSkill: SkillsMpCliSkillResult | null
   installed: boolean
+  saving: string | null
+  onInstall: (skill: SkillsMpCliSkillResult) => Promise<void>
 }) {
+  const fit = selectedSkill ? inferSkillAgentFit(selectedSkill) : null
   return (
     <section
       className="mt-3 rounded-lg border bg-muted/10 p-3"
       data-testid="skills-use-path"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div
+        className="rounded-md border bg-background p-3"
+        data-testid="skills-market-command-bar"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="size-4 text-primary" />
+              技能市场工作台
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              选技能、安装到本地，然后分配给某个智能体。
+            </div>
+          </div>
+          <Badge variant={installed ? 'default' : 'outline'} className="shrink-0">
+            {installed ? '已安装，可分配' : '未安装'}
+          </Badge>
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]">
+          <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">当前技能</div>
+            <div className="mt-1 truncate text-sm font-semibold">
+              {selectedSkill?.name ?? '先从下面选择一个技能'}
+            </div>
+            <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+              {selectedSkill?.description ?? '选择后这里会显示它能帮智能体做什么。'}
+            </div>
+          </div>
+          <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">推荐给</div>
+            <div className="mt-1 line-clamp-1 text-sm font-semibold">
+              {fit?.role ?? '智能体岗位'}
+            </div>
+            <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+              {fit?.capability ?? '安装后可加入智能体工具包。'}
+            </div>
+          </div>
+          <div className="flex min-w-44 flex-col gap-2">
+            <Button
+              className="h-9 gap-1"
+              disabled={!selectedSkill || installed || saving !== null}
+              onClick={() => {
+                if (selectedSkill) void onInstall(selectedSkill)
+              }}
+            >
+              {selectedSkill && saving === `marketplace:${selectedSkill.id}` ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <DownloadCloud className="size-3.5" />
+              )}
+              {installed ? '已经安装' : '安装到本地'}
+            </Button>
+            <Button
+              className="h-9 gap-1"
+              variant="outline"
+              onClick={() => emitUiCommand('open-agent-settings')}
+            >
+              <UserCheck className="size-3.5" />
+              分配给智能体
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold">技能怎么变成智能体能力</div>
           <div className="mt-1 text-xs text-muted-foreground">
@@ -700,6 +795,59 @@ function SkillUsePath({
   )
 }
 
+function SkillMarketCategoryShelf({
+  loading,
+  onSearch,
+}: {
+  loading: boolean
+  onSearch: (query: string) => void
+}) {
+  const icons = [Code2, Search, Package, Sparkles]
+  return (
+    <section
+      data-testid="skills-market-category-shelf"
+      className="rounded-lg border bg-background p-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold">按岗位找技能</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            不用记关键词，直接按智能体要做的工作找能力。
+          </div>
+        </div>
+        <Badge variant="outline">技能商店</Badge>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {skillMarketCategories.map((category, index) => {
+          const Icon = icons[index] ?? Package
+          return (
+            <button
+              key={category.title}
+              type="button"
+              className="group flex min-h-20 items-start gap-3 rounded-lg border bg-muted/10 p-3 text-left transition hover:border-primary/60 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => onSearch(category.query)}
+              disabled={loading}
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                <Icon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1 text-sm font-semibold">
+                  {category.title}
+                  <ArrowRight className="size-3.5 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+                </span>
+                <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
+                  {category.detail}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function SkillsMpResultList({
   items,
   result,
@@ -710,6 +858,7 @@ function SkillsMpResultList({
   selectedSkillId,
   onSelect,
   onInstall,
+  onSearch,
 }: {
   items: SkillsMpCliSkillResult[]
   result: SkillsMpCliSearchResult | null
@@ -720,6 +869,7 @@ function SkillsMpResultList({
   selectedSkillId: string | null
   onSelect: (id: string) => void
   onInstall: (skill: SkillsMpCliSkillResult) => Promise<void>
+  onSearch: (query: string) => void
 }) {
   if (loading && items.length === 0) {
     return (
@@ -740,6 +890,7 @@ function SkillsMpResultList({
   }
   return (
     <div className="grid gap-3 p-4">
+      <SkillMarketCategoryShelf loading={loading} onSearch={onSearch} />
       <section
         data-testid="skillsmp-featured-market"
         className="rounded-lg border bg-background p-3"
