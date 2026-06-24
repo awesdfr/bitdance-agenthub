@@ -42,6 +42,18 @@ export interface RuntimeUsageSummary {
   contextSummaryCount: number
 }
 
+export interface UsageCostBreakdown {
+  inputCostUsd: number
+  outputCostUsd: number
+  cacheReadCostUsd: number
+  cacheCreationCostUsd: number
+  promptCostUsd: number
+  totalCostUsd: number
+  uncachedPromptCostUsd: number
+  savedUsd: number
+  effectivePromptCostPercent: number
+}
+
 export interface PromptCacheStrategySummary {
   mode: 'append_only_stable_prefix'
   label: string
@@ -93,12 +105,17 @@ export interface UsageSummary {
   byModel: Array<
     UsageBucket & {
       model: string
+      provider: string | null
       estimatedCostUsd: number
       estimatedUncachedPromptCostUsd: number
       estimatedSavedUsd: number
       sharePercent: number
+      costSharePercent: number
       avgTokensPerRun: number
       cacheHitRate: number
+      last7dCostUsd: number
+      projectedMonthlyCostUsd: number
+      costBreakdown: UsageCostBreakdown
     }
   >
 }
@@ -174,14 +191,32 @@ function pricingForModel(topModel?: string) {
 }
 
 function estimateCostUsd(bucket: UsageBucket, topModel?: string): number {
-  const rates = pricingForModel(topModel)
+  return costBreakdownForBucket(bucket, topModel).totalCostUsd
+}
 
-  return (
-    (bucket.inputTokens / 1_000_000) * rates.input +
-    (bucket.outputTokens / 1_000_000) * rates.output +
-    (bucket.cacheReadTokens / 1_000_000) * rates.cacheRead +
-    (bucket.cacheCreationTokens / 1_000_000) * rates.cacheCreation
-  )
+function costBreakdownForBucket(bucket: UsageBucket, topModel?: string): UsageCostBreakdown {
+  const rates = pricingForModel(topModel)
+  const inputCostUsd = (bucket.inputTokens / 1_000_000) * rates.input
+  const outputCostUsd = (bucket.outputTokens / 1_000_000) * rates.output
+  const cacheReadCostUsd = (bucket.cacheReadTokens / 1_000_000) * rates.cacheRead
+  const cacheCreationCostUsd = (bucket.cacheCreationTokens / 1_000_000) * rates.cacheCreation
+  const promptCostUsd = inputCostUsd + cacheReadCostUsd + cacheCreationCostUsd
+  const cacheablePrefixTokens = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
+  const uncachedPromptCostUsd = (cacheablePrefixTokens / 1_000_000) * rates.input
+  const savedUsd = Math.max(0, uncachedPromptCostUsd - promptCostUsd)
+
+  return {
+    inputCostUsd,
+    outputCostUsd,
+    cacheReadCostUsd,
+    cacheCreationCostUsd,
+    promptCostUsd,
+    totalCostUsd: promptCostUsd + outputCostUsd,
+    uncachedPromptCostUsd,
+    savedUsd,
+    effectivePromptCostPercent:
+      uncachedPromptCostUsd > 0 ? Math.round((promptCostUsd / uncachedPromptCostUsd) * 1000) / 10 : 100,
+  }
 }
 
 function estimatePromptCacheSavingsUsd(bucket: UsageBucket, topModel?: string) {
@@ -260,6 +295,7 @@ export async function GET() {
   const allTime = empty()
   const byAgentMap = new Map<string, UsageBucket>()
   const byModelMap = new Map<string, UsageBucket>()
+  const byModelWeekMap = new Map<string, UsageBucket>()
   const byConvMap = new Map<string, UsageBucket>()
 
   let latestInputTokens = 0
@@ -287,6 +323,15 @@ export async function GET() {
         byModelMap.set(usage.model, modelBucket)
       }
       accumulate(modelBucket, usage)
+
+      if (row.startedAt >= weekStart) {
+        let modelWeekBucket = byModelWeekMap.get(usage.model)
+        if (!modelWeekBucket) {
+          modelWeekBucket = empty()
+          byModelWeekMap.set(usage.model, modelWeekBucket)
+        }
+        accumulate(modelWeekBucket, usage)
+      }
     }
 
     let conversationBucket = byConvMap.get(row.conversationId)
@@ -334,6 +379,14 @@ export async function GET() {
       byModelMap.set(model, modelBucket)
     }
     accumulate(modelBucket, usage)
+    if (row.createdAt >= weekStart) {
+      let modelWeekBucket = byModelWeekMap.get(model)
+      if (!modelWeekBucket) {
+        modelWeekBucket = empty()
+        byModelWeekMap.set(model, modelWeekBucket)
+      }
+      accumulate(modelWeekBucket, usage)
+    }
 
     let conversationBucket = byConvMap.get(row.conversationId)
     if (!conversationBucket) {
@@ -387,27 +440,46 @@ export async function GET() {
     .slice(0, 10)
     .map(([id]) => id)
 
-  const byModel = Array.from(byModelMap.entries())
-    .map(([model, bucket]) => {
-      const cacheBase = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
-      const savings = estimatePromptCacheSavingsUsd(bucket, model)
-      return {
-        model,
-        inputTokens: bucket.inputTokens,
-        outputTokens: bucket.outputTokens,
-        cacheReadTokens: bucket.cacheReadTokens,
-        cacheCreationTokens: bucket.cacheCreationTokens,
-        totalTokens: bucket.totalTokens,
-        runs: bucket.runs,
-        estimatedCostUsd: estimateCostUsd(bucket, model),
-        estimatedUncachedPromptCostUsd: savings.uncachedPromptCost,
-        estimatedSavedUsd: savings.estimatedSavedUsd,
-        sharePercent: allTime.totalTokens > 0 ? bucket.totalTokens / allTime.totalTokens : 0,
-        avgTokensPerRun: bucket.runs > 0 ? bucket.totalTokens / bucket.runs : 0,
-        cacheHitRate: cacheBase > 0 ? bucket.cacheReadTokens / cacheBase : 0,
-      }
-    })
-    .sort((a, b) => b.totalTokens - a.totalTokens)
+  const modelProfileByModel = new Map<string, (typeof modelProfileRows)[number]>()
+  for (const profile of modelProfileRows) {
+    if (!modelProfileByModel.has(profile.model)) modelProfileByModel.set(profile.model, profile)
+  }
+
+  const rawByModel = Array.from(byModelMap.entries()).map(([model, bucket]) => {
+    const cacheBase = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
+    const savings = estimatePromptCacheSavingsUsd(bucket, model)
+    const costBreakdown = costBreakdownForBucket(bucket, model)
+    const weekBucket = byModelWeekMap.get(model) ?? empty()
+    const last7dCostUsd = estimateCostUsd(weekBucket, model)
+    return {
+      model,
+      provider: modelProfileByModel.get(model)?.provider ?? null,
+      inputTokens: bucket.inputTokens,
+      outputTokens: bucket.outputTokens,
+      cacheReadTokens: bucket.cacheReadTokens,
+      cacheCreationTokens: bucket.cacheCreationTokens,
+      totalTokens: bucket.totalTokens,
+      runs: bucket.runs,
+      estimatedCostUsd: costBreakdown.totalCostUsd,
+      estimatedUncachedPromptCostUsd: savings.uncachedPromptCost,
+      estimatedSavedUsd: savings.estimatedSavedUsd,
+      sharePercent: allTime.totalTokens > 0 ? bucket.totalTokens / allTime.totalTokens : 0,
+      costSharePercent: 0,
+      avgTokensPerRun: bucket.runs > 0 ? bucket.totalTokens / bucket.runs : 0,
+      cacheHitRate: cacheBase > 0 ? bucket.cacheReadTokens / cacheBase : 0,
+      last7dCostUsd,
+      projectedMonthlyCostUsd: last7dCostUsd > 0 ? (last7dCostUsd / 7) * 30 : 0,
+      costBreakdown,
+    }
+  })
+  const totalModelCost = rawByModel.reduce((sum, model) => sum + model.estimatedCostUsd, 0)
+  const byModel = rawByModel
+    .map((model) => ({
+      ...model,
+      costSharePercent: totalModelCost > 0 ? model.estimatedCostUsd / totalModelCost : 0,
+    }))
+    .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd)
+  const topCostModel = byModel[0]?.model ?? topModel
 
   const summary: UsageSummary = {
     today,
@@ -429,12 +501,12 @@ export async function GET() {
       conversationTokens: allTime.totalTokens,
       cacheHitTokens: allTime.cacheReadTokens,
       cacheHitRate: cacheBase > 0 ? allTime.cacheReadTokens / cacheBase : 0,
-      estimatedCostUsd: estimateCostUsd(allTime, topModel),
+      estimatedCostUsd: totalModelCost > 0 ? totalModelCost : estimateCostUsd(allTime, topCostModel),
       contextStatus: contextStatus(percent),
       compressionPercent,
       contextSummaryCount: contextSummaryRows.length,
     },
-    promptCache: summarizePromptCache(allTime, topModel),
+    promptCache: summarizePromptCache(allTime, topCostModel),
     projectContext: {
       mode: 'lazy_files',
       fileReadCharLimit: FILE_READ_CHAR_LIMIT,

@@ -166,6 +166,7 @@ export function UsageDashboard() {
                   totalCost={totalModelCost}
                   totalSaved={totalModelSaved}
                 />
+                <ActualModelBillPanel models={data.byModel} totalCost={totalModelCost} />
                 <ModelUsagePanel models={data.byModel} totalTokens={data.allTime.totalTokens} />
                 <ModelBillTable models={data.byModel} totalCost={totalModelCost} />
               </Panel>
@@ -542,8 +543,9 @@ function ModelCostRow({
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{model.model}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {model.runs} 次请求 · 实际费用 {formatUsd(model.estimatedCostUsd)} · 缓存节省{' '}
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {model.provider ?? '未绑定提供商'} · {model.runs} 次请求 · 实际费用{' '}
+                {formatUsd(model.estimatedCostUsd)} · 缓存节省{' '}
                 {formatUsd(model.estimatedSavedUsd)}
               </div>
             </div>
@@ -593,6 +595,107 @@ function ModelCostRow({
         <MiniMetric label="请求数" value={formatInteger(model.runs)} />
       </div>
     </article>
+  )
+}
+
+function ActualModelBillPanel({
+  models,
+  totalCost,
+}: {
+  models: UsageSummary['byModel']
+  totalCost: number
+}) {
+  if (models.length === 0) return null
+
+  const totals = models.reduce(
+    (sum, model) => ({
+      input: sum.input + model.costBreakdown.inputCostUsd,
+      output: sum.output + model.costBreakdown.outputCostUsd,
+      cacheRead: sum.cacheRead + model.costBreakdown.cacheReadCostUsd,
+      cacheCreation: sum.cacheCreation + model.costBreakdown.cacheCreationCostUsd,
+      monthly: sum.monthly + model.projectedMonthlyCostUsd,
+    }),
+    { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, monthly: 0 },
+  )
+
+  return (
+    <section className="mb-3 rounded-md border bg-background" data-testid="actual-model-bill-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b px-3 py-2">
+        <div>
+          <div className="text-sm font-semibold">模型真实扣费拆分</div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            每个模型按输入、输出、缓存命中和缓存写入拆账，7 日费用会自动折算成月度预估。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <BadgeLike label="当前总账" value={formatUsd(totalCost)} />
+          <BadgeLike label="月度预估" value={formatUsd(totals.monthly)} />
+        </div>
+      </div>
+
+      <div className="grid gap-2 border-b p-3 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricTile label="输入费用" value={formatUsd(totals.input)} />
+        <MetricTile label="输出费用" value={formatUsd(totals.output)} />
+        <MetricTile label="缓存读取" value={formatUsd(totals.cacheRead)} tone="good" />
+        <MetricTile label="缓存写入" value={formatUsd(totals.cacheCreation)} />
+        <MetricTile label="预估月账单" value={formatUsd(totals.monthly)} tone={totals.monthly > totalCost ? 'warn' : 'default'} />
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] border-collapse text-left text-[11px]">
+          <thead className="bg-muted/30 text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">模型</th>
+              <th className="px-3 py-2 font-medium">提供商</th>
+              <th className="px-3 py-2 font-medium">实际扣费</th>
+              <th className="px-3 py-2 font-medium">输入费</th>
+              <th className="px-3 py-2 font-medium">输出费</th>
+              <th className="px-3 py-2 font-medium">缓存读</th>
+              <th className="px-3 py-2 font-medium">缓存写</th>
+              <th className="px-3 py-2 font-medium">7 日费用</th>
+              <th className="px-3 py-2 font-medium">月预估</th>
+              <th className="px-3 py-2 font-medium">输入成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.slice(0, 12).map((model) => (
+              <tr key={model.model} className="border-t">
+                <td className="px-3 py-2">
+                  <div className="max-w-[18rem] truncate font-semibold">{model.model}</div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${Math.max(2, Math.min(100, model.costSharePercent * 100))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    费用占比 {formatPercent(model.costSharePercent * 100)}
+                  </div>
+                </td>
+                <td className="px-3 py-2">{model.provider ?? '未绑定'}</td>
+                <td className="px-3 py-2 font-mono font-semibold">{formatUsd(model.estimatedCostUsd)}</td>
+                <td className="px-3 py-2 font-mono">{formatUsd(model.costBreakdown.inputCostUsd)}</td>
+                <td className="px-3 py-2 font-mono">{formatUsd(model.costBreakdown.outputCostUsd)}</td>
+                <td className="px-3 py-2 font-mono text-emerald-600 dark:text-emerald-400">
+                  {formatUsd(model.costBreakdown.cacheReadCostUsd)}
+                </td>
+                <td className="px-3 py-2 font-mono">{formatUsd(model.costBreakdown.cacheCreationCostUsd)}</td>
+                <td className="px-3 py-2 font-mono">{formatUsd(model.last7dCostUsd)}</td>
+                <td className="px-3 py-2 font-mono font-semibold">{formatUsd(model.projectedMonthlyCostUsd)}</td>
+                <td className="px-3 py-2">
+                  <div className="font-mono font-semibold">
+                    {formatPercent(model.costBreakdown.effectivePromptCostPercent)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    无缓存 {formatUsd(model.costBreakdown.uncachedPromptCostUsd)}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 

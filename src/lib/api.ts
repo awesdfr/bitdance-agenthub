@@ -15912,6 +15912,18 @@ export interface RuntimeUsageSummary {
   contextSummaryCount: number
 }
 
+export interface UsageCostBreakdown {
+  inputCostUsd: number
+  outputCostUsd: number
+  cacheReadCostUsd: number
+  cacheCreationCostUsd: number
+  promptCostUsd: number
+  totalCostUsd: number
+  uncachedPromptCostUsd: number
+  savedUsd: number
+  effectivePromptCostPercent: number
+}
+
 export interface PromptCacheStrategySummary {
   mode: 'append_only_stable_prefix'
   label: string
@@ -15963,12 +15975,17 @@ export interface UsageSummary {
   byModel: Array<
     UsageBucket & {
       model: string
+      provider: string | null
       estimatedCostUsd: number
       estimatedUncachedPromptCostUsd: number
       estimatedSavedUsd: number
       sharePercent: number
+      costSharePercent: number
       avgTokensPerRun: number
       cacheHitRate: number
+      last7dCostUsd: number
+      projectedMonthlyCostUsd: number
+      costBreakdown: UsageCostBreakdown
     }
   >
 }

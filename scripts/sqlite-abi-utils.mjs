@@ -36,11 +36,29 @@ export function isNativeBindingLoadError(errorOrText) {
 }
 
 export function runPnpm(args) {
-  const command = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'pnpm'
-  const commandArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm.cmd', ...args] : args
-  const result = spawnSync(command, commandArgs, { stdio: 'inherit' })
-  if (result.error) throw result.error
-  if (result.status !== 0) process.exit(result.status ?? 1)
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', 'corepack', 'pnpm', ...args] },
+          { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', 'pnpm.cmd', ...args] },
+        ]
+      : [
+          { command: 'corepack', args: ['pnpm', ...args] },
+          { command: 'pnpm', args },
+        ]
+
+  let lastError = null
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate.command, candidate.args, { stdio: 'inherit' })
+    if (result.error) {
+      lastError = result.error
+      continue
+    }
+    if (result.status !== 0) process.exit(result.status ?? 1)
+    return
+  }
+  if (lastError) throw lastError
+  throw new Error('Unable to run pnpm.')
 }
 
 export function rebuildBetterSqliteForElectron() {
