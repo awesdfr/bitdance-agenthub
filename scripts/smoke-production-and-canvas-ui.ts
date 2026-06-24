@@ -117,6 +117,8 @@ const uiText = {
   toolsModeStat: 'CLI / MCP \u6a21\u5f0f',
   toolsIntro: '\u8f6f\u4ef6\u4ecb\u7ecd',
   toolsSoftwareDetail: '\u8f6f\u4ef6\u8be6\u60c5',
+  toolsAccessMatrix: '\u80fd\u529b\u63a5\u5165\u9762\u677f',
+  toolsCurrentChoice: '\u5f53\u524d\u9009\u62e9',
   toolsCliMode: 'CLI \u6a21\u5f0f',
   toolsMcpMode: 'MCP \u6a21\u5f0f',
   toolsPackagedCommands: '\u5c01\u88c5\u547d\u4ee4',
@@ -424,8 +426,9 @@ async function main() {
 
   const smokeModelName = `UI temp model ${Date.now()}`
   await openSidebarModeAndWait(page, sidebar, uiText.modelsNav, uiText.modelsTitle)
-  await page.getByTestId('model-profile-card').first().waitFor({ timeout: 90_000 })
-  await page.locator('main button', { hasText: uiText.addModel }).first().click()
+  const addModelButton = page.locator('main button', { hasText: uiText.addModel }).first()
+  await addModelButton.waitFor({ timeout: 90_000 })
+  await addModelButton.click()
   const modelDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.addModel }).first()
   await modelDialog.getByText(uiText.addModel, { exact: true }).waitFor({ timeout: 90_000 })
   await modelDialog.getByPlaceholder(uiText.modelNamePlaceholder).fill(smokeModelName)
@@ -578,6 +581,12 @@ async function main() {
     intro: toolsBodyText.includes(uiText.toolsIntro),
     softwareDetail: toolsBodyText.includes(uiText.toolsSoftwareDetail),
     useGuideNode: await page.getByTestId('software-store-use-guide').isVisible(),
+    accessMatrixNode: await page.getByTestId('software-store-access-matrix').isVisible(),
+    accessMatrixText: toolsBodyText.includes(uiText.toolsAccessMatrix),
+    currentChoiceText: toolsBodyText.includes(uiText.toolsCurrentChoice),
+    accessCliNode: await page.getByTestId('software-store-access-cli').isVisible(),
+    accessMcpNode: await page.getByTestId('software-store-access-mcp').isVisible(),
+    accessCommandsNode: await page.getByTestId('software-store-access-commands').isVisible(),
     assignmentPlanNode: await page.getByTestId('software-store-assignment-plan').isVisible(),
     assignmentPlanText: toolsBodyText.includes(uiText.toolsAssignmentPlan),
     fitAgentText: toolsBodyText.includes(uiText.toolsFitAgent),

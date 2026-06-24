@@ -1281,6 +1281,12 @@ export function ToolControlCenter() {
 
                     <SoftwareStoreUseGuide item={selectedStoreItem} />
 
+                    <SoftwareStoreAccessMatrix
+                      item={selectedStoreItem}
+                      selectedMode={selectedStoreDetailMode}
+                      onModeChange={setSelectedStoreDetailMode}
+                    />
+
                     <SoftwareStoreAssignmentPlan item={selectedStoreItem} />
 
                     <StoreAgentUsePanel
@@ -2903,6 +2909,102 @@ function SoftwareStoreUseGuide({ item }: { item: SoftwareStoreItem }) {
   )
 }
 
+function SoftwareStoreAccessMatrix({
+  item,
+  selectedMode,
+  onModeChange,
+}: {
+  item: SoftwareStoreItem
+  selectedMode: StoreDetailMode
+  onModeChange: (mode: StoreDetailMode) => void
+}) {
+  const modes: Array<{
+    mode: Exclude<StoreDetailMode, 'overview'>
+    title: string
+    count: number
+    icon: ReactNode
+    detail: string
+  }> = [
+    {
+      mode: 'cli',
+      title: 'CLI 接入',
+      count: item.cliProfiles.length,
+      icon: <Terminal className="size-4" />,
+      detail: '让智能体通过终端、脚本或本地命令调用这个软件。',
+    },
+    {
+      mode: 'mcp',
+      title: 'MCP 接入',
+      count: item.mcpServers.length,
+      icon: <Plug className="size-4" />,
+      detail: '把外部工具包装成结构化能力，智能体能看到参数和返回结果。',
+    },
+    {
+      mode: 'commands',
+      title: '可用命令',
+      count: item.softwareCommands.length,
+      icon: <Cpu className="size-4" />,
+      detail: '把复杂操作封装成一个动作，例如导出、检查、生成或处理。',
+    },
+  ]
+
+  const activeMode = selectedMode === 'overview' ? 'cli' : selectedMode
+
+  return (
+    <section
+      data-testid="software-store-access-matrix"
+      className="mt-4 rounded-lg border bg-background p-3"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">能力接入面板</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            点击下面的 CLI、MCP 或命令，就能看到这个软件对应的接入详情和检测入口。
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0">
+          当前选择：{modeTitle(activeMode)}
+        </Badge>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {modes.map((entry) => {
+          const active = activeMode === entry.mode
+          const ready = entry.count > 0
+          return (
+            <button
+              key={entry.mode}
+              type="button"
+              data-testid={`software-store-access-${entry.mode}`}
+              className={cn(
+                'grid gap-3 rounded-lg border p-3 text-left transition sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:items-center',
+                active
+                  ? 'border-primary bg-primary/5 ring-2 ring-primary/10'
+                  : 'bg-muted/10 hover:border-primary/50 hover:bg-primary/5',
+              )}
+              onClick={() => onModeChange(entry.mode)}
+            >
+              <span className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
+                {entry.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                  {entry.title}
+                  <Badge variant={ready ? 'default' : 'outline'}>{ready ? '已接入' : '待接入'}</Badge>
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{entry.detail}</span>
+              </span>
+              <span className="flex shrink-0 items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-xs sm:min-w-24">
+                <span className="text-muted-foreground">数量</span>
+                <span className="font-mono text-sm font-semibold">{entry.count}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function SoftwareStoreAssignmentPlan({ item }: { item: SoftwareStoreItem }) {
   const fit = inferSoftwareAgentFit(item)
   const canAssign = getStoreModeCount(item) > 0 || item.softwareCommands.length > 0
@@ -3118,6 +3220,12 @@ function softwareStoreModeSummary(
     badge: ready ? '可分配' : '待接入',
     ready,
   }
+}
+
+function modeTitle(mode: Exclude<StoreDetailMode, 'overview'>): string {
+  if (mode === 'cli') return 'CLI 接入'
+  if (mode === 'mcp') return 'MCP 接入'
+  return '可用命令'
 }
 
 function StoreModeSection({
