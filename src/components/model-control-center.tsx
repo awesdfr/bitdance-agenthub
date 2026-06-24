@@ -71,6 +71,7 @@ const modelProviders: ModelProfileProvider[] = [
 
 const networkModes: NetworkMode[] = ['direct', 'http_proxy', 'socks5_proxy', 'custom_gateway']
 const networkTargets: NetworkAppliesTo[] = ['model_only', 'browser_only', 'cli_only', 'all_agent_traffic']
+const preferredModelStorageKey = 'agenthub:preferred-model-profile-id'
 
 type SavingAction =
   | 'model'
@@ -212,6 +213,7 @@ export function ModelControlCenter() {
   const [connectionTests, setConnectionTests] = useState<ModelConnectionTestRow[]>([])
   const [routeDecisions, setRouteDecisions] = useState<ModelRouteDecisionRow[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
+  const [preferredModelId, setPreferredModelId] = useState('')
   const [selectedNetworkId, setSelectedNetworkId] = useState('')
   const [routeAgentId, setRouteAgentId] = useState('')
   const [routeNeedsVision, setRouteNeedsVision] = useState(false)
@@ -248,10 +250,19 @@ export function ModelControlCenter() {
     () => models.find((model) => model.id === selectedModelId) ?? null,
     [models, selectedModelId],
   )
+  const preferredModel = useMemo(
+    () => models.find((model) => model.id === preferredModelId) ?? null,
+    [models, preferredModelId],
+  )
   const selectedNetwork = useMemo(
     () => networks.find((network) => network.id === selectedNetworkId) ?? null,
     [networks, selectedNetworkId],
   )
+  const workbenchModel = selectedModel ?? preferredModel ?? models[0] ?? null
+  const workbenchNetwork =
+    workbenchModel && workbenchModel.networkProfileId
+      ? networks.find((network) => network.id === workbenchModel.networkProfileId) ?? null
+      : selectedNetwork
 
   const openAddModelDialog = () => {
     setEditingModel(null)
@@ -286,6 +297,20 @@ export function ModelControlCenter() {
     }
     return counts
   }, [models])
+
+  useEffect(() => {
+    try {
+      setPreferredModelId(window.localStorage.getItem(preferredModelStorageKey) ?? '')
+    } catch {
+      setPreferredModelId('')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!preferredModelId) return
+    if (!models.some((model) => model.id === preferredModelId)) return
+    setSelectedModelId((current) => current || preferredModelId)
+  }, [models, preferredModelId])
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -446,6 +471,14 @@ export function ModelControlCenter() {
       removeModelLocally(model.id)
       setPendingDeleteModelId(null)
       setSelectedModelId((current) => (current === model.id ? '' : current))
+      if (preferredModelId === model.id) {
+        setPreferredModelId('')
+        try {
+          window.localStorage.removeItem(preferredModelStorageKey)
+        } catch {
+          // Best-effort local preference cleanup.
+        }
+      }
       setNotice(`已删除模型：${model.name}`)
       await reload()
       removeModelLocally(model.id)
@@ -464,6 +497,17 @@ export function ModelControlCenter() {
       provider,
       name: draft.name.trim() ? draft.name : `${providerLabel(provider)} 模型`,
     }))
+  }
+
+  const setAsPreferredModel = (model: ModelProfileRow) => {
+    setPreferredModelId(model.id)
+    setSelectedModelId(model.id)
+    try {
+      window.localStorage.setItem(preferredModelStorageKey, model.id)
+    } catch {
+      // Local preference is optional; the current session still updates.
+    }
+    setNotice(`已设为首选模型：${model.name}`)
   }
 
   const runModelTest = async (model: ModelProfileRow, live: boolean) => {
@@ -950,6 +994,21 @@ export function ModelControlCenter() {
 
         <ScrollArea className="min-h-0">
           <div className="space-y-3 p-3">
+            <ModelConnectionWorkbench
+              model={workbenchModel}
+              preferred={Boolean(workbenchModel && workbenchModel.id === preferredModelId)}
+              network={workbenchNetwork}
+              latestTest={workbenchModel && selectedModelId === workbenchModel.id ? (connectionTests[0] ?? null) : null}
+              saving={Boolean(workbenchModel && saving === `model:${workbenchModel.id}`)}
+              onAddModel={openAddModelDialog}
+              onDryTest={() => workbenchModel && void runModelTest(workbenchModel, false)}
+              onLiveTest={() => workbenchModel && void runModelTest(workbenchModel, true)}
+              onInvokeProbe={() => workbenchModel && void runModelInvokeProbe(workbenchModel)}
+              onEdit={() => workbenchModel && openEditModelDialog(workbenchModel)}
+              onSetPreferred={() => workbenchModel && setAsPreferredModel(workbenchModel)}
+              onOpenAdvanced={() => setShowConfigPanel(true)}
+            />
+
             <Section title="模型列表">
               <div className="mb-2 rounded-md border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
                 模型在这里统一管理。添加一次之后，普通对话和每个智能体都可以直接选择使用。
@@ -963,6 +1022,7 @@ export function ModelControlCenter() {
                       key={model.id}
                       model={model}
                       selected={model.id === selectedModelId}
+                      preferred={model.id === preferredModelId}
                       network={networks.find((network) => network.id === model.networkProfileId) ?? null}
                       saving={saving === `model:${model.id}`}
                       deleting={saving === `delete-model:${model.id}`}
@@ -1166,9 +1226,186 @@ function Toggle({
   )
 }
 
+function ModelConnectionWorkbench({
+  model,
+  preferred,
+  network,
+  latestTest,
+  saving,
+  onAddModel,
+  onDryTest,
+  onLiveTest,
+  onInvokeProbe,
+  onEdit,
+  onSetPreferred,
+  onOpenAdvanced,
+}: {
+  model: ModelProfileRow | null
+  preferred: boolean
+  network: NetworkProfileRow | null
+  latestTest: ModelConnectionTestRow | null
+  saving: boolean
+  onAddModel: () => void
+  onDryTest: () => void
+  onLiveTest: () => void
+  onInvokeProbe: () => void
+  onEdit: () => void
+  onSetPreferred: () => void
+  onOpenAdvanced: () => void
+}) {
+  const failedTestMessage = latestTest?.status === 'failed' ? latestTest.message : null
+  const failureReason = model?.lastTestResult ?? failedTestMessage ?? '暂无失败原因'
+  const latestTestText = latestTest
+    ? `${statusLabel(latestTest.status)} · ${latestTest.message || '没有返回说明'} · ${latestTest.latencyMs ?? 0}ms`
+    : '暂无测试记录'
+
+  return (
+    <section
+      data-testid="model-connection-workbench"
+      className="overflow-hidden rounded-lg border bg-card text-card-foreground"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/20 px-3 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Zap className="size-4 text-primary" />
+            <span>模型连接工作台</span>
+          </div>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            普通用户只需要在这里添加模型、设为首选模型、选择网络出口并一键检测。高级适配器参数已经收起来。
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button size="sm" className="h-8 gap-1" onClick={onAddModel}>
+            <Plus className="size-3.5" />
+            添加模型
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 gap-1" onClick={onOpenAdvanced}>
+            <Settings2 className="size-3.5" />
+            高级设置
+          </Button>
+        </div>
+      </div>
+
+      {!model ? (
+        <div className="grid place-items-center px-3 py-8">
+          <div className="max-w-sm text-center">
+            <div className="text-sm font-semibold">还没有可用模型</div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              先添加 DeepSeek、OpenAI、Gemini 或本地 Ollama，后面新建对话和智能体就能直接选择。
+            </p>
+            <Button className="mt-3 h-8 gap-1" onClick={onAddModel}>
+              <Plus className="size-3.5" />
+              添加第一个模型
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3 p-3 xl:grid-cols-[1.2fr_1fr_0.9fr]">
+          <div className="rounded-md border bg-background/60 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-sm font-semibold">{model.name}</h3>
+                  {preferred && <Badge variant="secondary">首选模型</Badge>}
+                </div>
+                <div className="mt-1 truncate text-xs text-muted-foreground">
+                  {providerLabel(model.provider)} · {model.model}
+                </div>
+              </div>
+              <Badge variant={badgeTone(model.healthStatus)}>{statusLabel(model.healthStatus)}</Badge>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+              <WorkbenchInfo label="服务商" value={providerLabel(model.provider)} />
+              <WorkbenchInfo label="上下文" value={`${model.contextWindow ?? 0}`} />
+              <WorkbenchInfo label="密钥" value={model.apiKeyRef || '未设置'} />
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+              <CapabilityChip enabled={model.supportsVision} label="视觉" />
+              <CapabilityChip enabled={model.supportsToolCalling} label="工具调用" />
+              <CapabilityChip enabled={model.supportsJsonMode} label="JSON 输出" />
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-background/60 p-3">
+            <div className="grid gap-2 text-xs">
+              <WorkbenchInfo label="连接状态" value={latestTestText} />
+              <WorkbenchInfo
+                label="网络出口"
+                value={network ? `${network.name} · ${networkModeLabel(network.mode)}` : '直连，不走代理'}
+              />
+              <div className="rounded-md border bg-muted/20 px-2 py-2">
+                <div className="text-[11px] font-semibold text-muted-foreground">失败原因</div>
+                <div className="mt-1 line-clamp-3 text-xs">{failureReason}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-background/60 p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground">一键检测</div>
+            <div className="mt-2 grid gap-2">
+              <Button className="h-8 gap-1" onClick={onLiveTest} disabled={saving}>
+                {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+                一键检测连接
+              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" variant="outline" className="h-8 gap-1" onClick={onDryTest} disabled={saving}>
+                  <CheckCircle2 className="size-3.5" />
+                  静态检查
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 gap-1" onClick={onInvokeProbe} disabled={saving}>
+                  <Zap className="size-3.5" />
+                  推理探测
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                variant={preferred ? 'secondary' : 'outline'}
+                className="h-8 gap-1"
+                onClick={onSetPreferred}
+                disabled={saving}
+              >
+                设为首选模型
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 gap-1" onClick={onEdit} disabled={saving}>
+                <Settings2 className="size-3.5" />
+                编辑模型
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function WorkbenchInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-muted/20 px-2 py-2">
+      <div className="text-[11px] font-semibold text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-xs">{value}</div>
+    </div>
+  )
+}
+
+function CapabilityChip({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <span
+      className={cn(
+        'rounded-full border px-2 py-0.5',
+        enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground',
+      )}
+    >
+      {enabled ? '支持' : '不支持'} {label}
+    </span>
+  )
+}
+
 function ModelRow({
   model,
   selected,
+  preferred,
   network,
   saving,
   deleting,
@@ -1182,6 +1419,7 @@ function ModelRow({
 }: {
   model: ModelProfileRow
   selected: boolean
+  preferred: boolean
   network: NetworkProfileRow | null
   saving: boolean
   deleting: boolean
@@ -1201,7 +1439,10 @@ function ModelRow({
       <button type="button" className="w-full text-left" onClick={onSelect}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate font-medium">{model.name}</div>
+            <div className="flex items-center gap-1.5">
+              <div className="truncate font-medium">{model.name}</div>
+              {preferred && <Badge variant="secondary">首选</Badge>}
+            </div>
             <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
               {providerLabel(model.provider)} · {model.model}
             </div>

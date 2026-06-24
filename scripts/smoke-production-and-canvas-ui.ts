@@ -68,6 +68,13 @@ const uiText = {
   confirmDeleteModel: '\u786e\u8ba4\u5220\u9664\u6a21\u578b',
   modelNamePlaceholder: '\u4f8b\u5982\uff1aDeepSeek \u4e3b\u6a21\u578b',
   modelIdPlaceholder: '\u4f8b\u5982\uff1adeepseek-v4-flash',
+  modelWorkbench: '\u6a21\u578b\u8fde\u63a5\u5de5\u4f5c\u53f0',
+  preferredModel: '\u9996\u9009\u6a21\u578b',
+  modelConnectionStatus: '\u8fde\u63a5\u72b6\u6001',
+  modelNetworkOutlet: '\u7f51\u7edc\u51fa\u53e3',
+  modelFailureReason: '\u5931\u8d25\u539f\u56e0',
+  oneClickTest: '\u4e00\u952e\u68c0\u6d4b',
+  setPreferredModel: '\u8bbe\u4e3a\u9996\u9009\u6a21\u578b',
 
   agentsNav: '\u667a\u80fd\u4f53',
   oldFactoryNav: '\u667a\u80fd\u4f53\u5de5\u5382',
@@ -430,6 +437,7 @@ async function main() {
 
   const smokeModelName = `UI temp model ${Date.now()}`
   await openSidebarModeAndWait(page, sidebar, uiText.modelsNav, uiText.modelsTitle)
+  await page.getByTestId('model-connection-workbench').waitFor({ timeout: 90_000 })
   const addModelButton = page.locator('main button', { hasText: uiText.addModel }).first()
   await addModelButton.waitFor({ timeout: 90_000 })
   await addModelButton.click()
@@ -446,9 +454,17 @@ async function main() {
   await smokeModelCard.waitFor({ state: 'hidden', timeout: 90_000 })
   const modelManagementScreenshot = path.join(outDir, 'model-management-add-delete.png')
   await page.screenshot({ path: modelManagementScreenshot, fullPage: true })
+  const modelManagementBodyText = await page.locator('body').innerText()
   const modelManagementChecks = {
     title: await page.locator('main').getByText(uiText.modelsTitle, { exact: true }).isVisible(),
     addButton: await page.locator('main button', { hasText: uiText.addModel }).first().isVisible(),
+    workbench: await page.getByTestId('model-connection-workbench').isVisible(),
+    preferredModel: modelManagementBodyText.includes(uiText.preferredModel),
+    connectionStatus: modelManagementBodyText.includes(uiText.modelConnectionStatus),
+    networkOutlet: modelManagementBodyText.includes(uiText.modelNetworkOutlet),
+    failureReason: modelManagementBodyText.includes(uiText.modelFailureReason),
+    oneClickTest: modelManagementBodyText.includes(uiText.oneClickTest),
+    setPreferredModel: modelManagementBodyText.includes(uiText.setPreferredModel),
     temporaryModelDeleted:
       (await page.getByTestId('model-profile-card').filter({ hasText: smokeModelName }).count()) === 0,
   }
