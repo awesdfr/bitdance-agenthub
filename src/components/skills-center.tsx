@@ -546,6 +546,15 @@ export function SkillsCenter() {
               </div>
             </div>
 
+            <SkillInstallAssistant
+              selectedSkill={selectedMarketplaceSkill}
+              installed={selectedMarketplaceSkillInstalled}
+              installedCount={visibleSkills.length}
+              enabledCount={enabledCount}
+              loading={marketplaceLoading}
+              onSearch={quickSearch}
+            />
+
             <div className="mt-4 grid grid-cols-[minmax(0,1fr)_8rem_6rem] gap-2">
               <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -681,6 +690,107 @@ export function SkillsCenter() {
           </div>
         </main>
       </div>
+    </div>
+  )
+}
+
+function SkillInstallAssistant({
+  selectedSkill,
+  installed,
+  installedCount,
+  enabledCount,
+  loading,
+  onSearch,
+}: {
+  selectedSkill: SkillsMpCliSkillResult | null
+  installed: boolean
+  installedCount: number
+  enabledCount: number
+  loading: boolean
+  onSearch: (query: string) => void
+}) {
+  const fit = selectedSkill ? inferSkillAgentFit(selectedSkill) : null
+  return (
+    <section
+      data-testid="skills-install-assistant"
+      className="mt-4 rounded-lg border bg-primary/5 p-3"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Sparkles className="size-4 text-primary" />
+            技能安装助手
+          </div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            先选智能体要做的工作，系统会帮你找技能。安装以后，回到智能体设置里勾选即可。
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+          <Metric label="我的技能" value={installedCount} />
+          <Metric label="已启用" value={enabledCount} />
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {skillMarketCategories.map((category) => (
+            <button
+              key={category.title}
+              type="button"
+              className="group min-h-24 rounded-md border bg-background px-3 py-2 text-left transition hover:border-primary/60 hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={loading}
+              onClick={() => onSearch(category.query)}
+            >
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                <span>{category.title}</span>
+                <ArrowRight className="size-3.5 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{category.detail}</div>
+              <div className="mt-2 inline-flex rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                一键找技能
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-md border bg-background p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold text-muted-foreground">当前选中技能</div>
+              <div className="mt-1 truncate text-sm font-semibold">
+                {selectedSkill?.name ?? '先从市场里选一个技能'}
+              </div>
+              <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                {selectedSkill
+                  ? fit?.capability
+                  : '选中后这里会显示它适合哪个 Agent，以及下一步怎么分配。'}
+              </div>
+            </div>
+            <Badge variant={installed ? 'default' : 'outline'} className="shrink-0">
+              {installed ? '可分配' : '待安装'}
+            </Badge>
+          </div>
+          <div className="mt-3 grid gap-1.5">
+            <AssistantStep done={Boolean(selectedSkill)} label="选择技能" />
+            <AssistantStep done={installed} label="安装到本地" />
+            <AssistantStep done={installed} label="分配给智能体" />
+          </div>
+          <div className="mt-3 rounded-md border bg-muted/30 px-2.5 py-2 text-xs leading-5 text-muted-foreground">
+            下一步：{selectedSkill ? (installed ? '打开智能体设置，把技能勾选给对应员工。' : '点击安装到本地。') : '按岗位搜索并选择一个技能。'}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AssistantStep({ done, label }: { done: boolean; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/10 px-2 py-1.5 text-xs">
+      <span className="truncate">{label}</span>
+      <Badge variant={done ? 'default' : 'outline'} className="h-5 px-1.5 text-[9px]">
+        {done ? '完成' : '待办'}
+      </Badge>
     </div>
   )
 }
