@@ -161,6 +161,7 @@ export function SkillsCenter() {
   const [notice, setNotice] = useState<string | null>(null)
   const [installedQuery, setInstalledQuery] = useState('')
   const [manualInstallOpen, setManualInstallOpen] = useState(false)
+  const [installHistoryOpen, setInstallHistoryOpen] = useState(false)
   const [developerToolsOpen, setDeveloperToolsOpen] = useState(false)
   const [marketplaceQuery, setMarketplaceQuery] = useState('code review')
   const [marketplaceSort, setMarketplaceSort] = useState<'recent' | 'stars'>('recent')
@@ -363,7 +364,7 @@ export function SkillsCenter() {
               <Metric label="已安装" value={visibleSkills.length} />
               <Metric label="已启用" value={enabledCount} />
               <Metric label="市场结果" value={marketplaceCount} />
-              <Metric label="SDK" value={data.sdkManifests.length} />
+              <Metric label="开发包" value={data.sdkManifests.length} />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -478,10 +479,24 @@ export function SkillsCenter() {
               )}
 
               <section className="rounded-lg border bg-background">
-                <div className="border-b px-3 py-2 text-sm font-semibold">最近安装</div>
-                <div className="p-3">
-                  <InstallFlowList flows={data.installFlows} />
-                </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold transition hover:bg-muted/40"
+                  onClick={() => setInstallHistoryOpen((current) => !current)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {installHistoryOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                    <span className="truncate">安装记录</span>
+                  </span>
+                  <Badge variant="outline" className="shrink-0">
+                    {data.installFlows.length}
+                  </Badge>
+                </button>
+                {installHistoryOpen && (
+                  <div className="border-t p-3">
+                    <InstallFlowList flows={data.installFlows} />
+                  </div>
+                )}
               </section>
             </div>
           </ScrollArea>
@@ -614,7 +629,7 @@ export function SkillsCenter() {
             >
               <span className="flex items-center gap-2">
                 {developerToolsOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                高级：创建和发布技能
+                开发者工具：创建和发布技能
               </span>
               <span className="text-xs font-normal text-muted-foreground">
                 {data.sdkManifests.length} 个 SDK / {data.marketplacePublications.length} 条发布
