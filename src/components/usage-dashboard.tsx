@@ -161,6 +161,7 @@ export function UsageDashboard() {
                 icon={<BarChart3 className="size-4" />}
               >
                 <BillingSummary models={data.byModel} totalCost={totalModelCost} totalSaved={totalModelSaved} />
+                <ModelSpendSnapshot models={data.byModel} totalCost={totalModelCost} />
                 <ModelCostDiagnosis
                   models={data.byModel}
                   totalCost={totalModelCost}
@@ -509,6 +510,75 @@ function ModelUsagePanel({
         ))}
       </div>
     </div>
+  )
+}
+
+function ModelSpendSnapshot({
+  models,
+  totalCost,
+}: {
+  models: UsageSummary['byModel']
+  totalCost: number
+}) {
+  if (models.length === 0) return null
+
+  return (
+    <section className="mb-3 rounded-md border bg-background p-3" data-testid="model-spend-snapshot">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">模型费用快照</div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            一眼看每个模型实际花了多少钱，本周花多少，后续月账单大概会到哪里。
+          </p>
+        </div>
+        <BadgeLike label="按实际费用排序" value={formatUsd(totalCost)} />
+      </div>
+      <div className="grid gap-2 xl:grid-cols-2">
+        {models.slice(0, 6).map((model, index) => {
+          const costShare = totalCost > 0 ? (model.estimatedCostUsd / totalCost) * 100 : 0
+          const cacheHit = model.cacheReadTokens > 0 ? formatPercent(model.cacheHitRate * 100) : '-'
+          return (
+            <article key={model.model} className="rounded-md border bg-muted/10 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-md border bg-background text-[11px] font-semibold">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{model.model}</div>
+                    <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                      {model.provider ?? '未绑定提供商'} · {formatInteger(model.runs)} 次请求
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="font-mono text-sm font-semibold">{formatUsd(model.estimatedCostUsd)}</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">实际花费</div>
+                </div>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${Math.max(2, Math.min(100, costShare))}%` }}
+                />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <MiniMetric label="成本占比" value={formatPercent(costShare)} />
+                <MiniMetric label="本周费用" value={formatUsd(model.last7dCostUsd)} />
+                <MiniMetric label="月预估" value={formatUsd(model.projectedMonthlyCostUsd)} strong />
+                <MiniMetric label="缓存命中" value={cacheHit} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <MiniMetric color="bg-cyan-400" label="输入" value={formatTokens(model.inputTokens)} />
+                <MiniMetric color="bg-blue-500" label="输出" value={formatTokens(model.outputTokens)} />
+                <MiniMetric color="bg-emerald-500" label="已省" value={formatUsd(model.estimatedSavedUsd)} />
+                <MiniMetric label="每次平均" value={formatTokens(model.avgTokensPerRun)} />
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
