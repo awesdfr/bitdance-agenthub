@@ -165,6 +165,8 @@ export interface CreateModelProfileArgs {
   networkProfileId?: string | null
 }
 
+export type UpdateModelProfileArgs = CreateModelProfileArgs
+
 export async function createModelProfile(args: CreateModelProfileArgs): Promise<ModelProfileRow> {
   const now = Date.now()
   const row = {
@@ -191,6 +193,48 @@ export async function createModelProfile(args: CreateModelProfileArgs): Promise<
 
 export async function listModelProfiles(): Promise<ModelProfileRow[]> {
   return db.query.modelProfiles.findMany({ orderBy: [desc(schema.modelProfiles.createdAt)] })
+}
+
+export async function updateModelProfile(
+  id: string,
+  args: UpdateModelProfileArgs,
+): Promise<ModelProfileRow> {
+  const existing = await getRequiredModelProfile(id)
+  const now = Date.now()
+  const nextNetworkProfileId = normalizeNullable(args.networkProfileId)
+  const connectionRelevantUnchanged =
+    existing.provider === args.provider &&
+    existing.baseUrl === args.baseUrl.trim() &&
+    existing.apiKeyRef === args.apiKeyRef.trim() &&
+    existing.model === args.model.trim() &&
+    existing.networkProfileId === nextNetworkProfileId &&
+    existing.supportsVision === (args.supportsVision ?? false) &&
+    existing.supportsToolCalling === (args.supportsToolCalling ?? false) &&
+    existing.supportsJsonMode === (args.supportsJsonMode ?? false)
+
+  await db
+    .update(schema.modelProfiles)
+    .set({
+      name: args.name.trim(),
+      provider: args.provider,
+      baseUrl: args.baseUrl.trim(),
+      apiKeyRef: args.apiKeyRef.trim(),
+      model: args.model.trim(),
+      contextWindow: args.contextWindow ?? null,
+      supportsVision: args.supportsVision ?? false,
+      supportsToolCalling: args.supportsToolCalling ?? false,
+      supportsJsonMode: args.supportsJsonMode ?? false,
+      networkProfileId: nextNetworkProfileId,
+      healthStatus: connectionRelevantUnchanged ? existing.healthStatus : 'unknown',
+      lastTestResult: connectionRelevantUnchanged
+        ? existing.lastTestResult
+        : 'Model profile changed; run a connection test again.',
+      lastCheckedAt: connectionRelevantUnchanged ? existing.lastCheckedAt : null,
+      updatedAt: now,
+    })
+    .where(eq(schema.modelProfiles.id, id))
+
+  return getRequiredModelProfile(id)
 }
 
 export async function deleteModelProfile(id: string): Promise<void> {

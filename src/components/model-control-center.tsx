@@ -53,6 +53,7 @@ import {
   testModelConnection,
   testModelProfile,
   testNetworkProfile,
+  updateModelProfile,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -180,6 +181,30 @@ const providerDefaults: Record<
   },
 }
 
+function defaultModelDraft(provider: ModelProfileProvider = 'deepseek'): ModelDraft {
+  return {
+    name: `${providerLabel(provider)} 主模型`,
+    provider,
+    ...providerDefaults[provider],
+    networkProfileId: '',
+  }
+}
+
+function modelToDraft(model: ModelProfileRow): ModelDraft {
+  return {
+    name: model.name,
+    provider: model.provider,
+    baseUrl: model.baseUrl,
+    apiKeyRef: model.apiKeyRef,
+    model: model.model,
+    contextWindow: model.contextWindow ? String(model.contextWindow) : '',
+    supportsVision: model.supportsVision,
+    supportsToolCalling: model.supportsToolCalling,
+    supportsJsonMode: model.supportsJsonMode,
+    networkProfileId: model.networkProfileId ?? '',
+  }
+}
+
 export function ModelControlCenter() {
   const [models, setModels] = useState<ModelProfileRow[]>([])
   const [networks, setNetworks] = useState<NetworkProfileRow[]>([])
@@ -194,6 +219,7 @@ export function ModelControlCenter() {
   const [routeNeedsJson, setRouteNeedsJson] = useState(true)
   const [addModelOpen, setAddModelOpen] = useState(false)
   const [showConfigPanel, setShowConfigPanel] = useState(false)
+  const [editingModel, setEditingModel] = useState<ModelProfileRow | null>(null)
   const [pendingDeleteModelId, setPendingDeleteModelId] = useState<string | null>(null)
   const [inputTokens, setInputTokens] = useState('1200')
   const [outputTokens, setOutputTokens] = useState('800')
@@ -205,12 +231,7 @@ export function ModelControlCenter() {
     regionLabel: '',
     appliesTo: 'model_only' as NetworkAppliesTo,
   })
-  const [modelDraft, setModelDraft] = useState({
-    name: 'DeepSeek 主模型',
-    provider: 'deepseek' as ModelProfileProvider,
-    ...providerDefaults.deepseek,
-    networkProfileId: '',
-  })
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => defaultModelDraft())
   const [secretDraft, setSecretDraft] = useState({
     enabled: true,
     name: 'OpenAI 生产密钥',
@@ -231,6 +252,23 @@ export function ModelControlCenter() {
     () => networks.find((network) => network.id === selectedNetworkId) ?? null,
     [networks, selectedNetworkId],
   )
+
+  const openAddModelDialog = () => {
+    setEditingModel(null)
+    setModelDraft(defaultModelDraft())
+    setAddModelOpen(true)
+  }
+
+  const openEditModelDialog = (model: ModelProfileRow) => {
+    setEditingModel(model)
+    setModelDraft(modelToDraft(model))
+    setAddModelOpen(true)
+  }
+
+  const handleModelDialogOpenChange = (open: boolean) => {
+    setAddModelOpen(open)
+    if (!open) setEditingModel(null)
+  }
 
   const upsertModelLocally = useCallback((model: ModelProfileRow) => {
     setModels((current) => [model, ...current.filter((item) => item.id !== model.id)])
@@ -365,7 +403,7 @@ export function ModelControlCenter() {
     setError(null)
     setNotice(null)
     try {
-      const model = await createModelProfile({
+      const payload = {
         name: requireTrimmed(modelDraft.name, '请输入模型名称。'),
         provider: modelDraft.provider,
         baseUrl: requireTrimmed(modelDraft.baseUrl, '请输入 Base URL。'),
@@ -376,11 +414,15 @@ export function ModelControlCenter() {
         supportsToolCalling: modelDraft.supportsToolCalling,
         supportsJsonMode: modelDraft.supportsJsonMode,
         networkProfileId: modelDraft.networkProfileId || null,
-      })
+      }
+      const model = editingModel
+        ? await updateModelProfile(editingModel.id, payload)
+        : await createModelProfile(payload)
       upsertModelLocally(model)
       setSelectedModelId(model.id)
       setAddModelOpen(false)
-      setNotice('模型已添加，可以直接在 Agent 或普通对话里选择使用')
+      setEditingModel(null)
+      setNotice(editingModel ? '模型已保存，请重新检测连接状态' : '模型已添加，可以直接在智能体或普通对话里选择使用')
       await reload()
       upsertModelLocally(model)
     } catch (err) {
@@ -532,7 +574,7 @@ export function ModelControlCenter() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" className="h-8 gap-1" onClick={() => setAddModelOpen(true)}>
+            <Button size="sm" className="h-8 gap-1" onClick={openAddModelDialog}>
               <Plus className="size-3.5" />
               添加模型
             </Button>
@@ -564,12 +606,14 @@ export function ModelControlCenter() {
         )}
       </div>
 
-      <Dialog open={addModelOpen} onOpenChange={setAddModelOpen}>
+      <Dialog open={addModelOpen} onOpenChange={handleModelDialogOpenChange}>
         <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>添加模型</DialogTitle>
+            <DialogTitle>{editingModel ? '编辑模型' : '添加模型'}</DialogTitle>
             <DialogDescription>
-              这里添加一次，后面创建对话或配置智能体时就可以直接选择这个模型。
+              {editingModel
+                ? '修改后会立即影响后续对话和智能体调用，建议保存后重新检测连接。'
+                : '这里添加一次，后面创建对话或配置智能体时就可以直接选择这个模型。'}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-3" onSubmit={(event) => void submitQuickModel(event)}>
@@ -675,7 +719,7 @@ export function ModelControlCenter() {
                 disabled={saving !== null || !modelDraft.name.trim() || !modelDraft.model.trim()}
               >
                 {saving === 'model' ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                保存模型
+                {editingModel ? '保存修改' : '保存模型'}
               </Button>
             </DialogFooter>
           </form>
@@ -924,6 +968,7 @@ export function ModelControlCenter() {
                       onDryTest={() => void runModelTest(model, false)}
                       onLiveTest={() => void runModelTest(model, true)}
                       onInvokeProbe={() => void runModelInvokeProbe(model)}
+                      onEdit={() => openEditModelDialog(model)}
                       onDelete={() => void deleteModel(model)}
                     />
                   ))
@@ -1125,6 +1170,7 @@ function ModelRow({
   onDryTest,
   onLiveTest,
   onInvokeProbe,
+  onEdit,
   onDelete,
 }: {
   model: ModelProfileRow
@@ -1137,6 +1183,7 @@ function ModelRow({
   onDryTest: () => void
   onLiveTest: () => void
   onInvokeProbe: () => void
+  onEdit: () => void
   onDelete: () => void
 }) {
   return (
@@ -1170,6 +1217,10 @@ function ModelRow({
         <Button size="xs" variant="ghost" className="gap-1" onClick={onInvokeProbe} disabled={saving}>
           <Zap className="size-3" />
           推理
+        </Button>
+        <Button size="xs" variant="ghost" className="gap-1" onClick={onEdit} disabled={saving || deleting}>
+          <Settings2 className="size-3" />
+          编辑
         </Button>
         <Button
           size="xs"

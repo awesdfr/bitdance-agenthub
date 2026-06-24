@@ -1034,6 +1034,20 @@ export async function createModelProfile(body: CreateModelProfileBody): Promise<
   return modelProfile
 }
 
+export async function updateModelProfile(
+  modelProfileId: string,
+  body: CreateModelProfileBody,
+): Promise<ModelProfileRow> {
+  const { modelProfile } = await json<{ modelProfile: ModelProfileRow }>(
+    fetch(`/api/model-profiles/${modelProfileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return modelProfile
+}
+
 export async function deleteModelProfile(modelProfileId: string): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/model-profiles/${modelProfileId}`, {
