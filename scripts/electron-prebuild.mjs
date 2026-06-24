@@ -56,7 +56,17 @@ if (!fs.existsSync(standaloneDir)) {
 // Next tracer 在遇到非常动态的 server import 时可能把 repo 级生成物也带进 standalone。
 // Electron Builder 会递归压缩这些目录；旧 release、临时输出、测试缓存和 GUI harness
 // 都会让 Windows 安装包暴涨，甚至碰到不可读的 pytest 缓存目录后失败。
-for (const relativePath of ['release', '.agenthub-data', 'apps', 'output', 'tmp', 'tools', 'e2e']) {
+for (const relativePath of [
+  'release',
+  'release-latest',
+  '.electron-package',
+  '.agenthub-data',
+  'apps',
+  'output',
+  'tmp',
+  'tools',
+  'e2e',
+]) {
   const target = path.join(standaloneDir, relativePath)
   if (!fs.existsSync(target)) continue
   fs.rmSync(target, { recursive: true, force: true })
