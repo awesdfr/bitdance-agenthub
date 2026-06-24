@@ -113,7 +113,7 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   'employee-factory': '\u667a\u80fd\u4f53\u8bbe\u7f6e',
   'agent-canvas': '\u7f16\u6392\u753b\u5e03',
   skills: '\u6280\u80fd\u4e2d\u5fc3',
-  scheduler: '\u81ea\u52a8\u4efb\u52a1',
+  scheduler: '\u4efb\u52a1\u8c03\u5ea6',
   memory: '\u8bb0\u5fc6\u5b66\u4e60',
   context: '\u4e0a\u4e0b\u6587',
   models: '\u6a21\u578b\u7ba1\u7406',
@@ -125,7 +125,7 @@ const navDisplayLabels: Record<SidebarMode, string> = {
   configops: '\u914d\u7f6e\u7ba1\u7406',
   production: '\u4ea4\u4ed8\u68c0\u67e5',
   agents: '\u667a\u80fd\u4f53',
-  analytics: '\u8d39\u7528\u5206\u6790',
+  analytics: '\u6570\u636e\u5206\u6790',
 }
 
 function navLabel(mode: SidebarMode): string {

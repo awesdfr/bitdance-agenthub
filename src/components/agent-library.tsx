@@ -1,7 +1,18 @@
 'use client'
 
-import { Pencil, Plus, Settings2, Trash2, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  BrainCircuit,
+  CheckCircle2,
+  Package,
+  Pencil,
+  Plus,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+  Wrench,
+  X,
+} from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
@@ -40,6 +51,7 @@ export function AgentLibrary({
   const [settingsAgentId, setSettingsAgentId] = useState<string | null>(
     defaultSettingsOpen ? '__first__' : null,
   )
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(defaultSettingsOpen)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -53,6 +65,7 @@ export function AgentLibrary({
   useEffect(() => {
     if (settingsRequestKey <= 0) return
     setSettingsAgentId('__first__')
+    setAdvancedSettingsOpen(true)
   }, [settingsRequestKey])
 
   const openCreate = () => {
@@ -67,6 +80,7 @@ export function AgentLibrary({
 
   const openSettings = (agent: AgentRow) => {
     setSettingsAgentId(agent.id)
+    setAdvancedSettingsOpen(false)
   }
 
   const handleFormOpenChange = (open: boolean) => {
@@ -145,16 +159,61 @@ export function AgentLibrary({
           >
             <X className="size-4" />
           </Button>
-          <EmployeeAgentFactory
-            embedded
-            initialTab="agent"
-            initialFocusSection={focusCapabilitiesOnSettingsOpen ? 'capabilities' : undefined}
-            initialAgentProfileId={settingsAgent.id}
-            initialAgentName={settingsAgent.name}
-            initialAgentDescription={settingsAgent.description}
-            title={`${settingsAgent.name} 的能力设置`}
-            subtitle="把已经接入的模型、技能、MCP、CLI 和软件能力分配给这个智能体。"
-          />
+          <div className="shrink-0 border-b px-4 py-3 pr-12">
+            <AgentSettingsOverview
+              agent={settingsAgent}
+              advancedOpen={advancedSettingsOpen}
+              onEdit={() => openEdit(settingsAgent)}
+              onToggleAdvanced={() => setAdvancedSettingsOpen((open) => !open)}
+            />
+          </div>
+          {advancedSettingsOpen ? (
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <EmployeeAgentFactory
+                embedded
+                initialTab="agent"
+                initialFocusSection={focusCapabilitiesOnSettingsOpen ? 'capabilities' : undefined}
+                initialAgentProfileId={settingsAgent.id}
+                initialAgentName={settingsAgent.name}
+                initialAgentDescription={settingsAgent.description}
+                title={`${settingsAgent.name} 的完整配置`}
+                subtitle="模型、技能、CLI、MCP、记忆、权限和交付物都集中在当前智能体里。"
+              />
+            </div>
+          ) : (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="grid gap-3 p-4 lg:grid-cols-2">
+                <AgentPlainSettingCard
+                  icon={<Package className="size-4 text-primary" />}
+                  title="技能与工具"
+                  detail="已安装技能、MCP、CLI 和软件能力都分配给当前员工。"
+                  action="分配能力"
+                  onAction={() => setAdvancedSettingsOpen(true)}
+                />
+                <AgentPlainSettingCard
+                  icon={<BrainCircuit className="size-4 text-primary" />}
+                  title="记忆与上下文"
+                  detail="客户偏好、项目状态、历史经验跟着这个员工走。"
+                  action="设置记忆"
+                  onAction={() => setAdvancedSettingsOpen(true)}
+                />
+                <AgentPlainSettingCard
+                  icon={<ShieldCheck className="size-4 text-primary" />}
+                  title="权限与安全"
+                  detail="文件、命令、浏览器、电脑操作权限在员工里统一控制。"
+                  action="调整权限"
+                  onAction={() => setAdvancedSettingsOpen(true)}
+                />
+                <AgentPlainSettingCard
+                  icon={<CheckCircle2 className="size-4 text-primary" />}
+                  title="交付物"
+                  detail="设置它最终交付报告、代码、图片、视频或文件包。"
+                  action="设置交付"
+                  onAction={() => setAdvancedSettingsOpen(true)}
+                />
+              </div>
+            </ScrollArea>
+          )}
         </section>
       )}
 
@@ -183,6 +242,131 @@ export function AgentLibrary({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function AgentSettingsOverview({
+  agent,
+  advancedOpen,
+  onEdit,
+  onToggleAdvanced,
+}: {
+  agent: AgentRow
+  advancedOpen: boolean
+  onEdit: () => void
+  onToggleAdvanced: () => void
+}) {
+  const toolCount = agent.skillIds.length + agent.mcpServerIds.length + agent.cliProfileIds.length
+  const modelLabel = agent.modelId
+    ? `${agent.modelProvider ?? '自定义'} / ${agent.modelId}`
+    : '还未选择模型'
+  const permissionHints = [
+    agent.toolNames.some((name) => name.includes('fs') || name.includes('file')) ? '文件' : null,
+    agent.toolNames.some((name) => name.includes('bash') || name.includes('command')) ||
+    agent.cliProfileIds.length > 0
+      ? '命令/CLI'
+      : null,
+    agent.toolNames.some((name) => name.includes('browser')) ? '浏览器' : null,
+    agent.supportsVision ? '视觉' : null,
+  ].filter(Boolean)
+  const permissionLabel = permissionHints.length ? permissionHints.join('、') : '基础对话'
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <AgentAvatar agent={agent} size="md" />
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold">{agent.name}</h2>
+              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                {agent.description || '还没有填写岗位说明'}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onEdit} className="gap-1.5">
+            <Pencil className="size-3.5" />
+            基础信息
+          </Button>
+          <Button size="sm" onClick={onToggleAdvanced} className="gap-1.5">
+            <Settings2 className="size-3.5" />
+            {advancedOpen ? '收起完整配置' : '打开完整配置'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <OverviewTile icon={<Wrench className="size-3.5" />} label="模型" value={modelLabel} />
+        <OverviewTile
+          icon={<Package className="size-3.5" />}
+          label="工具包"
+          value={toolCount > 0 ? `${toolCount} 项能力` : '未分配'}
+        />
+        <OverviewTile
+          icon={<ShieldCheck className="size-3.5" />}
+          label="权限"
+          value={permissionLabel}
+        />
+        <OverviewTile
+          icon={<CheckCircle2 className="size-3.5" />}
+          label="交付"
+          value="在本员工内设置"
+        />
+      </div>
+    </div>
+  )
+}
+
+function OverviewTile({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+}) {
+  return (
+    <div className="min-w-0 rounded-md border bg-muted/20 px-2.5 py-2">
+      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="mt-1 truncate text-xs font-medium">{value}</div>
+    </div>
+  )
+}
+
+function AgentPlainSettingCard({
+  icon,
+  title,
+  detail,
+  action,
+  onAction,
+}: {
+  icon: ReactNode
+  title: string
+  detail: string
+  action: string
+  onAction: () => void
+}) {
+  return (
+    <section className="rounded-md border bg-card p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{detail}</p>
+          <Button variant="outline" size="sm" onClick={onAction} className="mt-3 h-8">
+            {action}
+          </Button>
+        </div>
+      </div>
+    </section>
   )
 }
 
