@@ -186,6 +186,11 @@ const uiText = {
   canvasAcceptanceState: '\u9a8c\u6536\u72b6\u6001',
   canvasProduced: '\u5df2\u4ea7\u51fa',
   canvasPendingArtifact: '\u5f85\u4ea7\u51fa',
+  canvasCustomerAcceptance: '\u5ba2\u6237\u9a8c\u6536\u89c6\u56fe',
+  canvasPreviewMode: '\u9884\u89c8\u5f62\u5f0f',
+  canvasDeliveryFile: '\u4ea4\u4ed8\u6587\u4ef6',
+  canvasOwnerNode: '\u8d1f\u8d23\u8282\u70b9',
+  canvasAcceptanceRule: '\u9a8c\u6536\u53e3\u5f84',
   canvasRunStatus: '\u8fd0\u884c\u72b6\u6001',
   canvasNextStep: '\u4e0b\u4e00\u6b65',
   startCanvasConnection: '\u4ece\u8fd9\u4e2a\u8282\u70b9\u5f00\u59cb\u8fde\u7ebf',
@@ -438,9 +443,9 @@ async function main() {
   const smokeModelName = `UI temp model ${Date.now()}`
   await openSidebarModeAndWait(page, sidebar, uiText.modelsNav, uiText.modelsTitle)
   await page.getByTestId('model-connection-workbench').waitFor({ timeout: 90_000 })
-  const addModelButton = page.locator('main button', { hasText: uiText.addModel }).first()
+  const addModelButton = page.locator('main').getByRole('button', { name: uiText.addModel }).first()
   await addModelButton.waitFor({ timeout: 90_000 })
-  await addModelButton.click()
+  await addModelButton.evaluate((element) => (element as HTMLButtonElement).click())
   const modelDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.addModel }).first()
   await modelDialog.getByText(uiText.addModel, { exact: true }).waitFor({ timeout: 90_000 })
   await modelDialog.getByPlaceholder(uiText.modelNamePlaceholder).fill(smokeModelName)
@@ -789,8 +794,13 @@ async function main() {
   })
   const collapseQuickEditorButton = page.getByTestId('canvas-quick-editor-collapse')
   await collapseQuickEditorButton.waitFor({ timeout: 30_000 })
-  await collapseQuickEditorButton.evaluate((element) => (element as HTMLButtonElement).click())
   const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await collapseQuickEditorButton.evaluate((element) => (element as HTMLButtonElement).click())
+    const collapsed = await quickEditorCollapsed.isVisible().catch(() => false)
+    if (collapsed) break
+    await page.waitForTimeout(300)
+  }
   await quickEditorCollapsed.waitFor({ timeout: 30_000 })
   const quickEditorCollapsedVisible = await quickEditorCollapsed.isVisible()
   await quickEditorCollapsed.evaluate((element) => (element as HTMLButtonElement).click())
@@ -956,6 +966,10 @@ async function main() {
     await page.locator('main button', { hasText: uiText.advancedSettings }).first().click()
     runPanelVisible = await page.getByText(uiText.runMonitor).isVisible().catch(() => false)
   }
+  await page
+    .getByTestId('canvas-customer-preview-board')
+    .getByText(uiText.canvasCustomerAcceptance, { exact: true })
+    .waitFor({ timeout: 30_000 })
 
   const firstCanvasNode = page.getByTestId('workflow-canvas-node').first()
   const canvasNodeId = await firstCanvasNode.getAttribute('data-node-id')
@@ -1054,6 +1068,8 @@ async function main() {
     artifactQuickPicker: artifactQuickPickerVisible,
     customerDeliverableDock: await page.getByTestId('canvas-customer-delivery-dock').isVisible(),
     customerDeliverablesPanel: await page.getByTestId('canvas-customer-deliverables-panel').isVisible(),
+    customerPreviewBoard: await page.getByTestId('canvas-customer-preview-board').isVisible(),
+    customerPreviewCard: await page.getByTestId('canvas-customer-preview-card').first().isVisible(),
     nodeProgress: await page.getByTestId('canvas-node-progress').first().isVisible(),
     nodeDeliveryCard: await page.getByTestId('canvas-node-delivery-card').first().isVisible(),
     nodeStatusStrip: await page.getByTestId('canvas-node-status-strip').first().isVisible(),
@@ -1076,6 +1092,11 @@ async function main() {
     acceptanceState: canvasBodyText.includes(uiText.canvasAcceptanceState),
     producedState: canvasBodyText.includes(uiText.canvasProduced),
     pendingState: canvasBodyText.includes(uiText.canvasPendingArtifact),
+    customerAcceptanceView: canvasBodyText.includes(uiText.canvasCustomerAcceptance),
+    previewMode: canvasBodyText.includes(uiText.canvasPreviewMode),
+    deliveryFile: canvasBodyText.includes(uiText.canvasDeliveryFile),
+    ownerNode: canvasBodyText.includes(uiText.canvasOwnerNode),
+    acceptanceRule: canvasBodyText.includes(uiText.canvasAcceptanceRule),
     backgroundPan: canvasPan,
     viewportControls: await viewportControls.isVisible(),
     zoomChanged: beforeZoomText !== zoomedText,

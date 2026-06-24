@@ -2260,6 +2260,11 @@ function CustomerDeliverablesPanel({
               </Badge>
             ))}
           </div>
+          <CustomerAcceptancePreviewBoard
+            nodes={deliverables}
+            nodeRunByNodeId={nodeRunByNodeId}
+            artifactValidations={artifactValidations}
+          />
           <div className="space-y-1.5">
             {deliverables.map((node) => (
               <CustomerDeliverableRow
@@ -2273,6 +2278,83 @@ function CustomerDeliverablesPanel({
       )}
       </Section>
     </section>
+  )
+}
+
+function CustomerAcceptancePreviewBoard({
+  nodes,
+  nodeRunByNodeId,
+  artifactValidations,
+}: {
+  nodes: DraftNode[]
+  nodeRunByNodeId: Map<string, WorkflowNodeRunRow>
+  artifactValidations: ArtifactValidationRow[]
+}) {
+  const readyCount = nodes.filter((node) => nodeRunByNodeId.get(node.id)?.status === 'complete').length
+  return (
+    <div data-testid="canvas-customer-preview-board" className="rounded-md border bg-background p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <Eye className="size-3.5 text-primary" />
+            <span>客户验收视图</span>
+          </div>
+          <div className="mt-1 text-[10px] leading-4 text-muted-foreground">
+            每个智能体必须产出什么、客户能怎么预览、最终拿到什么文件。
+          </div>
+        </div>
+        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+          {readyCount}/{nodes.length} 可验收
+        </Badge>
+      </div>
+      <div className="mt-2 grid gap-1.5">
+        {nodes.slice(0, 6).map((node) => (
+          <CustomerDeliverablePreviewCard
+            key={node.id}
+            node={node}
+            nodeRun={nodeRunByNodeId.get(node.id) ?? null}
+          />
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
+        <DeliveryDatum label="验收记录" value={`${artifactValidations.length} 条`} />
+        <DeliveryDatum label="客户视角" value="预览 + 下载 + 状态" />
+      </div>
+    </div>
+  )
+}
+
+function CustomerDeliverablePreviewCard({
+  node,
+  nodeRun,
+}: {
+  node: DraftNode
+  nodeRun: WorkflowNodeRunRow | null
+}) {
+  const type = artifactTypeOf(node)
+  return (
+    <div data-testid="canvas-customer-preview-card" className="rounded-md border bg-muted/20 p-2 text-[10px]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5 font-medium">
+            {artifactTypeIcon(type, 'size-3.5 shrink-0 text-primary')}
+            <span className="truncate">{deliveryTitleOf(node)}</span>
+          </div>
+          <div className="mt-1 line-clamp-2 text-muted-foreground">
+            {deliveryDescriptionOf(node)}
+          </div>
+        </div>
+        <Badge variant={nodeRun?.status === 'complete' ? 'secondary' : 'outline'} className="h-5 shrink-0 px-1.5 text-[9px]">
+          {deliveryStateLabel(nodeRun)}
+        </Badge>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <DeliveryDatum label="负责节点" value={nodeLabel(node)} />
+        <DeliveryDatum label="预览形式" value={artifactPreviewMode(type)} />
+        <DeliveryDatum label="交付文件" value={artifactExpectedFile(type)} />
+        <DeliveryDatum label="验收口径" value={artifactAcceptanceHint(type)} />
+      </div>
+    </div>
   )
 }
 
@@ -3926,6 +4008,63 @@ function artifactFileHint(type: string): string {
     software_result: '软件执行结果',
   }
   return map[type] ?? '产物文件'
+}
+
+function artifactPreviewMode(type: string): string {
+  const map: Record<string, string> = {
+    report: '页面预览',
+    json: '结构化预览',
+    document: '文档预览',
+    code: '代码差异',
+    spreadsheet: '表格预览',
+    image: '图片预览',
+    video: '视频播放器',
+    presentation: '幻灯片预览',
+    browser_state: '页面截图',
+    desktop_result: '操作回放',
+    file_bundle: '文件清单',
+    approval_decision: '审批摘要',
+    software_result: '执行报告',
+  }
+  return map[type] ?? '产物预览'
+}
+
+function artifactExpectedFile(type: string): string {
+  const map: Record<string, string> = {
+    report: 'report.html / PDF',
+    json: 'result.json',
+    document: 'document.docx',
+    code: 'patch.diff / src.zip',
+    spreadsheet: 'sheet.xlsx',
+    image: 'image.png',
+    video: 'video.mp4',
+    presentation: 'slides.pptx',
+    browser_state: 'screenshot.png',
+    desktop_result: 'result.png / log.txt',
+    file_bundle: 'deliverables.zip',
+    approval_decision: 'approval.json',
+    software_result: 'software-result.json',
+  }
+  return map[type] ?? 'artifact'
+}
+
+function artifactAcceptanceHint(type: string): string {
+  const map: Record<string, string> = {
+    report: '内容完整',
+    json: 'Schema 通过',
+    document: '格式可读',
+    code: '测试通过',
+    spreadsheet: '数据完整',
+    image: '可打开',
+    video: '可播放',
+    presentation: '可演示',
+    browser_state: '截图可信',
+    desktop_result: '操作完成',
+    file_bundle: '文件齐全',
+    approval_decision: '审批明确',
+    software_result: '命令成功',
+  }
+  return map[type] ?? '可验收'
 }
 
 function customerVisibleOf(node: DraftNode): boolean {
