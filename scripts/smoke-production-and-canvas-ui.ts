@@ -133,6 +133,10 @@ const uiText = {
   toolsOneClickFindSoftware: '\u4e00\u952e\u627e\u8f6f\u4ef6',
   toolsNextStep: '\u4e0b\u4e00\u6b65',
   toolsIntro: '\u8f6f\u4ef6\u4ecb\u7ecd',
+  toolsSoftwareCardHero: '\u8f6f\u4ef6\u540d\u7247',
+  toolsConnectionOverview: '\u63a5\u5165\u603b\u89c8',
+  toolsAssignmentPath: '\u5206\u914d\u8def\u5f84',
+  toolsGoAssignToAgent: '\u53bb\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
   toolsSoftwareDetail: '\u8f6f\u4ef6\u8be6\u60c5',
   toolsAccessMatrix: '\u80fd\u529b\u63a5\u5165\u9762\u677f',
   toolsCurrentChoice: '\u5f53\u524d\u9009\u62e9',
@@ -358,6 +362,9 @@ async function main() {
     if (!value) throw new Error(`Desktop workbench check failed: ${key}.`)
   }
   await page.locator('main button', { hasText: uiText.workbenchModelMode }).click()
+  await page.waitForFunction(() => document.querySelector('main')?.textContent?.includes('普通对话'), null, {
+    timeout: 10_000,
+  })
   if (!(await page.locator('main').innerText()).includes('\u666e\u901a\u5bf9\u8bdd')) {
     throw new Error('Workbench model mode should update the assignment preview.')
   }
@@ -636,6 +643,13 @@ async function main() {
     usePathChoose: toolsBodyText.includes(uiText.toolsStepChoose),
     usePathCheck: toolsBodyText.includes(uiText.toolsStepCheck),
     usePathAssign: toolsBodyText.includes(uiText.toolsStepAssign),
+    detailHeroNode: await page.getByTestId('software-store-detail-hero').isVisible(),
+    detailHeroText: toolsBodyText.includes(uiText.toolsSoftwareCardHero),
+    connectionOverviewNode: await page.getByTestId('software-store-connection-overview').isVisible(),
+    connectionOverviewText: toolsBodyText.includes(uiText.toolsConnectionOverview),
+    assignmentPathNode: await page.getByTestId('software-store-assignment-path').isVisible(),
+    assignmentPathText: toolsBodyText.includes(uiText.toolsAssignmentPath),
+    heroAssignAction: toolsBodyText.includes(uiText.toolsGoAssignToAgent),
     intro: toolsBodyText.includes(uiText.toolsIntro),
     softwareDetail: toolsBodyText.includes(uiText.toolsSoftwareDetail),
     useGuideNode: await page.getByTestId('software-store-use-guide').isVisible(),

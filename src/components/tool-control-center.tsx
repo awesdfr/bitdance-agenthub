@@ -1311,22 +1311,13 @@ export function ToolControlCenter() {
                       </div>
                     </div>
 
-                    <section className="mt-4 rounded-lg border bg-muted/10 p-3">
-                      <div className="text-sm font-semibold">软件介绍</div>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {getSoftwareStoreIntro(selectedStoreItem)}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {getSoftwareStoreCapabilities(selectedStoreItem).map((capability) => (
-                          <span
-                            key={capability}
-                            className="rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground"
-                          >
-                            {capability}
-                          </span>
-                        ))}
-                      </div>
-                    </section>
+                    <SoftwareStoreDetailHero
+                      item={selectedStoreItem}
+                      selectedMode={selectedStoreDetailMode}
+                      onModeChange={setSelectedStoreDetailMode}
+                      onAssignToAgent={() => emitUiCommand('open-agent-settings')}
+                      onCreateAccess={() => openAdvancedForSoftware(selectedStoreItem)}
+                    />
 
                     <SoftwareStoreUseGuide item={selectedStoreItem} />
 
@@ -3050,6 +3041,145 @@ function StoreCardModeButton({
       <span>{label}</span>
       <span className="font-mono">{count}</span>
     </button>
+  )
+}
+
+function SoftwareStoreDetailHero({
+  item,
+  selectedMode,
+  onModeChange,
+  onAssignToAgent,
+  onCreateAccess,
+}: {
+  item: SoftwareStoreItem
+  selectedMode: StoreDetailMode
+  onModeChange: (mode: StoreDetailMode) => void
+  onAssignToAgent: () => void
+  onCreateAccess: () => void
+}) {
+  const recommended = getSoftwareStoreRecommendedMode(item)
+  const fit = inferSoftwareAgentFit(item)
+  const canAssign = getStoreModeCount(item) > 0 || item.softwareCommands.length > 0
+  const activeMode = selectedMode === 'overview' ? recommended.mode : selectedMode
+  const modeEntries: Array<{
+    mode: Exclude<StoreDetailMode, 'overview'>
+    label: string
+    count: number
+    detail: string
+    icon: ReactNode
+  }> = [
+    {
+      mode: 'cli',
+      label: 'CLI',
+      count: item.cliProfiles.length,
+      detail: '终端、脚本、本地命令',
+      icon: <Terminal className="size-4" />,
+    },
+    {
+      mode: 'mcp',
+      label: 'MCP',
+      count: item.mcpServers.length,
+      detail: '结构化工具和参数',
+      icon: <Plug className="size-4" />,
+    },
+    {
+      mode: 'commands',
+      label: '命令',
+      count: item.softwareCommands.length,
+      detail: '封装好的动作',
+      icon: <Cpu className="size-4" />,
+    },
+  ]
+
+  return (
+    <section
+      data-testid="software-store-detail-hero"
+      className="mt-4 overflow-hidden rounded-lg border bg-gradient-to-b from-primary/5 to-background"
+    >
+      <div className="border-b bg-background/70 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Package className="size-4 text-primary" />
+            软件名片
+          </div>
+          <Badge variant={canAssign ? 'default' : 'outline'}>
+            {canAssign ? '可分配给智能体' : '需要先接入'}
+          </Badge>
+        </div>
+      </div>
+
+      <div className="space-y-3 p-3">
+        <div>
+          <div className="text-sm font-semibold">软件介绍</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {getSoftwareStoreIntro(item)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {getSoftwareStoreCapabilities(item).map((capability) => (
+              <span
+                key={capability}
+                className="rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground"
+              >
+                {capability}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div data-testid="software-store-connection-overview">
+          <div className="mb-2 text-xs font-semibold text-muted-foreground">接入总览</div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {modeEntries.map((entry) => {
+              const active = activeMode === entry.mode
+              return (
+                <button
+                  key={entry.mode}
+                  type="button"
+                  className={cn(
+                    'rounded-lg border bg-background px-3 py-2 text-left transition hover:border-primary/50 hover:bg-primary/5',
+                    active && 'border-primary bg-primary/5 ring-2 ring-primary/10',
+                  )}
+                  onClick={() => onModeChange(entry.mode)}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold">
+                      <span className="text-primary">{entry.icon}</span>
+                      {entry.label}
+                    </span>
+                    <span className="font-mono text-sm font-semibold">{entry.count}</span>
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{entry.detail}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div
+          data-testid="software-store-assignment-path"
+          className="rounded-lg border bg-background px-3 py-2"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-muted-foreground">分配路径</div>
+              <div className="mt-1 text-sm font-semibold">推荐给：{fit.role}</div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                {recommended.reason} {recommended.action}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              className="shrink-0 gap-2"
+              variant={canAssign ? 'default' : 'outline'}
+              onClick={canAssign ? onAssignToAgent : onCreateAccess}
+            >
+              {canAssign ? <Bot className="size-4" /> : <Settings2 className="size-4" />}
+              {canAssign ? '去分配给智能体' : '创建接入'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
