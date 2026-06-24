@@ -147,6 +147,8 @@ export function UsageDashboard() {
             />
           </section>
 
+          <ModelActualConsumptionBoard models={data.byModel} totalCost={totalModelCost} />
+
           <ModelSpendLedgerBoard
             models={data.byModel}
             totalCost={totalModelCost}
@@ -258,6 +260,150 @@ export function UsageDashboard() {
         </div>
       </div>
     </ScrollArea>
+  )
+}
+
+function ModelActualConsumptionBoard({
+  models,
+  totalCost,
+}: {
+  models: UsageSummary['byModel']
+  totalCost: number
+}) {
+  if (models.length === 0) return null
+
+  const totalTokens = models.reduce((sum, model) => sum + model.totalTokens, 0)
+  const totalRuns = models.reduce((sum, model) => sum + model.runs, 0)
+  const totalSaved = models.reduce((sum, model) => sum + model.estimatedSavedUsd, 0)
+  const topModel = models[0]
+
+  return (
+    <section className="rounded-md border bg-card p-3 shadow-sm" data-testid="model-actual-consumption-board">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Coins className="size-4 text-primary" />
+            <span>模型实际消耗排行</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            这里先按真实账单排序。每个模型花了多少钱、用了多少 token、跑了多少次、缓存帮你省了多少，一眼就能看到。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <BadgeLike label="实付总额" value={formatUsd(totalCost)} />
+          <BadgeLike label="总 token" value={formatTokens(totalTokens)} />
+          <BadgeLike label="缓存省下" value={formatUsd(totalSaved)} tone="good" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="grid gap-2 lg:grid-cols-2">
+          {models.slice(0, 8).map((model, index) => (
+            <ModelActualConsumptionRow
+              key={model.model}
+              index={index}
+              model={model}
+              totalCost={totalCost}
+              totalTokens={totalTokens}
+            />
+          ))}
+        </div>
+
+        <aside className="rounded-md border bg-background p-3">
+          <div className="text-sm font-semibold">先看这个</div>
+          <div className="mt-2 grid gap-2">
+            <BillReadingTip
+              label="最烧钱模型"
+              value={topModel?.model ?? '暂无'}
+              detail={
+                topModel
+                  ? `当前实付 ${formatUsd(topModel.estimatedCostUsd)}，先检查它的上下文、缓存命中和任务拆分。`
+                  : '还没有模型账单。'
+              }
+            />
+            <BillReadingTip
+              label="总请求量"
+              value={`${formatInteger(totalRuns)} 次`}
+              detail={`${formatTokens(totalTokens)} tokens 已按模型拆分，适合判断哪个模型最需要限额。`}
+            />
+            <BillReadingTip
+              label="无缓存会多花"
+              value={formatUsd(totalSaved)}
+              detail="长会话保持 append-only 稳定前缀后，DeepSeek / OpenAI-compatible 模型更容易命中 prefix cache。"
+            />
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
+}
+
+function ModelActualConsumptionRow({
+  index,
+  model,
+  totalCost,
+  totalTokens,
+}: {
+  index: number
+  model: UsageSummary['byModel'][number]
+  totalCost: number
+  totalTokens: number
+}) {
+  const costShare = totalCost > 0 ? (model.estimatedCostUsd / totalCost) * 100 : 0
+  const tokenShare = totalTokens > 0 ? (model.totalTokens / totalTokens) * 100 : 0
+  const cacheHit = model.cacheReadTokens > 0 ? model.cacheHitRate * 100 : 0
+  const averageCost = model.estimatedCostUsd / Math.max(1, model.runs)
+
+  return (
+    <article className="rounded-md border bg-background p-3" data-testid="model-actual-consumption-row">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-md border bg-muted text-[11px] font-semibold">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{model.model}</div>
+            <div className="mt-1 truncate text-[11px] text-muted-foreground">
+              {model.provider ?? '未绑定供应商'} · {formatInteger(model.runs)} 次请求
+            </div>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-base font-semibold">{formatUsd(model.estimatedCostUsd)}</div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">实际花费</div>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <ProgressLine
+          label="费用占比"
+          value={formatPercent(costShare)}
+          percent={costShare}
+          barClassName="bg-primary"
+        />
+        <ProgressLine
+          label="Token 占比"
+          value={formatPercent(tokenShare)}
+          percent={tokenShare}
+          barClassName="bg-blue-500"
+        />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <MiniMetric label="总 token" value={formatTokens(model.totalTokens)} />
+        <MiniMetric label="请求均价" value={formatUsd(averageCost)} />
+        <MiniMetric
+          label="缓存命中"
+          value={model.cacheReadTokens > 0 ? formatPercent(cacheHit) : '-'}
+          color={cacheHit >= 50 ? 'bg-emerald-500' : undefined}
+        />
+        <MiniMetric
+          label="缓存节省"
+          value={formatUsd(model.estimatedSavedUsd)}
+          color={model.estimatedSavedUsd > 0 ? 'bg-emerald-500' : undefined}
+        />
+      </div>
+    </article>
   )
 }
 
