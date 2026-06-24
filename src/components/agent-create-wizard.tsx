@@ -45,7 +45,7 @@ export function AgentCreateWizard({
   const generateDraft = async () => {
     const trimmedIntent = intent.trim()
     if (trimmedIntent.length < 6) {
-      setError('请稍微多描述一点你想创建的 Agent。')
+      setError('请稍微多描述一点你想创建的智能体。')
       return
     }
 
@@ -77,7 +77,7 @@ export function AgentCreateWizard({
   if (draft) {
     const providerLabel = draft.modelProvider
       ? AGENT_BUILDER_PROVIDER_DEFAULTS[draft.modelProvider].label
-      : 'SDK 默认'
+      : '系统默认'
 
     return (
       <div className="flex min-h-0 flex-col gap-3">
@@ -108,7 +108,7 @@ export function AgentCreateWizard({
             <div className="rounded-md border px-3 py-2">
               <div className="text-[10px] text-muted-foreground">模型</div>
               <div className="mt-1 text-xs font-medium">
-                {providerLabel} / {draft.modelId ?? 'SDK 默认'}
+                {providerLabel} / {draft.modelId ?? '系统默认'}
               </div>
             </div>
             <div className="rounded-md border px-3 py-2">
@@ -140,7 +140,7 @@ export function AgentCreateWizard({
               </div>
             ) : (
               <div className="mt-2 text-[11px] text-muted-foreground">
-                SDK adapter 使用运行时内置工具集，不保存 AgentHub 自定义 toolNames。
+                这类运行方式使用系统内置工具集，不需要单独保存自定义工具名。
               </div>
             )}
           </section>
@@ -161,7 +161,7 @@ export function AgentCreateWizard({
           </section>
 
           <section className="rounded-md border px-3 py-2">
-            <div className="text-xs font-medium">System Prompt</div>
+            <div className="text-xs font-medium">系统提示词</div>
             <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[10px] leading-4 text-muted-foreground">
               {draft.systemPrompt}
             </pre>
@@ -205,7 +205,7 @@ export function AgentCreateWizard({
           <div className="flex items-start gap-2">
             <MessageSquareText className="mt-0.5 size-4 shrink-0 text-primary" />
             <div className="min-w-0">
-              <div className="text-sm font-medium">描述你想要的 Agent</div>
+              <div className="text-sm font-medium">描述你想要的智能体</div>
               <div className="mt-1 text-xs text-muted-foreground">
                 说明它负责什么、常见输入是什么、希望它交付什么结果。系统会生成一份可确认的配置草稿。
               </div>
@@ -217,7 +217,7 @@ export function AgentCreateWizard({
           <Textarea
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
-            placeholder="例：我想要一个能帮我审查本地代码、运行测试并指出风险的 Agent"
+            placeholder="例：我想要一个能帮我审查本地代码、运行测试并指出风险的智能体"
             className="min-h-[140px] text-sm"
           />
           <Textarea

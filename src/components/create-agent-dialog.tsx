@@ -70,7 +70,7 @@ const emptyCapabilityCatalog: CapabilityCatalog = {
   cliProfiles: [],
 }
 
-const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub custom agent。你的任务是理解用户目标，使用已启用的工具完成工作，并把结果清晰交付给用户。
+const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub 智能体。你的任务是理解用户目标，使用已启用的工具完成工作，并把结果清晰交付给用户。
 
 工作原则：
 1. 先判断需要什么上下文；只有在用户提到附件、已有产物或工作区文件时，才调用对应读取工具。
@@ -112,7 +112,7 @@ function modelProfileMatchesAgent(profile: ModelProfileRow, agent: AgentRow) {
 }
 
 /**
- * 创建 / 编辑 Agent 的对话框。
+ * 创建 / 编辑智能体的对话框。
  *
  * 传入 `agent` 进入编辑模式，未传则为创建模式。两种模式公用同一套字段、
  * 同一套校验，只是 submit 路径与文案不同。
@@ -383,8 +383,8 @@ export function CreateAgentDialog({
     }
     if (!trimmed) return fail('basic', '名称不能为空')
     if (!description.trim()) return fail('basic', '描述不能为空')
-    if (!systemPrompt.trim()) return fail('toolsPrompt', 'System Prompt 不能为空')
-    if (adapterKind === 'custom' && !modelId.trim()) return fail('model', '请先选择模型，或手动填写模型 ID')
+    if (!systemPrompt.trim()) return fail('toolsPrompt', '系统提示词不能为空')
+    if (adapterKind === 'custom' && !modelId.trim()) return fail('model', '请先选择模型')
     const trimmedApiBaseUrl = apiBaseUrl.trim()
     const trimmedApiKey = apiKey.trim()
     if (adapterKind === 'codex') {
@@ -458,18 +458,18 @@ export function CreateAgentDialog({
 
   const showDetailForm = isEdit || createStep === 'detail'
   const descriptionText = isEdit
-    ? '修改这个 Agent 的配置。保存后立即生效，已存在的会话也会用新配置回复。'
+    ? '修改这个智能体的配置。保存后立即生效，已存在的会话也会用新配置回复。'
     : createStep === 'choose'
       ? '选择创建方式。可以先用描述生成草稿，也可以直接进入完整配置。'
-      : createStep === 'wizard'
-        ? '通过描述生成一份可确认的 Agent 配置草稿。'
-        : '为这个 Agent 设定身份与能力。它会出现在新建对话的选择列表里。'
+    : createStep === 'wizard'
+        ? '通过描述生成一份可确认的智能体配置草稿。'
+        : '为这个智能体设定身份与能力。它会出现在新建对话的选择列表里。'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="grid max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{isEdit ? '编辑 Agent' : '创建 Agent'}</DialogTitle>
+          <DialogTitle>{isEdit ? '编辑智能体' : '创建智能体'}</DialogTitle>
           <DialogDescription>{descriptionText}</DialogDescription>
         </DialogHeader>
 
@@ -540,7 +540,7 @@ export function CreateAgentDialog({
                     <Input
                       value={capabilitiesText}
                       onChange={(e) => setCapabilitiesText(e.target.value)}
-                      placeholder="testing, react, vitest"
+                      placeholder="写代码，查资料，剪辑视频"
                     />
                     <div className="mt-1 text-[10px] text-muted-foreground">用逗号或空格分隔</div>
                   </div>
@@ -551,16 +551,11 @@ export function CreateAgentDialog({
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                   <Label required>模型</Label>
                   <div className="space-y-2">
-                    {compatibleModelProfiles.length > 0 ? (
+                    {compatibleModelProfiles.length > 0 && selectedModelProfileId !== MANUAL_MODEL_VALUE ? (
                       <select
-                        value={selectedModelProfile?.id ?? MANUAL_MODEL_VALUE}
+                        value={selectedModelProfile?.id ?? compatibleModelProfiles[0]?.id ?? ''}
                         onChange={(event) => {
                           const value = event.target.value
-                          if (value === MANUAL_MODEL_VALUE) {
-                            setSelectedModelProfileId(MANUAL_MODEL_VALUE)
-                            setAdapterKind('custom')
-                            return
-                          }
                           const profile = compatibleModelProfiles.find((item) => item.id === value)
                           if (profile) applyModelProfile(profile)
                         }}
@@ -571,8 +566,19 @@ export function CreateAgentDialog({
                             {profile.name} · {profile.model}
                           </option>
                         ))}
-                        <option value={MANUAL_MODEL_VALUE}>手动填写模型</option>
                       </select>
+                    ) : compatibleModelProfiles.length > 0 && selectedModelProfileId === MANUAL_MODEL_VALUE ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                        <span className="text-muted-foreground">当前使用临时手动模型。</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => applyModelProfile(compatibleModelProfiles[0])}
+                        >
+                          改用已配置模型
+                        </Button>
+                      </div>
                     ) : (
                       <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                         {modelProfilesLoading
@@ -596,15 +602,19 @@ export function CreateAgentDialog({
                           {selectedModelProfile.model}
                         </div>
                       </div>
+                    ) : selectedModelProfileId === MANUAL_MODEL_VALUE ? (
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                        当前智能体使用临时手动模型。建议到「模型管理」把它保存成正式模型，之后这里就可以直接勾选。
+                      </div>
                     ) : (
                       <div className="text-[10px] leading-4 text-muted-foreground">
-                        新 Agent 默认使用这里选中的模型。模型的 API Key、代理出口和连通性建议统一在左侧「模型管理」里维护。
+                        新智能体默认使用这里选中的模型。密钥、代理出口和连通性统一在左侧「模型管理」里维护。
                       </div>
                     )}
                   </div>
                 </div>
 
-                {!selectedModelProfile && (
+                {(!selectedModelProfile && compatibleModelProfiles.length === 0) || selectedModelProfileId === MANUAL_MODEL_VALUE ? (
                   <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                     <Label>手动模型</Label>
                     <div className="flex gap-2">
@@ -626,20 +636,37 @@ export function CreateAgentDialog({
                           setAdapterKind('custom')
                           setModelId(event.target.value)
                         }}
-                        placeholder="model id"
+                        placeholder="模型 ID"
                         className="flex-1 font-mono text-xs"
                       />
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 <details className="rounded-md border bg-muted/20 px-3 py-2">
                   <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                     高级覆盖
                   </summary>
                   <div className="mt-3 space-y-3">
+                    {compatibleModelProfiles.length > 0 && (
+                      <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                        <Label>临时模型</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => {
+                            setSelectedModelProfileId(MANUAL_MODEL_VALUE)
+                            setAdapterKind('custom')
+                          }}
+                        >
+                          手动填写一次
+                        </Button>
+                      </div>
+                    )}
                     <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                      <Label>Base URL</Label>
+                      <Label>接口地址</Label>
                       <div>
                         <Input
                           value={apiBaseUrl}
@@ -654,7 +681,7 @@ export function CreateAgentDialog({
                     </div>
 
                     <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                      <Label>API Key</Label>
+                      <Label>密钥</Label>
                       <div>
                         <div className="flex gap-2">
                           <Input
@@ -675,7 +702,7 @@ export function CreateAgentDialog({
                           </Button>
                         </div>
                         <div className="mt-1 text-[10px] text-muted-foreground">
-                          这里只适合给单个 Agent 临时覆盖密钥；常用密钥请放到「模型管理」或系统设置。
+                          这里只适合给单个智能体临时覆盖密钥；常用密钥请放到「模型管理」或系统设置。
                         </div>
                       </div>
                     </div>
@@ -695,7 +722,7 @@ export function CreateAgentDialog({
                           className="mt-0.5 accent-primary"
                         />
                         <div className="min-w-0">
-                          <div className="text-xs font-medium">允许这个 Agent 接收图片</div>
+                          <div className="text-xs font-medium">允许这个智能体接收图片</div>
                           <div className="mt-0.5 text-[10px] text-muted-foreground">
                             只有所选模型本身支持多模态时才会生效。
                           </div>
@@ -719,7 +746,7 @@ export function CreateAgentDialog({
                       <>
                         <CapabilityPickGroup
                           icon={<PackageCheck className="size-3.5" />}
-                          title="已安装 Skills"
+                          title="已安装技能"
                           emptyText="还没有已安装技能，可先去「技能中心」安装。"
                           items={capabilityCatalog.skills.map((skill) => ({
                             id: skill.id,
@@ -745,8 +772,8 @@ export function CreateAgentDialog({
                         />
                         <CapabilityPickGroup
                           icon={<Terminal className="size-3.5" />}
-                          title="CLI 命令"
-                          emptyText="还没有 CLI，可先去「工具连接」接入。"
+                          title="命令行工具"
+                          emptyText="还没有命令行工具，可先去「工具连接」接入。"
                           items={capabilityCatalog.cliProfiles.map((cli) => ({
                             id: cli.id,
                             title: cli.name,
@@ -762,7 +789,7 @@ export function CreateAgentDialog({
                 </div>
 
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-                  <Label required>System Prompt</Label>
+                  <Label required>系统提示词</Label>
                   <Textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
