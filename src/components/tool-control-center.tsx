@@ -3,6 +3,7 @@
 import {
   Activity,
   Blocks,
+  Bot,
   CheckCircle2,
   ChevronRight,
   Code2,
@@ -105,6 +106,7 @@ import {
   testToolConnection,
   type ProgrammaticApiKeyPublic,
 } from '@/lib/api'
+import { emitUiCommand } from '@/lib/ui-command-events'
 import { cn } from '@/lib/utils'
 
 const mcpTransports: McpTransport[] = ['stdio', 'sse', 'http']
@@ -146,6 +148,21 @@ const softwareStoreCategories = [
   '自动化脚本',
   '其他软件',
 ] as const
+
+const softwareUseSteps = [
+  {
+    title: '选择软件',
+    detail: '先选 Codex、微信、剪映、Chrome 这类实际要让智能体使用的软件。',
+  },
+  {
+    title: '检测接入',
+    detail: '确认它有没有 CLI、MCP 或已封装命令；没有就从右侧创建接入。',
+  },
+  {
+    title: '分配给智能体',
+    detail: '打开智能体设置，把这个软件能力加入员工工具包。',
+  },
+]
 
 type SoftwareStoreCategory = (typeof softwareStoreCategories)[number]
 type ConcreteSoftwareStoreCategory = Exclude<SoftwareStoreCategory, '全部'>
@@ -500,6 +517,56 @@ function getSoftwareStoreCapabilities(item: SoftwareStoreItem): string[] {
   if (item.softwareCommands.length > 0) capabilities.push('已有封装命令')
   if (item.mcpTools.length > 0) capabilities.push(`${item.mcpTools.length} 个 MCP 工具`)
   return Array.from(new Set(capabilities)).slice(0, 5)
+}
+
+function getSoftwareStoreAgentUseCopy(item: SoftwareStoreItem): string {
+  if (getStoreModeCount(item) === 0) {
+    return '还没有可分配给智能体的接入方式。先创建 CLI 或 MCP 接入，之后智能体设置里会直接出现这个软件能力。'
+  }
+  return '已经可以分配给智能体。创建或编辑智能体时，直接勾选这里的 CLI/MCP 能力，运行时系统会自动调用对应接入。'
+}
+
+function inferSoftwareAgentFit(item: SoftwareStoreItem): { role: string; action: string; route: string } {
+  if (item.category === '开发工具') {
+    return {
+      role: '写代码 Agent、代码审查 Agent、测试 Agent',
+      action: '修改代码、检查仓库、运行命令、提交交付结果。',
+      route: item.cliProfiles.length > 0 ? '优先走 CLI，适合终端交付。' : '先创建 CLI 接入，再分配给代码类 Agent。',
+    }
+  }
+  if (item.category === '办公协作') {
+    return {
+      role: '运营 Agent、客户沟通 Agent、项目助理 Agent',
+      action: '整理沟通内容、生成草稿、同步通知和处理协作资料。',
+      route: item.mcpServers.length > 0 ? '优先走 MCP，适合结构化消息和资料调用。' : '可以先创建 CLI 或 MCP 接入，再给协作类 Agent 使用。',
+    }
+  }
+  if (item.category === '浏览器网页') {
+    return {
+      role: '研究 Agent、浏览器操作 Agent、资料收集 Agent',
+      action: '访问网页、读取页面、检索信息、整理来源。',
+      route: item.mcpServers.length > 0 ? '优先走 MCP 工具；需要登录态页面时走浏览器/桌面能力。' : '先注册浏览器或网页类接入。',
+    }
+  }
+  if (item.category === '视频创作') {
+    return {
+      role: '视频制作 Agent、剪辑 Agent、交付检查 Agent',
+      action: '整理素材、生成剪辑动作、检查导出文件和交付状态。',
+      route: item.softwareCommands.length > 0 ? '优先走封装命令，复杂操作可以继续录制成命令。' : '先创建软件配置，再把常用动作封装成命令。',
+    }
+  }
+  if (item.category === '数据文件') {
+    return {
+      role: '数据分析 Agent、报表 Agent、文件整理 Agent',
+      action: '读取文件、清洗表格、生成报表和打包交付物。',
+      route: item.cliProfiles.length > 0 || item.mcpServers.length > 0 ? '可直接分配给数据类 Agent。' : '先接入文件或表格能力。',
+    }
+  }
+  return {
+    role: '通用执行 Agent、自动化 Agent',
+    action: '把重复操作变成智能体可调用的能力。',
+    route: getStoreModeCount(item) > 0 ? '可直接进入智能体工具包。' : '先创建 CLI、MCP 或软件配置。',
+  }
 }
 
 function formatCliModeMeta(profile: CliProfileRow): string {
@@ -1082,7 +1149,7 @@ export function ToolControlCenter() {
                 <h2 className="text-lg font-semibold">软件能力商店</h2>
               </div>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                按软件选择能力。每个软件只展示它已经接入的 CLI 或 MCP 模式。
+                像软件商店一样选择能力。点一个软件，就能看到它有什么 CLI、MCP、命令，以及怎么给智能体使用。
               </p>
             </div>
             <div className="flex gap-2">
@@ -1111,7 +1178,7 @@ export function ToolControlCenter() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto p-5">
-          <div className="mx-auto grid max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="mx-auto grid max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
             <section className="min-w-0 space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <SoftwareStoreStat label="已接入软件" value={connectedSoftwareCount} />
@@ -1147,6 +1214,8 @@ export function ToolControlCenter() {
                 </div>
               </div>
 
+              <SoftwareStoreUsePath selectedItem={selectedStoreItem} />
+
               {visibleSoftwareStoreItems.length === 0 ? (
                 <EmptyState label="没有匹配的软件" />
               ) : (
@@ -1173,7 +1242,11 @@ export function ToolControlCenter() {
             <aside className="min-w-0 xl:sticky xl:top-5 xl:self-start">
               <div className="rounded-lg border bg-background shadow-sm">
                 {selectedStoreItem ? (
-                  <div className="p-4" data-testid="software-store-detail">
+                  <div
+                    className="p-4"
+                    data-selected-mode={selectedStoreDetailMode}
+                    data-testid="software-store-detail"
+                  >
                     <div className="flex items-start gap-3">
                       <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                         {renderSoftwareStoreIcon(selectedStoreItem.icon, 'size-5')}
@@ -1206,13 +1279,29 @@ export function ToolControlCenter() {
                       </div>
                     </section>
 
+                    <SoftwareStoreUseGuide item={selectedStoreItem} />
+
+                    <SoftwareStoreAssignmentPlan item={selectedStoreItem} />
+
+                    <StoreAgentUsePanel
+                      item={selectedStoreItem}
+                      onOpenCli={() => setSelectedStoreDetailMode('cli')}
+                      onOpenMcp={() => setSelectedStoreDetailMode('mcp')}
+                      onAssignToAgent={() => emitUiCommand('open-agent-settings')}
+                      onCreateCli={() => openAdvancedForCli(selectedStoreItem)}
+                      onCreateMcp={() => openAdvancedForMcp(selectedStoreItem)}
+                      onCreateSoftware={() => openAdvancedForSoftware(selectedStoreItem)}
+                    />
+
                     <div className="mt-4 grid grid-cols-3 gap-2">
                       <SoftwareStoreMiniStat label="CLI" value={selectedStoreItem.cliProfiles.length} />
                       <SoftwareStoreMiniStat label="MCP" value={selectedStoreItem.mcpServers.length} />
                       <SoftwareStoreMiniStat label="命令" value={selectedStoreItem.softwareCommands.length} />
                     </div>
 
-                    <div className="mt-4 grid grid-cols-4 gap-1 rounded-lg border bg-muted/20 p-1">
+                    <div className="mt-4">
+                      <div className="mb-2 text-xs font-medium text-muted-foreground">查看接入方式</div>
+                      <div className="grid grid-cols-4 gap-1 rounded-lg border bg-muted/20 p-1">
                       <StoreDetailModeButton
                         label="概览"
                         active={selectedStoreDetailMode === 'overview'}
@@ -1233,6 +1322,7 @@ export function ToolControlCenter() {
                         active={selectedStoreDetailMode === 'commands'}
                         onClick={() => setSelectedStoreDetailMode('commands')}
                       />
+                      </div>
                     </div>
 
                     <div className="mt-4 space-y-3">
@@ -2604,6 +2694,39 @@ function SoftwareStoreMiniStat({ label, value }: { label: string; value: number 
   )
 }
 
+function SoftwareStoreUsePath({ selectedItem }: { selectedItem: SoftwareStoreItem | null }) {
+  const canAssign = selectedItem ? getStoreModeCount(selectedItem) > 0 || selectedItem.softwareCommands.length > 0 : false
+  return (
+    <section
+      data-testid="software-store-use-path"
+      className="rounded-lg border bg-background p-3 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">软件怎么变成智能体能力</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            当前选中：{selectedItem?.name ?? '先选择一个软件'} · {canAssign ? '已可分配' : '需要先接入'}
+          </div>
+        </div>
+        <Badge variant={canAssign ? 'default' : 'outline'}>{canAssign ? '可分配' : '待接入'}</Badge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {softwareUseSteps.map((step, index) => (
+          <div key={step.title} className="rounded-md border bg-muted/10 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs font-semibold">
+              <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                {index + 1}
+              </span>
+              <span>{step.title}</span>
+            </div>
+            <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{step.detail}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function SoftwareStoreCard({
   item,
   selected,
@@ -2627,6 +2750,7 @@ function SoftwareStoreCard({
       }}
       role="button"
       tabIndex={0}
+      data-selected={selected ? 'true' : 'false'}
       data-testid={`software-store-card-${item.key}`}
       className={cn(
         'group min-h-40 cursor-pointer rounded-lg border bg-background p-4 text-left shadow-sm outline-none transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/40',
@@ -2655,37 +2779,48 @@ function SoftwareStoreCard({
         )}
         {item.mcpTools.length > 0 && <Badge variant="outline">{item.mcpTools.length} 个工具</Badge>}
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <StoreCardModeButton
-          label="CLI"
-          count={item.cliProfiles.length}
-          active={item.cliProfiles.length > 0}
-          testId={`software-store-card-${item.key}-cli`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenMode('cli')
-          }}
-        />
-        <StoreCardModeButton
-          label="MCP"
-          count={item.mcpServers.length}
-          active={item.mcpServers.length > 0}
-          testId={`software-store-card-${item.key}-mcp`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenMode('mcp')
-          }}
-        />
-        <StoreCardModeButton
-          label="命令"
-          count={item.softwareCommands.length}
-          active={item.softwareCommands.length > 0}
-          testId={`software-store-card-${item.key}-commands`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenMode('commands')
-          }}
-        />
+      <div className="mt-3">
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground">接入方式</div>
+        <div className="flex flex-wrap gap-2">
+          {item.cliProfiles.length > 0 && (
+            <StoreCardModeButton
+              label="CLI"
+              count={item.cliProfiles.length}
+              testId={`software-store-card-${item.key}-cli`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenMode('cli')
+              }}
+            />
+          )}
+          {item.mcpServers.length > 0 && (
+            <StoreCardModeButton
+              label="MCP"
+              count={item.mcpServers.length}
+              testId={`software-store-card-${item.key}-mcp`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenMode('mcp')
+              }}
+            />
+          )}
+          {item.softwareCommands.length > 0 && (
+            <StoreCardModeButton
+              label="命令"
+              count={item.softwareCommands.length}
+              testId={`software-store-card-${item.key}-commands`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenMode('commands')
+              }}
+            />
+          )}
+          {modeCount === 0 && item.softwareCommands.length === 0 && (
+            <span className="rounded-md border border-dashed bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground">
+              未接入，点击查看
+            </span>
+          )}
+        </div>
       </div>
     </article>
   )
@@ -2694,13 +2829,11 @@ function SoftwareStoreCard({
 function StoreCardModeButton({
   label,
   count,
-  active,
   onClick,
   testId,
 }: {
   label: string
   count: number
-  active: boolean
   onClick: MouseEventHandler<HTMLButtonElement>
   testId: string
 }) {
@@ -2708,18 +2841,178 @@ function StoreCardModeButton({
     <button
       type="button"
       data-testid={testId}
-      className={cn(
-        'flex h-8 items-center justify-center gap-1 rounded-md border text-xs transition',
-        active
-          ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
-          : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40',
-      )}
+      className="flex h-8 items-center justify-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-xs text-primary transition hover:bg-primary/15"
       onClick={onClick}
       title={`查看 ${label} 接入`}
     >
       <span>{label}</span>
       <span className="font-mono">{count}</span>
     </button>
+  )
+}
+
+function SoftwareStoreUseGuide({ item }: { item: SoftwareStoreItem }) {
+  const hasCli = item.cliProfiles.length > 0
+  const hasMcp = item.mcpServers.length > 0
+  const hasCommands = item.softwareCommands.length > 0
+  const canAssign = hasCli || hasMcp || hasCommands
+
+  return (
+    <section
+      data-testid="software-store-use-guide"
+      className="mt-4 rounded-lg border bg-muted/10 p-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">软件详情</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            这里把一个软件拆成智能体能理解的能力：CLI 负责命令行执行，MCP 负责结构化工具调用，封装命令负责把复杂操作变成一个可选择动作。
+          </p>
+        </div>
+        <Badge variant={canAssign ? 'default' : 'outline'}>
+          {canAssign ? '可分配给智能体' : '等待接入'}
+        </Badge>
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <SoftwareUseGuideRow
+          icon={<Terminal className="size-4" />}
+          title="CLI 模式"
+          value={hasCli ? `${item.cliProfiles.length} 个 CLI` : '未接入'}
+          detail={hasCli ? '适合 Codex CLI、Claude Code、本地脚本和桌面软件命令。' : '创建 CLI 后，智能体可以像调用命令一样使用这个软件。'}
+        />
+        <SoftwareUseGuideRow
+          icon={<Plug className="size-4" />}
+          title="MCP 模式"
+          value={hasMcp ? `${item.mcpServers.length} 个 MCP` : '未接入'}
+          detail={hasMcp ? '适合文件、数据库、浏览器、GitHub 等稳定工具连接。' : '注册 MCP 后，智能体可以看到结构化工具和参数。'}
+        />
+        <SoftwareUseGuideRow
+          icon={<Cpu className="size-4" />}
+          title="封装命令"
+          value={hasCommands ? `${item.softwareCommands.length} 个命令` : '暂无命令'}
+          detail={hasCommands ? '复杂操作已经包装成智能体可直接选择的动作。' : '后续可以把软件操作录制或封装成可复用命令。'}
+        />
+      </div>
+    </section>
+  )
+}
+
+function SoftwareStoreAssignmentPlan({ item }: { item: SoftwareStoreItem }) {
+  const fit = inferSoftwareAgentFit(item)
+  const canAssign = getStoreModeCount(item) > 0 || item.softwareCommands.length > 0
+  return (
+    <section
+      data-testid="software-store-assignment-plan"
+      className="mt-4 rounded-lg border bg-primary/5 p-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">分配建议</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            系统按软件类型判断这个能力更适合交给哪类智能体，用户不需要理解底层适配器。
+          </p>
+        </div>
+        <Badge variant={canAssign ? 'default' : 'outline'}>{canAssign ? '可加入工具包' : '先接入'}</Badge>
+      </div>
+      <div className="mt-3 grid gap-2">
+        <SoftwareAssignmentRow label="适合智能体" value={fit.role} />
+        <SoftwareAssignmentRow label="能做什么" value={fit.action} />
+        <SoftwareAssignmentRow label="接入路线" value={fit.route} />
+      </div>
+    </section>
+  )
+}
+
+function SoftwareAssignmentRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 rounded-md border bg-background px-3 py-2 sm:grid-cols-[5rem_minmax(0,1fr)]">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-xs leading-5 text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function SoftwareUseGuideRow({
+  icon,
+  title,
+  value,
+  detail,
+}: {
+  icon: ReactNode
+  title: string
+  value: string
+  detail: string
+}) {
+  return (
+    <div className="grid gap-2 rounded-md border bg-background px-3 py-2 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
+      <div className="flex items-center gap-2 text-xs font-semibold">
+        <span className="text-primary">{icon}</span>
+        {title}
+      </div>
+      <div className="min-w-0 text-xs text-muted-foreground">{detail}</div>
+      <div className="w-fit rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">{value}</div>
+    </div>
+  )
+}
+
+function StoreAgentUsePanel({
+  item,
+  onOpenCli,
+  onOpenMcp,
+  onAssignToAgent,
+  onCreateCli,
+  onCreateMcp,
+  onCreateSoftware,
+}: {
+  item: SoftwareStoreItem
+  onOpenCli: () => void
+  onOpenMcp: () => void
+  onAssignToAgent: () => void
+  onCreateCli: () => void
+  onCreateMcp: () => void
+  onCreateSoftware: () => void
+}) {
+  const hasCli = item.cliProfiles.length > 0
+  const hasMcp = item.mcpServers.length > 0
+  const hasSoftwareProfile = item.softwareProfiles.length > 0
+
+  return (
+    <section className="mt-4 rounded-lg border bg-background p-3">
+      <div className="flex items-start gap-2">
+        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold">给智能体使用</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{getSoftwareStoreAgentUseCopy(item)}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <Button
+          data-testid="assign-software-to-agent"
+          className="justify-start gap-2 sm:col-span-2"
+          onClick={onAssignToAgent}
+        >
+          <Bot className="size-4" />
+          打开智能体设置并分配
+        </Button>
+        <Button variant={hasCli ? 'default' : 'outline'} className="justify-start gap-2" onClick={hasCli ? onOpenCli : onCreateCli}>
+          <Terminal className="size-4" />
+          {hasCli ? `查看 CLI（${item.cliProfiles.length}）` : '创建 CLI 接入'}
+        </Button>
+        <Button variant={hasMcp ? 'default' : 'outline'} className="justify-start gap-2" onClick={hasMcp ? onOpenMcp : onCreateMcp}>
+          <Plug className="size-4" />
+          {hasMcp ? `查看 MCP（${item.mcpServers.length}）` : '注册 MCP 接入'}
+        </Button>
+      </div>
+      <Button
+        variant="ghost"
+        className="mt-2 h-8 w-full justify-start gap-2 text-muted-foreground"
+        onClick={onCreateSoftware}
+      >
+        <Package className="size-4" />
+        {hasSoftwareProfile ? '查看软件配置和封装命令' : '创建软件配置，后续可继续封装命令'}
+      </Button>
+    </section>
   )
 }
 

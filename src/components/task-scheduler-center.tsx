@@ -53,13 +53,13 @@ export function TaskSchedulerCenter() {
   const [schedules, setSchedules] = useState<TaskScheduleRow[]>([])
   const [continuationPlans, setContinuationPlans] = useState<ContinuationPlanRow[]>([])
   const [selectedQueueId, setSelectedQueueId] = useState('')
-  const [queueName, setQueueName] = useState('Agent employee queue')
+  const [queueName, setQueueName] = useState('智能体员工队列')
   const [concurrencyLimit, setConcurrencyLimit] = useState('1')
   const [maxItems, setMaxItems] = useState('1')
   const [scanLimit, setScanLimit] = useState('25')
   const [priority, setPriority] = useState('5')
   const [budgetLimitCents, setBudgetLimitCents] = useState('20')
-  const [scheduleName, setScheduleName] = useState('Run employee queue tick')
+  const [scheduleName, setScheduleName] = useState('定时执行员工队列')
   const [scheduleKind, setScheduleKind] = useState<TaskScheduleKind>('task_queue_tick')
   const [intervalSeconds, setIntervalSeconds] = useState('60')
   const [nextDelaySeconds, setNextDelaySeconds] = useState('0')
@@ -136,7 +136,7 @@ export function TaskSchedulerCenter() {
         name: queueName,
         concurrencyLimit: parsePositiveInt(concurrencyLimit, 1),
       })
-      setNotice('Queue created')
+      setNotice('已创建任务队列')
       setSelectedQueueId(queue.id)
       setQueues((current) => [queue, ...current])
       await reloadQueueDetails(queue.id)
@@ -160,7 +160,7 @@ export function TaskSchedulerCenter() {
         budgetLimitCents: parseNullableInteger(budgetLimitCents),
       })
       setNotice(
-        `Tick completed: ${result.processed.completed} complete, ${result.processed.failed} failed`,
+        `队列执行完成：${result.processed.completed} 个完成，${result.processed.failed} 个失败`,
       )
       await reload()
     } catch (err) {
@@ -182,7 +182,7 @@ export function TaskSchedulerCenter() {
         priority: parseInteger(priority, 0),
         budgetLimitCents: parseNullableInteger(budgetLimitCents),
       })
-      setNotice(`Queued ${result.queued} due continuation plan(s)`)
+      setNotice(`已加入 ${result.queued} 个到期任务`)
       await reload()
     } catch (err) {
       setError(formatError(err))
@@ -198,7 +198,7 @@ export function TaskSchedulerCenter() {
     setNotice(null)
     try {
       const result = await processTaskQueue(selectedQueueId, parsePositiveInt(maxItems, 1))
-      setNotice(`Processed ${result.started} item(s)`)
+      setNotice(`已开始处理 ${result.started} 个任务`)
       await reload()
     } catch (err) {
       setError(formatError(err))
@@ -226,7 +226,7 @@ export function TaskSchedulerCenter() {
           budgetLimitCents,
         }),
       })
-      setNotice('Schedule created')
+      setNotice('已创建定时规则')
       setSchedules((current) => [schedule, ...current])
       await reloadQueueDetails(selectedQueueId)
     } catch (err) {
@@ -242,7 +242,7 @@ export function TaskSchedulerCenter() {
     setNotice(null)
     try {
       const result = await runDueTaskSchedules({ limit: 25 })
-      setNotice(`Due runner: ${result.ran} ran, ${result.failed} failed`)
+      setNotice(`到期任务执行：${result.ran} 个已运行，${result.failed} 个失败`)
       await reload()
     } catch (err) {
       setError(formatError(err))
@@ -264,13 +264,16 @@ export function TaskSchedulerCenter() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Clock3 className="size-4" />
-              <span className="truncate">Task Scheduler</span>
+              <span className="truncate">自动任务</span>
             </div>
-            <div className="mt-1 grid grid-cols-4 gap-1 text-[10px] text-muted-foreground">
-              <Metric label="queues" value={queues.length} />
-              <Metric label="items" value={queueItems.length} />
-              <Metric label="schedules" value={schedules.length} />
-              <Metric label="due" value={dueContinuationCount} />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              用来让智能体按时间自动处理队列任务。普通使用只看规则和任务，高级参数已经收在下面。
+            </p>
+            <div className="mt-2 grid grid-cols-4 gap-1 text-[10px] text-muted-foreground">
+              <Metric label="队列" value={queues.length} />
+              <Metric label="任务" value={queueItems.length} />
+              <Metric label="规则" value={schedules.length} />
+              <Metric label="到期" value={dueContinuationCount} />
             </div>
           </div>
           <Button size="icon" variant="ghost" onClick={() => void reload()} disabled={loading}>
@@ -294,17 +297,17 @@ export function TaskSchedulerCenter() {
       <div className="grid min-h-0 flex-1 grid-cols-[17rem_1fr]">
         <ScrollArea className="min-h-0 border-r">
           <div className="space-y-3 p-3">
-            <Section title="Queue">
+            <Section title="新建任务队列">
               <Input
                 value={queueName}
                 onChange={(event) => setQueueName(event.target.value)}
-                placeholder="Queue name"
+                placeholder="队列名称"
               />
               <Input
                 value={concurrencyLimit}
                 onChange={(event) => setConcurrencyLimit(event.target.value)}
                 inputMode="numeric"
-                placeholder="Concurrency"
+                placeholder="同时运行数量"
               />
               <Button
                 className="h-8 w-full gap-1"
@@ -316,14 +319,14 @@ export function TaskSchedulerCenter() {
                 ) : (
                   <Plus className="size-3.5" />
                 )}
-                Create Queue
+                新建队列
               </Button>
             </Section>
 
-            <Section title="Queues">
+            <Section title="任务队列">
               <div className="space-y-1">
                 {queues.length === 0 ? (
-                  <EmptyState label="No queues" />
+                  <EmptyState label="还没有任务队列" />
                 ) : (
                   queues.map((queue) => (
                     <button
@@ -340,11 +343,11 @@ export function TaskSchedulerCenter() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate font-medium">{queue.name}</span>
                         <Badge variant={queue.status === 'active' ? 'secondary' : 'outline'}>
-                          {queue.status}
+                          {statusLabel(queue.status)}
                         </Badge>
                       </div>
                       <div className="mt-1 text-[10px] text-muted-foreground">
-                        c{queue.concurrencyLimit} · {queue.id}
+                        同时运行 {queue.concurrencyLimit} 个 · {queue.id}
                       </div>
                     </button>
                   ))
@@ -359,13 +362,13 @@ export function TaskSchedulerCenter() {
             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">
-                  {selectedQueue?.name ?? 'No queue selected'}
+                  {selectedQueue?.name ?? '请选择一个任务队列'}
                 </div>
                 <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
-                  <Pill label="queued" value={itemCounts.get('queued') ?? 0} />
-                  <Pill label="running" value={itemCounts.get('running') ?? 0} />
-                  <Pill label="complete" value={itemCounts.get('complete') ?? 0} />
-                  <Pill label="failed" value={itemCounts.get('failed') ?? 0} />
+                  <Pill label="排队" value={itemCounts.get('queued') ?? 0} />
+                  <Pill label="运行中" value={itemCounts.get('running') ?? 0} />
+                  <Pill label="已完成" value={itemCounts.get('complete') ?? 0} />
+                  <Pill label="失败" value={itemCounts.get('failed') ?? 0} />
                 </div>
               </div>
               <Button
@@ -380,34 +383,34 @@ export function TaskSchedulerCenter() {
                 ) : (
                   <CalendarClock className="size-3.5" />
                 )}
-                Run Due
+                立即运行到期任务
               </Button>
             </div>
 
-            <Section title="Controls">
+            <Section title="快速操作">
               <div className="grid grid-cols-4 gap-2">
-                <LabeledInput label="max" value={maxItems} onChange={setMaxItems} />
-                <LabeledInput label="scan" value={scanLimit} onChange={setScanLimit} />
-                <LabeledInput label="priority" value={priority} onChange={setPriority} />
-                <LabeledInput label="budget" value={budgetLimitCents} onChange={setBudgetLimitCents} />
+                <LabeledInput label="本次最多" value={maxItems} onChange={setMaxItems} />
+                <LabeledInput label="扫描数量" value={scanLimit} onChange={setScanLimit} />
+                <LabeledInput label="优先级" value={priority} onChange={setPriority} />
+                <LabeledInput label="预算分" value={budgetLimitCents} onChange={setBudgetLimitCents} />
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <ActionButton
-                  label="Tick"
+                  label="执行一次"
                   icon={<Play className="size-3.5" />}
                   loading={saving === 'run_tick'}
                   disabled={!selectedQueueId || saving !== null}
                   onClick={() => void runSelectedQueueTick()}
                 />
                 <ActionButton
-                  label="Enqueue Due"
+                  label="加入到期任务"
                   icon={<TimerReset className="size-3.5" />}
                   loading={saving === 'enqueue_due'}
                   disabled={!selectedQueueId || saving !== null}
                   onClick={() => void enqueueDueContinuations()}
                 />
                 <ActionButton
-                  label="Process"
+                  label="处理队列"
                   icon={<CheckCircle2 className="size-3.5" />}
                   loading={saving === 'process_queue'}
                   disabled={!selectedQueueId || saving !== null}
@@ -416,25 +419,25 @@ export function TaskSchedulerCenter() {
               </div>
             </Section>
 
-            <Section title="Create Schedule">
+            <Section title="新建定时规则">
               <div className="grid grid-cols-[1fr_9rem] gap-2">
                 <Input
                   value={scheduleName}
                   onChange={(event) => setScheduleName(event.target.value)}
-                  placeholder="Schedule name"
+                  placeholder="规则名称"
                 />
                 <select
                   value={scheduleKind}
                   onChange={(event) => setScheduleKind(event.target.value as TaskScheduleKind)}
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring"
                 >
-                  <option value="task_queue_tick">tick</option>
-                  <option value="enqueue_due_continuations">scan only</option>
+                  <option value="task_queue_tick">执行队列</option>
+                  <option value="enqueue_due_continuations">只扫描到期任务</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <LabeledInput label="interval sec" value={intervalSeconds} onChange={setIntervalSeconds} />
-                <LabeledInput label="delay sec" value={nextDelaySeconds} onChange={setNextDelaySeconds} />
+                <LabeledInput label="间隔秒" value={intervalSeconds} onChange={setIntervalSeconds} />
+                <LabeledInput label="延迟秒" value={nextDelaySeconds} onChange={setNextDelaySeconds} />
               </div>
               <Button
                 className="h-8 w-full gap-1"
@@ -446,39 +449,39 @@ export function TaskSchedulerCenter() {
                 ) : (
                   <CalendarClock className="size-3.5" />
                 )}
-                Add Schedule
+                添加定时规则
               </Button>
             </Section>
 
-            <Section title="Schedules">
+            <Section title="定时规则">
               <div className="space-y-2">
                 {schedules.length === 0 ? (
-                  <EmptyState label="No schedules" />
+                  <EmptyState label="还没有定时规则" />
                 ) : (
                   schedules.map((schedule) => (
                     <RuntimeRow
                       key={schedule.id}
                       title={schedule.name}
-                      subtitle={`${schedule.kind} · every ${Math.round(schedule.intervalMs / 1000)}s`}
-                      badge={schedule.status}
-                      meta={`next ${formatTime(schedule.nextRunAt)} · last ${formatTime(schedule.lastRunAt)}`}
+                      subtitle={`${scheduleKindLabel(schedule.kind)} · 每 ${Math.round(schedule.intervalMs / 1000)} 秒`}
+                      badge={statusLabel(schedule.status)}
+                      meta={`下次 ${formatTime(schedule.nextRunAt)} · 上次 ${formatTime(schedule.lastRunAt)}`}
                     />
                   ))
                 )}
               </div>
             </Section>
 
-            <Section title="Queue Items">
+            <Section title="队列任务">
               <div className="space-y-2">
                 {queueItems.length === 0 ? (
-                  <EmptyState label="No queue items" />
+                  <EmptyState label="当前队列还没有任务" />
                 ) : (
                   queueItems.slice(0, 30).map((item) => (
                     <RuntimeRow
                       key={item.id}
                       title={item.kind}
                       subtitle={`${item.id} · p${item.priority}`}
-                      badge={item.status}
+                      badge={statusLabel(item.status)}
                       meta={item.error ?? summarizePayload(item.result ?? item.payload)}
                     />
                   ))
@@ -645,7 +648,7 @@ function parseNullableInteger(value: string): number | null {
 }
 
 function formatTime(value: number | null): string {
-  if (!value) return 'never'
+  if (!value) return '从未'
   return new Date(value).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
@@ -653,16 +656,42 @@ function formatTime(value: number | null): string {
   })
 }
 
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    active: '启用中',
+    paused: '已暂停',
+    queued: '排队中',
+    running: '运行中',
+    complete: '已完成',
+    completed: '已完成',
+    failed: '失败',
+    canceled: '已取消',
+    cancelled: '已取消',
+  }
+  return map[status] ?? status
+}
+
+function scheduleKindLabel(kind: TaskScheduleKind): string {
+  if (kind === 'enqueue_due_continuations') return '扫描到期任务'
+  return '执行队列'
+}
+
 function summarizePayload(value: JsonObject | null): string {
-  if (!value) return 'no payload'
+  if (!value) return '无参数'
   const text = JSON.stringify(value)
   return text.length > 180 ? `${text.slice(0, 177)}...` : text
 }
 
 function badgeTone(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'complete' || status === 'active') return 'secondary'
-  if (status === 'failed' || status === 'canceled') return 'destructive'
-  if (status === 'running' || status === 'queued') return 'default'
+  if (status === 'complete' || status === 'active' || status === '已完成' || status === '启用中') {
+    return 'secondary'
+  }
+  if (status === 'failed' || status === 'canceled' || status === '失败' || status === '已取消') {
+    return 'destructive'
+  }
+  if (status === 'running' || status === 'queued' || status === '运行中' || status === '排队中') {
+    return 'default'
+  }
   return 'outline'
 }
 

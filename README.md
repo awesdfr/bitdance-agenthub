@@ -21,7 +21,19 @@ Instead of treating every agent run as an isolated terminal transcript, AgentHub
     <img src="docs/images/agenthub-preview.png" alt="AgentHub multi-agent collaboration and artifact preview" width="100%" />
 </p>
 
-> Current status: active local development. The app is usable as a web app and Electron desktop app; the mobile companion app is under development.
+> Current status: desktop-first. The web app and Electron desktop app are runnable. Phone control, virtual workstations, VM/RDP desktop isolation, and full mobile automation are intentionally out of scope for the current public build.
+
+## Current Desktop Capability Snapshot
+
+- **Desktop workbench**: users can type a goal directly and let the system check models, agents, Skills, CLI access, tool connections, and desktop safety before starting.
+- **Unified agent settings**: the old agent factory flow is folded into the agent screen. Each agent can be configured with a model, Skills, MCP tools, CLI profiles, software abilities, memory, context, permissions, and required deliverables.
+- **Workflow canvas**: supports ComfyUI-style panning, zooming, node creation, connection, run status, node deliverables, and customer-visible artifact hints.
+- **Model management**: supports model add/delete, connection checks, network outlet/proxy routing, and DeepSeek/OpenAI-compatible model profiles.
+- **Skills center**: SkillsMP is accessed through an internal CLI/API flow instead of a fragile iframe, with search, install, publish, and assign-to-agent affordances.
+- **Tool connection store**: CLI, MCP, and software abilities are grouped by software, so users choose a software capability first and then see whether CLI, MCP, or packaged commands are available.
+- **Run scene monitor**: shows a human-readable live overview, task queue, task detail, recent events, and whether the user needs to intervene.
+- **Delivery center**: organizes agent output as customer-visible deliverables with readability, preview, version history, and package-for-delivery status.
+- **Cost analytics**: shows actual spend, uncached estimates, cache savings, average request cost, and the model that needs optimization.
 
 ## Contents
 

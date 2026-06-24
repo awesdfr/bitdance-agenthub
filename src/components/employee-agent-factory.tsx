@@ -25,6 +25,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type ReactNode,
@@ -134,6 +135,7 @@ import {
 import { cn } from '@/lib/utils'
 
 type FactoryTab = 'control' | 'agent' | 'run'
+type FactoryFocusSection = 'capabilities'
 
 interface EmployeeAgentFactoryProps {
   initialAgentProfileId?: string
@@ -141,6 +143,7 @@ interface EmployeeAgentFactoryProps {
   initialAgentDescription?: string
   embedded?: boolean
   initialTab?: FactoryTab
+  initialFocusSection?: FactoryFocusSection
   title?: string
   subtitle?: string
 }
@@ -208,6 +211,42 @@ const AGENT_PERSONALITIES: AgentPersonality[] = [
   'custom',
 ]
 const RISK_POSTURES: AgentRiskPosture[] = ['bold', 'balanced', 'conservative']
+const PERSONA_TONE_LABELS: Record<AgentPersonaTone, string> = {
+  formal: '正式稳重',
+  casual: '轻松自然',
+  technical: '技术专家',
+  friendly: '友好协作',
+  concise: '简洁直接',
+  detailed: '详细耐心',
+}
+const PERSONALITY_LABELS: Record<AgentPersonality, string> = {
+  creative: '创意型',
+  cautious: '谨慎型',
+  user_advocate: '用户视角',
+  security: '安全优先',
+  performance: '效率优先',
+  operator: '执行型',
+  custom: '自定义',
+}
+const RISK_POSTURE_LABELS: Record<AgentRiskPosture, string> = {
+  bold: '大胆执行',
+  balanced: '平衡',
+  conservative: '保守',
+}
+const WORKSTATION_MODE_LABELS: Record<WorkstationMode, string> = {
+  browser_context: '独立浏览器',
+  physical_desktop: '当前电脑桌面',
+  virtual_desktop: '虚拟桌面',
+  vm: '虚拟机',
+  remote_session: '远程会话',
+}
+const AUTONOMY_LABELS: Record<string, string> = {
+  observe_only: '只观察',
+  propose_only: '只给建议',
+  execute_with_approval: '执行前确认',
+  execute_low_risk: '低风险自动执行',
+  fully_autonomous: '完全自主',
+}
 const ONBOARDING_WORK_TYPES: OnboardingWorkType[] = [
   'coding',
   'documentation',
@@ -669,6 +708,7 @@ export function EmployeeAgentFactory({
   initialAgentDescription,
   embedded = false,
   initialTab = embedded ? 'agent' : 'control',
+  initialFocusSection,
   title,
   subtitle,
 }: EmployeeAgentFactoryProps = {}) {
@@ -1290,11 +1330,11 @@ export function EmployeeAgentFactory({
               <span className="truncate">{title ?? (embedded ? '智能体设置' : '智能体配置中心')}</span>
             </div>
             {subtitle && <p className="mt-1 truncate text-xs text-muted-foreground">{subtitle}</p>}
-            <div className="mt-1 grid grid-cols-5 gap-1 text-[10px] text-muted-foreground">
-              <Metric label="模型" value={data.models.length} />
-              <Metric label="配置" value={data.agentProfiles.length} />
-              <Metric label="cli" value={data.cliProfiles.length} />
-              <Metric label="风格" value={data.styleGuides.length} />
+            <div className={cn('mt-2 grid gap-1 text-[10px] text-muted-foreground', embedded ? 'grid-cols-4' : 'grid-cols-5')}>
+              <Metric label="可选模型" value={data.models.length} />
+              <Metric label="智能体" value={data.agentProfiles.length} />
+              <Metric label="命令" value={data.cliProfiles.length} />
+              {!embedded && <Metric label="规范" value={data.styleGuides.length} />}
               <Metric label="运行" value={data.employeeRuns.length} />
             </div>
           </div>
@@ -1410,6 +1450,7 @@ export function EmployeeAgentFactory({
                   onRunInterview={runInterview}
                   onRunPerformanceReview={runPerformanceReview}
                   embedded={embedded}
+                  focusCapabilities={initialFocusSection === 'capabilities'}
                 />
               </TabsContent>
 
@@ -2284,6 +2325,7 @@ function AgentProfileForm({
   onRunInterview,
   onRunPerformanceReview,
   embedded = false,
+  focusCapabilities = false,
 }: {
   data: FactoryData
   draft: AgentDraft
@@ -2300,6 +2342,7 @@ function AgentProfileForm({
   onRunInterview: () => Promise<void>
   onRunPerformanceReview: () => Promise<void>
   embedded?: boolean
+  focusCapabilities?: boolean
 }) {
   const latestInterview = selectedAgentId
     ? data.agentInterviews.find((interview) => interview.agentProfileId === selectedAgentId) ?? null
@@ -2307,8 +2350,77 @@ function AgentProfileForm({
   const latestReview = selectedAgentId
     ? data.performanceReviews.find((review) => review.agentProfileId === selectedAgentId) ?? null
     : null
+  const [advancedPersonaOpen, setAdvancedPersonaOpen] = useState(false)
+  const capabilitiesSectionRef = useRef<HTMLDivElement | null>(null)
+  const selectedModelName =
+    data.models.find((model) => model.id === draft.modelProfileId)?.name ?? '不绑定模型'
+  const selectedPromptTemplateName =
+    data.promptTemplates.find((template) => template.id === draft.selectedPromptTemplateId)?.name ??
+    '未绑定上下文模板'
+  const selectedStyleGuideName =
+    data.styleGuides.find((guide) => guide.id === draft.selectedStyleGuideId)?.name ?? '未绑定风格规范'
+  const capabilitySummary = [
+    draft.selectedCliIds.length ? `${draft.selectedCliIds.length} 个 CLI` : null,
+    draft.selectedMcpIds.length ? `${draft.selectedMcpIds.length} 个 MCP` : null,
+    draft.selectedSoftwareIds.length ? `${draft.selectedSoftwareIds.length} 个软件` : null,
+    splitList(draft.skillsText).length ? `${splitList(draft.skillsText).length} 个技能` : null,
+  ].filter(Boolean)
+  const assignedCapabilitySummary =
+    capabilitySummary.length ? capabilitySummary.join(' / ') : '还没有分配工具能力'
+  const assignedSkillCount = splitList(draft.skillsText).length
+  const assignedMcpCount = draft.selectedMcpIds.length + splitList(draft.mcpText).length
+  const assignedPermissionLabels = [
+    draft.canReadFiles ? '读文件' : null,
+    draft.canWriteFiles ? '写文件' : null,
+    draft.canRunCommands ? '运行命令' : null,
+    draft.canUseBrowser ? '浏览器' : null,
+    draft.canUseDesktop ? '电脑操作' : null,
+    draft.canUseNetwork ? '联网' : null,
+  ].filter(Boolean) as string[]
+  const assignedPermissionSummary =
+    assignedPermissionLabels.length > 0 ? assignedPermissionLabels.join('、') : '只允许观察和回复'
+  const jumpToCapabilities = () => {
+    capabilitiesSectionRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    if (!focusCapabilities) return
+    const timeoutId = window.setTimeout(() => {
+      capabilitiesSectionRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 150)
+    return () => window.clearTimeout(timeoutId)
+  }, [focusCapabilities, selectedAgentId])
+
   return (
     <>
+      <AgentSettingsSummary
+        role={draft.role}
+        artifactType={draft.outputArtifactType}
+        modelName={selectedModelName}
+        workstation={WORKSTATION_MODE_LABELS[draft.workstationMode] ?? draft.workstationMode}
+        autonomy={AUTONOMY_LABELS[draft.autonomyLevel] ?? draft.autonomyLevel}
+        capabilitySummary={assignedCapabilitySummary}
+      />
+
+      <AgentEmployeeControlPanel
+        draft={draft}
+        modelName={selectedModelName}
+        promptTemplateName={selectedPromptTemplateName}
+        styleGuideName={selectedStyleGuideName}
+        capabilitySummary={assignedCapabilitySummary}
+      />
+
+      <AgentToolboxSummary
+        modelName={selectedModelName}
+        skillCount={assignedSkillCount}
+        cliCount={draft.selectedCliIds.length}
+        mcpCount={assignedMcpCount}
+        softwareCount={draft.selectedSoftwareIds.length}
+        permissionSummary={assignedPermissionSummary}
+        outputTarget={draft.outputArtifactType || '未设置交付物'}
+        onAssign={jumpToCapabilities}
+      />
+
       <Section
         icon={<Bot className="size-3.5" />}
         title="身份与产物"
@@ -2316,60 +2428,59 @@ function AgentProfileForm({
         saving={saving === 'Agent profile' || saving === 'Agent profile update'}
         onAction={selectedAgentId ? onUpdate : onCreate}
       >
-        <Input
-          value={draft.name}
-          onChange={(event) => setDraft((next) => ({ ...next, name: event.target.value }))}
-          placeholder="智能体名称"
-        />
+        <Field label="员工名称" hint="用户在对话和画布里看到的名字。">
+          <Input
+            value={draft.name}
+            onChange={(event) => setDraft((next) => ({ ...next, name: event.target.value }))}
+            placeholder="例如：前端工程师"
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-2">
-          <Input
-            value={draft.role}
-            onChange={(event) => setDraft((next) => ({ ...next, role: event.target.value }))}
-            placeholder="岗位角色"
-          />
-          <Input
-            value={draft.outputArtifactType}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, outputArtifactType: event.target.value }))
-            }
-            placeholder="必须产出的结果类型"
-          />
+          <Field label="岗位职责" hint="决定它主要负责什么。">
+            <Input
+              value={draft.role}
+              onChange={(event) => setDraft((next) => ({ ...next, role: event.target.value }))}
+              placeholder="例如：researcher / designer / coder"
+            />
+          </Field>
+          <Field label="必须交付" hint="这个 Agent 完成后应该产出什么。">
+            <Input
+              value={draft.outputArtifactType}
+              onChange={(event) =>
+                setDraft((next) => ({ ...next, outputArtifactType: event.target.value }))
+              }
+              placeholder="例如：报告、代码、视频、图片"
+            />
+          </Field>
         </div>
-        <Textarea
-          className="min-h-16 text-xs"
-          value={draft.description}
-          onChange={(event) => setDraft((next) => ({ ...next, description: event.target.value }))}
-          placeholder="这个智能体负责什么"
-        />
+        <Field label="工作说明" hint="说明它像哪类员工、接到任务后要怎么做。">
+          <Textarea
+            className="min-h-16 text-xs"
+            value={draft.description}
+            onChange={(event) => setDraft((next) => ({ ...next, description: event.target.value }))}
+            placeholder="例如：负责理解需求、拆解任务、产出可交付结果，并在卡住时说明原因。"
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-2">
-          <Select
-            value={draft.personaTone}
-            onChange={(value) =>
-              setDraft((next) => ({ ...next, personaTone: value as AgentPersonaTone }))
-            }
-            options={AGENT_PERSONA_TONES}
-          />
-          <Input
-            value={draft.personaLanguage}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaLanguage: event.target.value }))
-            }
-            placeholder="语言"
-          />
-          <Input
-            value={draft.personaAvatar}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaAvatar: event.target.value }))
-            }
-            placeholder="头像地址或标识"
-          />
-          <Input
-            value={draft.personaSelfReference}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaSelfReference: event.target.value }))
-            }
-            placeholder="自称"
-          />
+          <Field label="沟通风格" hint="影响它回复用户时的语气。">
+            <Select
+              value={draft.personaTone}
+              onChange={(value) =>
+                setDraft((next) => ({ ...next, personaTone: value as AgentPersonaTone }))
+              }
+              options={AGENT_PERSONA_TONES}
+              labels={PERSONA_TONE_LABELS}
+            />
+          </Field>
+          <Field label="语言" hint="中国用户默认用中文。">
+            <Input
+              value={draft.personaLanguage}
+              onChange={(event) =>
+                setDraft((next) => ({ ...next, personaLanguage: event.target.value }))
+              }
+              placeholder="zh-CN"
+            />
+          </Field>
         </div>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <Checkbox
@@ -2399,66 +2510,111 @@ function AgentProfileForm({
             }
           />
         </div>
-        <div className="grid grid-cols-4 gap-2">
-          <Input
-            value={draft.personaCautious}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaCautious: event.target.value }))
-            }
-            placeholder="Cautious"
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-          />
-          <Input
-            value={draft.personaCreative}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaCreative: event.target.value }))
-            }
-            placeholder="Creative"
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-          />
-          <Input
-            value={draft.personaThorough}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaThorough: event.target.value }))
-            }
-            placeholder="Thorough"
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-          />
-          <Input
-            value={draft.personaEfficient}
-            onChange={(event) =>
-              setDraft((next) => ({ ...next, personaEfficient: event.target.value }))
-            }
-            placeholder="Efficient"
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-          />
+        <div className="rounded-lg border bg-muted/30 p-2">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 text-left text-xs font-medium"
+            onClick={() => setAdvancedPersonaOpen((open) => !open)}
+          >
+            <span>高级人格参数</span>
+            <span className="text-[11px] text-muted-foreground">
+              {advancedPersonaOpen ? '收起' : '展开'}
+            </span>
+          </button>
+          {advancedPersonaOpen && (
+            <div className="mt-2 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="头像标识">
+                  <Input
+                    value={draft.personaAvatar}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaAvatar: event.target.value }))
+                    }
+                    placeholder="例如：agent"
+                  />
+                </Field>
+                <Field label="自称">
+                  <Input
+                    value={draft.personaSelfReference}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaSelfReference: event.target.value }))
+                    }
+                    placeholder="例如：我"
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <Field label="谨慎">
+                  <Input
+                    value={draft.personaCautious}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaCautious: event.target.value }))
+                    }
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </Field>
+                <Field label="创意">
+                  <Input
+                    value={draft.personaCreative}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaCreative: event.target.value }))
+                    }
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </Field>
+                <Field label="细致">
+                  <Input
+                    value={draft.personaThorough}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaThorough: event.target.value }))
+                    }
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </Field>
+                <Field label="效率">
+                  <Input
+                    value={draft.personaEfficient}
+                    onChange={(event) =>
+                      setDraft((next) => ({ ...next, personaEfficient: event.target.value }))
+                    }
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </Field>
+              </div>
+            </div>
+          )}
         </div>
-        <Select
-          value={draft.modelProfileId}
-          onChange={(value) => setDraft((next) => ({ ...next, modelProfileId: value }))}
-          options={['', ...data.models.map((model) => model.id)]}
-          labels={Object.fromEntries(data.models.map((model) => [model.id, model.name]))}
-          emptyLabel="不绑定模型"
-        />
-        <Select
-          value={draft.workstationMode}
-          onChange={(value) =>
-            setDraft((next) => ({ ...next, workstationMode: value as WorkstationMode }))
-          }
-          options={WORKSTATION_MODES}
-        />
+        <Field label="使用模型" hint="模型密钥和出口在「模型管理」里维护，这里只选择。">
+          <Select
+            value={draft.modelProfileId}
+            onChange={(value) => setDraft((next) => ({ ...next, modelProfileId: value }))}
+            options={['', ...data.models.map((model) => model.id)]}
+            labels={Object.fromEntries(data.models.map((model) => [model.id, model.name]))}
+            emptyLabel="不绑定模型"
+          />
+        </Field>
+        <Field label="工作位置" hint="决定它用独立浏览器、当前桌面还是未来虚拟工位。">
+          <Select
+            value={draft.workstationMode}
+            onChange={(value) =>
+              setDraft((next) => ({ ...next, workstationMode: value as WorkstationMode }))
+            }
+            options={WORKSTATION_MODES}
+            labels={WORKSTATION_MODE_LABELS}
+          />
+        </Field>
       </Section>
 
       <Section icon={<BrainCircuit className="size-3.5" />} title="记忆、上下文与协作">
@@ -2497,63 +2653,79 @@ function AgentProfileForm({
             }
           />
         </div>
-        <Select
-          value={draft.selectedPromptTemplateId}
-          onChange={(value) =>
-            setDraft((next) => ({ ...next, selectedPromptTemplateId: value }))
-          }
-          options={['', ...data.promptTemplates.map((template) => template.id)]}
-          labels={Object.fromEntries(
-            data.promptTemplates.map((template) => [template.id, template.name]),
-          )}
-          emptyLabel="不绑定上下文模板"
-        />
-        <Select
-          value={draft.selectedStyleGuideId}
-          onChange={(value) => setDraft((next) => ({ ...next, selectedStyleGuideId: value }))}
-          options={['', ...data.styleGuides.map((guide) => guide.id)]}
-          labels={Object.fromEntries(data.styleGuides.map((guide) => [guide.id, guide.name]))}
-          emptyLabel="不绑定风格规范"
-        />
+        <Field label="上下文模板" hint="给这个智能体固定一套项目背景、流程或客户偏好。">
+          <Select
+            value={draft.selectedPromptTemplateId}
+            onChange={(value) =>
+              setDraft((next) => ({ ...next, selectedPromptTemplateId: value }))
+            }
+            options={['', ...data.promptTemplates.map((template) => template.id)]}
+            labels={Object.fromEntries(
+              data.promptTemplates.map((template) => [template.id, template.name]),
+            )}
+            emptyLabel="不绑定上下文模板"
+          />
+        </Field>
+        <Field label="风格规范" hint="用于固定文案、设计或代码输出风格。">
+          <Select
+            value={draft.selectedStyleGuideId}
+            onChange={(value) => setDraft((next) => ({ ...next, selectedStyleGuideId: value }))}
+            options={['', ...data.styleGuides.map((guide) => guide.id)]}
+            labels={Object.fromEntries(data.styleGuides.map((guide) => [guide.id, guide.name]))}
+            emptyLabel="不绑定风格规范"
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-2">
-          <Select
-            value={draft.personality}
-            onChange={(value) =>
-              setDraft((next) => ({ ...next, personality: value as AgentPersonality }))
-            }
-            options={AGENT_PERSONALITIES}
-          />
-          <Select
-            value={draft.riskPosture}
-            onChange={(value) =>
-              setDraft((next) => ({ ...next, riskPosture: value as AgentRiskPosture }))
-            }
-            options={RISK_POSTURES}
-          />
+          <Field label="工作性格">
+            <Select
+              value={draft.personality}
+              onChange={(value) =>
+                setDraft((next) => ({ ...next, personality: value as AgentPersonality }))
+              }
+              options={AGENT_PERSONALITIES}
+              labels={PERSONALITY_LABELS}
+            />
+          </Field>
+          <Field label="风险倾向">
+            <Select
+              value={draft.riskPosture}
+              onChange={(value) =>
+                setDraft((next) => ({ ...next, riskPosture: value as AgentRiskPosture }))
+              }
+              options={RISK_POSTURES}
+              labels={RISK_POSTURE_LABELS}
+            />
+          </Field>
         </div>
         <div className="grid grid-cols-[1fr_96px] gap-2">
-          <Input
-            value={draft.perspective}
-            onChange={(event) => setDraft((next) => ({ ...next, perspective: event.target.value }))}
-            placeholder="Perspective"
-          />
-          <Input
-            value={draft.temperature}
-            onChange={(event) => setDraft((next) => ({ ...next, temperature: event.target.value }))}
-            placeholder="Temp"
-            type="number"
-            min="0"
-            max="2"
-            step="0.1"
-          />
+          <Field label="看问题角度">
+            <Input
+              value={draft.perspective}
+              onChange={(event) => setDraft((next) => ({ ...next, perspective: event.target.value }))}
+              placeholder="例如：用户视角 / 代码质量 / 商业结果"
+            />
+          </Field>
+          <Field label="发散度">
+            <Input
+              value={draft.temperature}
+              onChange={(event) => setDraft((next) => ({ ...next, temperature: event.target.value }))}
+              placeholder="0.7"
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
+            />
+          </Field>
         </div>
-        <Input
-          value={draft.collaborationRole}
-          onChange={(event) =>
-            setDraft((next) => ({ ...next, collaborationRole: event.target.value }))
-          }
-          placeholder="协作角色"
-        />
+        <Field label="团队协作角色" hint="在画布里和其他智能体配合时，它扮演什么位置。">
+          <Input
+            value={draft.collaborationRole}
+            onChange={(event) =>
+              setDraft((next) => ({ ...next, collaborationRole: event.target.value }))
+            }
+            placeholder="例如：主执行 / 审核 / 资料收集 / 交付验收"
+          />
+        </Field>
       </Section>
 
       <Section icon={<CheckCircle2 className="size-3.5" />} title="产物质量要求">
@@ -2617,60 +2789,72 @@ function AgentProfileForm({
         </div>
       </Section>
 
-      <Section icon={<Terminal className="size-3.5" />} title="可用能力">
-        <CapabilityList
-          title="CLI"
-          rows={data.cliProfiles}
-          selectedIds={draft.selectedCliIds}
-          onToggle={(id) =>
-            setDraft((next) => ({ ...next, selectedCliIds: toggleId(next.selectedCliIds, id) }))
-          }
-        />
-        <CapabilityList
-          title="MCP"
-          rows={data.mcpServers}
-          selectedIds={draft.selectedMcpIds}
-          onToggle={(id) =>
-            setDraft((next) => ({ ...next, selectedMcpIds: toggleId(next.selectedMcpIds, id) }))
-          }
-        />
-        <CapabilityList
-          title="Software"
-          rows={data.softwareProfiles}
-          selectedIds={draft.selectedSoftwareIds}
-          onToggle={(id) =>
-            setDraft((next) => ({
-              ...next,
-              selectedSoftwareIds: toggleId(next.selectedSoftwareIds, id),
-            }))
-          }
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={draft.skillsText}
-          onChange={(event) => setDraft((next) => ({ ...next, skillsText: event.target.value }))}
-          placeholder="Skill IDs, one per line"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={draft.mcpText}
-          onChange={(event) => setDraft((next) => ({ ...next, mcpText: event.target.value }))}
-          placeholder="MCP server IDs, one per line"
-        />
-      </Section>
+      <div ref={capabilitiesSectionRef} data-testid="agent-capabilities-section">
+        <Section icon={<Terminal className="size-3.5" />} title="可用能力">
+          <CapabilityList
+            title="命令行能力"
+            emptyText="还没有可选 CLI。先去「工具连接」接入软件或命令。"
+            rows={data.cliProfiles}
+            selectedIds={draft.selectedCliIds}
+            onToggle={(id) =>
+              setDraft((next) => ({ ...next, selectedCliIds: toggleId(next.selectedCliIds, id) }))
+            }
+          />
+          <CapabilityList
+            title="工具连接"
+            emptyText="还没有可选 MCP 工具。先去「工具连接」注册。"
+            rows={data.mcpServers}
+            selectedIds={draft.selectedMcpIds}
+            onToggle={(id) =>
+              setDraft((next) => ({ ...next, selectedMcpIds: toggleId(next.selectedMcpIds, id) }))
+            }
+          />
+          <CapabilityList
+            title="软件能力"
+            emptyText="还没有可选软件能力。先在「工具连接」里创建软件配置。"
+            rows={data.softwareProfiles}
+            selectedIds={draft.selectedSoftwareIds}
+            onToggle={(id) =>
+              setDraft((next) => ({
+                ...next,
+                selectedSoftwareIds: toggleId(next.selectedSoftwareIds, id),
+              }))
+            }
+          />
+          <Field label="额外技能 ID" hint="一般不用手填；从技能中心安装后可填入一行一个 ID。">
+            <Textarea
+              className="min-h-16 text-xs"
+              value={draft.skillsText}
+              onChange={(event) => setDraft((next) => ({ ...next, skillsText: event.target.value }))}
+              placeholder="一行一个 Skill ID"
+            />
+          </Field>
+          <Field label="额外工具连接 ID" hint="高级用法，一般直接勾选上面的工具连接即可。">
+            <Textarea
+              className="min-h-16 text-xs"
+              value={draft.mcpText}
+              onChange={(event) => setDraft((next) => ({ ...next, mcpText: event.target.value }))}
+              placeholder="一行一个工具连接 ID"
+            />
+          </Field>
+        </Section>
+      </div>
 
       <Section icon={<ShieldCheck className="size-3.5" />} title="安全权限与自主性">
-        <Select
-          value={draft.autonomyLevel}
-          onChange={(value) => setDraft((next) => ({ ...next, autonomyLevel: value }))}
-          options={[
-            'observe_only',
-            'propose_only',
-            'execute_with_approval',
-            'execute_low_risk',
-            'fully_autonomous',
-          ]}
-        />
+        <Field label="自主程度" hint="控制它能自己做到哪一步。危险动作仍应走审批。">
+          <Select
+            value={draft.autonomyLevel}
+            onChange={(value) => setDraft((next) => ({ ...next, autonomyLevel: value }))}
+            options={[
+              'observe_only',
+              'propose_only',
+              'execute_with_approval',
+              'execute_low_risk',
+              'fully_autonomous',
+            ]}
+            labels={AUTONOMY_LABELS}
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <Checkbox
             checked={draft.canReadFiles}
@@ -2703,62 +2887,76 @@ function AgentProfileForm({
             onChange={(checked) => setDraft((next) => ({ ...next, canUseNetwork: checked }))}
           />
         </div>
-        <Textarea
-          className="min-h-20 text-xs"
-          value={draft.systemPrompt}
-          onChange={(event) => setDraft((next) => ({ ...next, systemPrompt: event.target.value }))}
-          placeholder="System prompt"
-        />
-        <Textarea
-          className="min-h-20 text-xs"
-          value={draft.behaviorRulesText}
-          onChange={(event) =>
-            setDraft((next) => ({ ...next, behaviorRulesText: event.target.value }))
-          }
-          placeholder="Behavior rules"
-        />
-        <Textarea
-          className="min-h-20 text-xs"
-          value={draft.successCriteriaText}
-          onChange={(event) =>
-            setDraft((next) => ({ ...next, successCriteriaText: event.target.value }))
-          }
-          placeholder="Success criteria"
-        />
+        <Field label="系统提示词" hint="定义这个智能体的工作底线和身份。">
+          <Textarea
+            className="min-h-20 text-xs"
+            value={draft.systemPrompt}
+            onChange={(event) => setDraft((next) => ({ ...next, systemPrompt: event.target.value }))}
+            placeholder="例如：你是一个员工级智能体，必须先理解目标，再使用允许的工具完成交付物。"
+          />
+        </Field>
+        <Field label="行为规则" hint="一行一条，告诉它哪些事情必须遵守。">
+          <Textarea
+            className="min-h-20 text-xs"
+            value={draft.behaviorRulesText}
+            onChange={(event) =>
+              setDraft((next) => ({ ...next, behaviorRulesText: event.target.value }))
+            }
+            placeholder="例如：删除文件前必须确认；遇到失败要先自检再汇报。"
+          />
+        </Field>
+        <Field label="完成标准" hint="一行一条，决定什么才算任务完成。">
+          <Textarea
+            className="min-h-20 text-xs"
+            value={draft.successCriteriaText}
+            onChange={(event) =>
+              setDraft((next) => ({ ...next, successCriteriaText: event.target.value }))
+            }
+            placeholder="例如：必须产出可预览文件；必须说明验证结果。"
+          />
+        </Field>
       </Section>
 
       <Section icon={<CheckCircle2 className="size-3.5" />} title="测试与评估">
-        <Input
-          value={interviewDraft.scenarioTitle}
-          onChange={(event) =>
-            setInterviewDraft((next) => ({ ...next, scenarioTitle: event.target.value }))
-          }
-          placeholder="Scenario title"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={interviewDraft.scenarioTask}
-          onChange={(event) =>
-            setInterviewDraft((next) => ({ ...next, scenarioTask: event.target.value }))
-          }
-          placeholder="Scenario task"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={interviewDraft.planResponse}
-          onChange={(event) =>
-            setInterviewDraft((next) => ({ ...next, planResponse: event.target.value }))
-          }
-          placeholder="Plan response"
-        />
-        <Textarea
-          className="min-h-16 text-xs"
-          value={interviewDraft.feedbackResponse}
-          onChange={(event) =>
-            setInterviewDraft((next) => ({ ...next, feedbackResponse: event.target.value }))
-          }
-          placeholder="Feedback response"
-        />
+        <Field label="测试场景">
+          <Input
+            value={interviewDraft.scenarioTitle}
+            onChange={(event) =>
+              setInterviewDraft((next) => ({ ...next, scenarioTitle: event.target.value }))
+            }
+            placeholder="例如：客户要求生成一份短视频脚本"
+          />
+        </Field>
+        <Field label="测试任务">
+          <Textarea
+            className="min-h-16 text-xs"
+            value={interviewDraft.scenarioTask}
+            onChange={(event) =>
+              setInterviewDraft((next) => ({ ...next, scenarioTask: event.target.value }))
+            }
+            placeholder="写清楚要让这个智能体完成什么。"
+          />
+        </Field>
+        <Field label="期望计划">
+          <Textarea
+            className="min-h-16 text-xs"
+            value={interviewDraft.planResponse}
+            onChange={(event) =>
+              setInterviewDraft((next) => ({ ...next, planResponse: event.target.value }))
+            }
+            placeholder="希望它先怎么拆解任务。"
+          />
+        </Field>
+        <Field label="期望反馈">
+          <Textarea
+            className="min-h-16 text-xs"
+            value={interviewDraft.feedbackResponse}
+            onChange={(event) =>
+              setInterviewDraft((next) => ({ ...next, feedbackResponse: event.target.value }))
+            }
+            placeholder="希望它完成后怎么汇报。"
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
@@ -3147,6 +3345,222 @@ function RunMonitor({
         )}
       </Section>
     </>
+  )
+}
+
+function AgentSettingsSummary({
+  role,
+  artifactType,
+  modelName,
+  workstation,
+  autonomy,
+  capabilitySummary,
+}: {
+  role: string
+  artifactType: string
+  modelName: string
+  workstation: string
+  autonomy: string
+  capabilitySummary: string
+}) {
+  return (
+    <section className="rounded-lg border bg-primary/5 p-3">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <Bot className="size-4 text-primary" />
+        <span>这个智能体现在的配置</span>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <SummaryTile label="岗位" value={role || '未设置岗位'} />
+        <SummaryTile label="必须交付" value={artifactType || '未设置交付物'} />
+        <SummaryTile label="模型" value={modelName} />
+        <SummaryTile label="工作位置" value={workstation} />
+        <SummaryTile label="自主程度" value={autonomy} />
+        <SummaryTile label="已分配能力" value={capabilitySummary} />
+      </div>
+    </section>
+  )
+}
+
+function AgentToolboxSummary({
+  modelName,
+  skillCount,
+  cliCount,
+  mcpCount,
+  softwareCount,
+  permissionSummary,
+  outputTarget,
+  onAssign,
+}: {
+  modelName: string
+  skillCount: number
+  cliCount: number
+  mcpCount: number
+  softwareCount: number
+  permissionSummary: string
+  outputTarget: string
+  onAssign: () => void
+}) {
+  return (
+    <section
+      className="rounded-lg border bg-background p-3 shadow-sm"
+      data-testid="agent-toolbox-summary"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Package className="size-4 text-primary" />
+            <span>员工工具包</span>
+          </div>
+          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+            模型、技能、CLI、MCP、软件和权限都在这里统一分配。用户只需要知道这个员工能用什么、最终交付什么。
+          </p>
+        </div>
+        <Button type="button" size="sm" onClick={onAssign} className="shrink-0">
+          分配能力
+        </Button>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+        <ToolboxTile label="模型" value={modelName} />
+        <ToolboxTile label="技能" value={`${skillCount} 个`} />
+        <ToolboxTile label="CLI" value={`${cliCount} 个`} />
+        <ToolboxTile label="MCP" value={`${mcpCount} 个`} />
+        <ToolboxTile label="软件" value={`${softwareCount} 个`} />
+        <ToolboxTile label="权限" value={permissionSummary} />
+      </div>
+      <div className="mt-2 rounded-md border bg-primary/5 px-2.5 py-2 text-xs">
+        <span className="font-medium text-foreground">交付给客户看到：</span>
+        <span className="ml-1 text-muted-foreground">{outputTarget}</span>
+      </div>
+    </section>
+  )
+}
+
+function ToolboxTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border bg-muted/20 px-2.5 py-2">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-medium">{value}</div>
+    </div>
+  )
+}
+
+function AgentEmployeeControlPanel({
+  draft,
+  modelName,
+  promptTemplateName,
+  styleGuideName,
+  capabilitySummary,
+}: {
+  draft: AgentDraft
+  modelName: string
+  promptTemplateName: string
+  styleGuideName: string
+  capabilitySummary: string
+}) {
+  const memoryScopes = [
+    draft.memoryScopeAgent ? '本智能体经验' : null,
+    draft.memoryScopeProject ? '项目状态' : null,
+    draft.memoryScopeWorkspace ? '工作区共识' : null,
+  ].filter(Boolean)
+  const allowedActions = [
+    draft.canReadFiles ? '读文件' : null,
+    draft.canWriteFiles ? '写文件' : null,
+    draft.canRunCommands ? '运行命令' : null,
+    draft.canUseBrowser ? '浏览器' : null,
+    draft.canUseDesktop ? '电脑操作' : null,
+    draft.canUseNetwork ? '联网' : null,
+  ].filter(Boolean)
+  const outputTarget = draft.outputArtifactType || '未设置交付物'
+  const collaboration = draft.collaborationRole || '可单人执行，也可进入工作对话区或编排画布'
+  const memoryDescription = draft.memoryEnabled
+    ? `会记住：${memoryScopes.length ? memoryScopes.join('、') : '当前任务经验'}`
+    : '长期记忆已关闭，只使用本次任务上下文'
+
+  return (
+    <Section icon={<Bot className="size-3.5" />} title="员工能力控制台">
+      <div
+        className="rounded-md border bg-muted/25 p-2.5 text-xs text-muted-foreground"
+        data-testid="agent-employee-control-panel"
+      >
+        <span className="font-medium text-foreground">统一在智能体设置里管理。</span>
+        这里把原来的记忆、上下文、能力、团队协作和安全治理收成一个员工设置面板。
+      </div>
+      <div className="grid gap-2 xl:grid-cols-2">
+        <ControlPanelRow
+          icon={<BrainCircuit className="size-4 text-primary" />}
+          title="记忆与上下文"
+          value={memoryDescription}
+          detail={`上下文：${promptTemplateName}；风格：${styleGuideName}`}
+        />
+        <ControlPanelRow
+          icon={<ShieldCheck className="size-4 text-primary" />}
+          title="权限与安全"
+          value={allowedActions.length ? allowedActions.join('、') : '只允许观察和回复'}
+          detail={`自主程度：${AUTONOMY_LABELS[draft.autonomyLevel] ?? draft.autonomyLevel}`}
+        />
+        <ControlPanelRow
+          icon={<Activity className="size-4 text-primary" />}
+          title="协作方式"
+          value={collaboration}
+          detail={`模型：${modelName}；工作位置：${
+            WORKSTATION_MODE_LABELS[draft.workstationMode] ?? draft.workstationMode
+          }`}
+        />
+        <ControlPanelRow
+          icon={<CheckCircle2 className="size-4 text-primary" />}
+          title="输出交付"
+          value={`客户最终看到：${outputTarget}`}
+          detail="画布会按这个产物类型传递给下一个 Agent 或交付检查"
+        />
+        <ControlPanelRow
+          icon={<Terminal className="size-4 text-primary" />}
+          title="技能 / MCP / CLI / 软件"
+          value={capabilitySummary}
+          detail="只需要在这里勾选已经接入的能力，不再让用户理解底层适配器"
+          className="xl:col-span-2"
+        />
+      </div>
+    </Section>
+  )
+}
+
+function ControlPanelRow({
+  icon,
+  title,
+  value,
+  detail,
+  className,
+}: {
+  icon: ReactNode
+  title: string
+  value: string
+  detail: string
+  className?: string
+}) {
+  return (
+    <div className={cn('rounded-md border bg-background p-2.5', className)}>
+      <div className="flex items-center gap-2">
+        {icon}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium">{title}</div>
+          <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{value}</div>
+        </div>
+        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+          已集中
+        </Badge>
+      </div>
+      <div className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
+  )
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border bg-background px-2.5 py-2">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-medium">{value}</div>
+    </div>
   )
 }
 
@@ -3665,6 +4079,24 @@ function Select({
   )
 }
 
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <label className="block min-w-0 space-y-1">
+      <span className="block text-[11px] font-medium text-muted-foreground">{label}</span>
+      {children}
+      {hint && <span className="block text-[10px] leading-relaxed text-muted-foreground">{hint}</span>}
+    </label>
+  )
+}
+
 function Checkbox({
   checked,
   label,
@@ -3689,11 +4121,13 @@ function Checkbox({
 
 function CapabilityList<T extends { id: string; name?: string; displayName?: string }>({
   title,
+  emptyText,
   rows,
   selectedIds,
   onToggle,
 }: {
   title: string
+  emptyText?: string
   rows: T[]
   selectedIds: string[]
   onToggle: (id: string) => void
@@ -3703,7 +4137,7 @@ function CapabilityList<T extends { id: string; name?: string; displayName?: str
       <div className="mb-1 text-[10px] uppercase text-muted-foreground">{title}</div>
       <div className="space-y-1">
         {rows.length === 0 ? (
-          <EmptyLine text={`No ${title} profiles.`} />
+          <EmptyLine text={emptyText ?? `还没有可选${title}`} />
         ) : (
           rows.map((row) => (
             <label

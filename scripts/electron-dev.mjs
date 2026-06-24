@@ -3,15 +3,20 @@
 // 详见 Spec 12 §7.2。
 
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 
-const child = spawn('electron', ['dist-electron/main.js'], {
+const localElectron = process.platform === 'win32'
+  ? path.resolve('node_modules/electron/dist/electron.exe')
+  : path.resolve('node_modules/.bin/electron')
+
+const child = spawn(existsSync(localElectron) ? localElectron : 'electron', ['dist-electron/main.js'], {
   stdio: 'inherit',
   env: {
     ...process.env,
     AGENTHUB_DEV: '1',
     AGENTHUB_DEV_URL: process.env.AGENTHUB_DEV_URL ?? 'http://localhost:3101',
   },
-  shell: process.platform === 'win32',
 })
 
 child.on('exit', (code, signal) => {

@@ -1,7 +1,7 @@
 'use client'
 
 import { Pencil, Plus, Settings2, Trash2, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
@@ -23,9 +23,15 @@ import { useAgentList, useAppStore } from '@/stores/app-store'
 
 interface AgentLibraryProps {
   defaultSettingsOpen?: boolean
+  settingsRequestKey?: number
+  focusCapabilitiesOnSettingsOpen?: boolean
 }
 
-export function AgentLibrary({ defaultSettingsOpen = false }: AgentLibraryProps) {
+export function AgentLibrary({
+  defaultSettingsOpen = false,
+  settingsRequestKey = 0,
+  focusCapabilitiesOnSettingsOpen = false,
+}: AgentLibraryProps) {
   const agents = useAgentList()
   const removeAgent = useAppStore((s) => s.removeAgent)
 
@@ -43,6 +49,11 @@ export function AgentLibrary({ defaultSettingsOpen = false }: AgentLibraryProps)
     return settingsAgentId ? agents.find((agent) => agent.id === settingsAgentId) ?? null : null
   }, [agents, settingsAgentId])
   const settingsOpen = Boolean(settingsAgent)
+
+  useEffect(() => {
+    if (settingsRequestKey <= 0) return
+    setSettingsAgentId('__first__')
+  }, [settingsRequestKey])
 
   const openCreate = () => {
     setEditingAgent(null)
@@ -132,6 +143,7 @@ export function AgentLibrary({ defaultSettingsOpen = false }: AgentLibraryProps)
           <EmployeeAgentFactory
             embedded
             initialTab="agent"
+            initialFocusSection={focusCapabilitiesOnSettingsOpen ? 'capabilities' : undefined}
             initialAgentProfileId={settingsAgent.id}
             initialAgentName={settingsAgent.name}
             initialAgentDescription={settingsAgent.description}
@@ -182,6 +194,8 @@ function AgentCard({
   onSettings: () => void
   onDelete: () => void
 }) {
+  const capabilityCount = agent.skillIds.length + agent.mcpServerIds.length + agent.cliProfileIds.length
+
   return (
     <div
       className={cn(
@@ -210,13 +224,22 @@ function AgentCard({
             模型：<span className="font-mono">{agent.modelId}</span>
           </div>
         )}
-        {(agent.skillIds.length > 0 || agent.mcpServerIds.length > 0 || agent.cliProfileIds.length > 0) && (
-          <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
-            {agent.skillIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">Skills {agent.skillIds.length}</span>}
-            {agent.mcpServerIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">MCP {agent.mcpServerIds.length}</span>}
-            {agent.cliProfileIds.length > 0 && <span className="rounded bg-muted px-1.5 py-0.5">CLI {agent.cliProfileIds.length}</span>}
+        <div
+          className="mt-2 rounded-md border bg-muted/20 px-2 py-1.5"
+          data-testid="agent-card-toolbox"
+        >
+          <div className="flex items-center justify-between gap-2 text-[10px] font-medium text-foreground">
+            <span>员工工具包</span>
+            <span className="text-muted-foreground">
+              {capabilityCount > 0 ? `${capabilityCount} 项能力` : '还没分配工具'}
+            </span>
           </div>
-        )}
+          <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+            <span className="rounded bg-background px-1.5 py-0.5">技能 {agent.skillIds.length}</span>
+            <span className="rounded bg-background px-1.5 py-0.5">MCP {agent.mcpServerIds.length}</span>
+            <span className="rounded bg-background px-1.5 py-0.5">CLI {agent.cliProfileIds.length}</span>
+          </div>
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button

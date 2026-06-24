@@ -48,6 +48,7 @@ import {
   createMetaAgentProfile,
   createNotification,
   employeeRunDebugPackageUrl,
+  fetchRunActivitySummary,
   fetchAgentReputationLeaderboard,
   fetchAgentReputationReviews,
   fetchAgentReputations,
@@ -71,6 +72,8 @@ import {
   recordMetricPoint,
   type AgentReputationLeaderboardDto,
   type EmployeeRunDebugPackageDto,
+  type RunActivitySummary,
+  type RunActivitySummaryRun,
   upsertNotificationPreference,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -118,6 +121,8 @@ export function ObservabilityCenter() {
   const [metaProfiles, setMetaProfiles] = useState<MetaAgentProfileRow[]>([])
   const [metaDigests, setMetaDigests] = useState<MetaAgentDigestRow[]>([])
   const [metaRecommendations, setMetaRecommendations] = useState<MetaAgentRecommendationRow[]>([])
+  const [activitySummary, setActivitySummary] = useState<RunActivitySummary | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [selectedRunId, setSelectedRunId] = useState('')
@@ -196,7 +201,6 @@ export function ObservabilityCenter() {
     () => notifications.filter((notification) => notification.status === 'unread').length,
     [notifications],
   )
-  const latestHealth = healthScores[0] ?? null
   const latestReputation = reputationSnapshots[0] ?? null
   const latestMetaProfile = metaProfiles[0] ?? null
 
@@ -220,6 +224,7 @@ export function ObservabilityCenter() {
         metaProfilesNext,
         metaDigestsNext,
         metaRecommendationsNext,
+        activitySummaryNext,
       ] = await Promise.all([
         fetchAgentProfiles(),
         fetchEmployeeRuns(selectedAgentId || undefined),
@@ -243,6 +248,7 @@ export function ObservabilityCenter() {
         fetchMetaAgentProfiles(20),
         fetchMetaAgentDigests(20),
         fetchMetaAgentRecommendations({ limit: 50 }),
+        fetchRunActivitySummary(),
       ])
       setAgents(agentsNext)
       setEmployeeRuns(runsNext)
@@ -259,6 +265,7 @@ export function ObservabilityCenter() {
       setMetaProfiles(metaProfilesNext)
       setMetaDigests(metaDigestsNext)
       setMetaRecommendations(metaRecommendationsNext)
+      setActivitySummary(activitySummaryNext)
       setSelectedAgentId((current) =>
         current && agentsNext.some((agent) => agent.id === current) ? current : agentsNext[0]?.id ?? '',
       )
@@ -446,22 +453,18 @@ export function ObservabilityCenter() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Activity className="size-4" />
-              <span className="truncate">Observability Center</span>
+              <span className="truncate">运行现场</span>
             </div>
-            <div className="mt-1 grid grid-cols-10 gap-1 text-[10px] text-muted-foreground">
-              <Metric label="metrics" value={metrics.length} />
-              <Metric label="rules" value={alertRules.length} />
-              <Metric label="open" value={openAlerts} />
-              <Metric label="replays" value={debugReplays.length} />
-              <Metric label="health" value={latestHealth ? Math.round(latestHealth.score) : 0} />
-              <Metric
-                label="repute"
-                value={latestReputation ? Math.round(latestReputation.overallScore) : 0}
-              />
-              <Metric label="rank" value={reputationLeaderboard?.entries.length ?? 0} />
-              <Metric label="unread" value={unreadNotifications} />
-              <Metric label="digests" value={metaDigests.length} />
-              <Metric label="meta" value={metaRecommendations.length} />
+            <div className="mt-1 text-xs text-muted-foreground">
+              看 Agent 当前做到哪一步、最近调用了什么工具、有没有失败，以及交付物是否已经生成。
+            </div>
+            <div className="mt-2 grid grid-cols-6 gap-1 text-[10px] text-muted-foreground">
+              <Metric label="运行中" value={activitySummary?.totals.running ?? 0} />
+              <Metric label="排队" value={activitySummary?.totals.queued ?? 0} />
+              <Metric label="今日完成" value={activitySummary?.totals.completedToday ?? 0} />
+              <Metric label="失败" value={activitySummary?.totals.failedToday ?? 0} />
+              <Metric label="工具动作" value={activitySummary?.totals.toolActions ?? 0} />
+              <Metric label="产物" value={activitySummary?.totals.artifacts ?? 0} />
             </div>
           </div>
           <Button size="icon" variant="ghost" onClick={() => void reload()} disabled={loading}>
@@ -482,7 +485,31 @@ export function ObservabilityCenter() {
         )}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[19rem_1fr]">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 p-3">
+          <RunActivityOverview
+            summary={activitySummary}
+            loading={loading}
+            openAlerts={openAlerts}
+            unreadNotifications={unreadNotifications}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+          />
+
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">高级监控</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                指标、告警规则、调试包、健康分和声誉评分都放在这里，普通使用不需要展开。
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setAdvancedOpen((open) => !open)}>
+              {advancedOpen ? '收起高级监控' : '打开高级监控'}
+            </Button>
+          </div>
+
+          {advancedOpen && (
+      <div className="grid min-h-[36rem] grid-cols-[19rem_1fr] overflow-hidden rounded-lg border">
         <ScrollArea className="min-h-0 border-r">
           <div className="space-y-3 p-3">
             <Section title="Scope" icon={<Activity className="size-3.5" />}>
@@ -1293,6 +1320,280 @@ export function ObservabilityCenter() {
           </div>
         </ScrollArea>
       </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function RunActivityOverview({
+  summary,
+  loading,
+  openAlerts,
+  unreadNotifications,
+  selectedRunId,
+  onSelectRun,
+}: {
+  summary: RunActivitySummary | null
+  loading: boolean
+  openAlerts: number
+  unreadNotifications: number
+  selectedRunId: string
+  onSelectRun: (runId: string) => void
+}) {
+  const runs = summary?.recentRuns ?? []
+  const events = summary?.recentEvents ?? []
+  const totals = summary?.totals
+  const activeRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null
+  const activeProgress = activeRun ? runProgressPercent(activeRun) : 0
+  const hasOpenRisk = openAlerts > 0 || (totals?.failedToday ?? 0) > 0
+  const liveVerdict = hasOpenRisk
+    ? '有异常需要处理'
+    : activeRun
+      ? '正在正常推进'
+      : '等待新的任务'
+
+  return (
+    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <section
+        className="rounded-lg border bg-background p-3 xl:col-span-2"
+        data-testid="run-scene-overview"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <HeartPulse className="size-4 text-primary" />
+              <span>现场总览</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              把运行状态翻译成四个问题：谁在干、干到哪、交付物有没有、需不需要人处理。
+            </p>
+          </div>
+          <StatusBadge value={liveVerdict} />
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-4">
+          <DetailStat label="当前负责人" value={activeRun?.agentName ?? '等待任务'} />
+          <DetailStat
+            label="当前步骤"
+            value={activeRun ? phaseLabel(activeRun.phase) : '暂无运行'}
+          />
+          <DetailStat
+            label="交付物状态"
+            value={activeRun ? deliveryStateLabel(activeRun) : '还未生成'}
+          />
+          <DetailStat label="是否需要处理" value={hasOpenRisk ? '需要关注' : '暂不需要'} />
+        </div>
+      </section>
+
+      <section className="min-w-0 rounded-lg border bg-background">
+        <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Activity className="size-4 text-primary" />
+              <span>任务队列与当前步骤</span>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              这里显示每个 Agent 正在做什么、下一步是什么、用了多少工具、有没有交付物。
+            </div>
+          </div>
+          {loading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        </div>
+
+        <div className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="min-w-0 space-y-2">
+            {runs.length === 0 ? (
+              <div
+                className="rounded-lg border border-dashed bg-muted/20 p-4 text-sm"
+                data-testid="run-scene-empty-guide"
+              >
+                <div className="font-semibold">还没有任务在运行</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  去工作台点击“开始工作”，或者在编排画布运行一个流程，这里就会显示实时进度。
+                </p>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <DetailStat label="启动入口" value="工作台" />
+                  <DetailStat label="团队任务" value="编排画布" />
+                  <DetailStat label="单模型聊天" value="对话" />
+                </div>
+              </div>
+            ) : (
+              runs.map((run) => (
+                <RunCard
+                  key={`${run.kind}:${run.id}`}
+                  run={run}
+                  selected={run.id === activeRun?.id}
+                  onSelect={() => onSelectRun(run.id)}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <div className="text-xs font-semibold text-muted-foreground">任务详情</div>
+            {activeRun ? (
+              <div className="mt-2 space-y-3">
+                <div>
+                  <div className="line-clamp-2 text-sm font-semibold">{activeRun.title}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {activeRun.agentName ?? '未指定智能体'} · {runKindLabel(activeRun.kind)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <DetailStat label="状态" value={statusLabel(activeRun.status)} />
+                  <DetailStat label="阶段" value={phaseLabel(activeRun.phase)} />
+                  <DetailStat label="工具动作" value={String(activeRun.toolActionCount)} />
+                  <DetailStat label="交付物" value={String(activeRun.artifactCount)} />
+                  <DetailStat label="开始时间" value={formatTime(activeRun.startedAt)} />
+                  <DetailStat label="最近更新" value={formatTime(activeRun.updatedAt)} />
+                </div>
+                <div className="rounded-md border bg-background px-2.5 py-2">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+                    <span>阶段进度</span>
+                    <span>{activeProgress}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${Math.max(4, activeProgress)}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-md border bg-background px-2.5 py-2">
+                  <div className="text-[11px] font-semibold text-muted-foreground">下一步</div>
+                  <div className="mt-1 text-xs">{activeRun.currentStep || '等待新的运行事件'}</div>
+                </div>
+              </div>
+            ) : (
+              <EmptyState label="暂无任务可选。" />
+            )}
+          </div>
+        </div>
+      </section>
+
+      <div className="grid min-w-0 gap-3">
+        <section className="rounded-lg border bg-background">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Bell className="size-4 text-primary" />
+              <span>最近事件</span>
+            </div>
+            <StatusBadge value={`${events.length} 条`} />
+          </div>
+          <div className="max-h-[20rem] space-y-2 overflow-auto p-3">
+            {events.length === 0 ? (
+              <EmptyState label="暂无运行事件。任务启动后，这里会记录模型调用、工具动作、产物生成和失败原因。" />
+            ) : (
+              events.slice(0, 8).map((event) => (
+                <div key={event.id} className="rounded-lg border bg-muted/20 p-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 truncate font-medium">{event.message}</div>
+                    <StatusBadge value={statusLabel(event.status)} />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="truncate">{phaseLabel(event.phase)}</span>
+                    <span className="shrink-0">{formatTime(event.createdAt)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-lg border bg-background p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <HeartPulse className="size-4 text-primary" />
+            <span>是否需要处理</span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <DetailStat label="未读提醒" value={String(unreadNotifications)} />
+            <DetailStat label="开放告警" value={String(openAlerts)} />
+            <DetailStat label="今日完成" value={String(summary?.totals.completedToday ?? 0)} />
+            <DetailStat label="今日失败" value={String(summary?.totals.failedToday ?? 0)} />
+          </div>
+          <div className="mt-3 rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
+            {openAlerts > 0
+              ? '有开放告警，建议先展开高级监控查看具体原因。'
+              : activeRun
+                ? '当前没有明显阻塞，可以继续观察下一步或查看交付物。'
+                : '当前没有运行压力。启动任务后这里会判断是否卡住。'}
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function runProgressPercent(run: RunActivitySummaryRun): number {
+  if (run.status === 'complete') return 100
+  if (run.status === 'failed' || run.status === 'aborted') return 100
+  if (run.status === 'queued') return 8
+  const phaseOrder = [
+    'understand_goal',
+    'retrieve_memory',
+    'create_plan',
+    'execute_action',
+    'verify_result',
+    'produce_artifact',
+    'reflect',
+  ]
+  const index = phaseOrder.indexOf(run.phase)
+  if (index >= 0) return Math.round(((index + 1) / phaseOrder.length) * 86)
+  if (run.status === 'running') return 42
+  if (run.status === 'paused') return 52
+  return 20
+}
+
+function deliveryStateLabel(run: RunActivitySummaryRun): string {
+  if (run.artifactCount > 0) return `已有 ${run.artifactCount} 个`
+  if (run.phase === 'produce_artifact') return '正在生成'
+  if (run.status === 'complete') return '待检查'
+  if (run.status === 'failed' || run.status === 'aborted') return '未完成'
+  return '还未生成'
+}
+
+function RunCard({
+  run,
+  selected,
+  onSelect,
+}: {
+  run: RunActivitySummaryRun
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        'grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border bg-background p-3 text-left transition',
+        selected ? 'border-primary bg-primary/5' : 'hover:border-foreground/25 hover:bg-accent/40',
+      )}
+    >
+      <div className="min-w-0">
+        <div className="line-clamp-1 text-sm font-semibold">{run.title}</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {run.agentName ?? '未指定智能体'} · {runKindLabel(run.kind)} · {formatTime(run.updatedAt)}
+        </div>
+        <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+          {phaseLabel(run.phase)}：{run.currentStep || statusLabel(run.status)}
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <StatusBadge value={statusLabel(run.status)} />
+        <div className="text-[11px] text-muted-foreground">
+          {run.toolActionCount} 工具 / {run.artifactCount} 产物
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-background px-2.5 py-2">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate font-semibold">{value}</div>
     </div>
   )
 }
@@ -1374,9 +1675,18 @@ function StatusBadge({ value }: { value: string }) {
     value === 'enabled' ||
     value === 'improving' ||
     value === 'top' ||
-    value === 'review'
+    value === 'review' ||
+    value === '已完成' ||
+    value === '正常' ||
+    value === '已读' ||
+    value === '已解决'
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-      : value === 'critical' || value === 'open' || value === 'declining'
+      : value === 'critical' ||
+          value === 'open' ||
+          value === 'declining' ||
+          value === '失败' ||
+          value === '已停止' ||
+          value === '告警'
         ? 'border-destructive/30 bg-destructive/10 text-destructive'
         : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
   return (
@@ -1384,6 +1694,51 @@ function StatusBadge({ value }: { value: string }) {
       {value}
     </Badge>
   )
+}
+
+function statusLabel(status: string): string {
+  const table: Record<string, string> = {
+    queued: '排队中',
+    running: '运行中',
+    complete: '已完成',
+    completed: '已完成',
+    failed: '失败',
+    aborted: '已停止',
+    paused: '已暂停',
+    unread: '未读',
+    read: '已读',
+    open: '告警',
+    acknowledged: '已确认',
+    resolved: '已解决',
+    info: '信息',
+    success: '正常',
+    warning: '注意',
+    critical: '严重',
+  }
+  return table[status] ?? status
+}
+
+function phaseLabel(phase: string): string {
+  const table: Record<string, string> = {
+    queued: '等待分配',
+    understand_goal: '理解目标',
+    retrieve_memory: '检索记忆',
+    create_plan: '制定计划',
+    execute_action: '执行工具动作',
+    verify_result: '验证结果',
+    produce_artifact: '生成产物',
+    reflect: '总结学习',
+    running: '执行中',
+    complete: '完成',
+    failed: '失败',
+    aborted: '停止',
+    paused: '暂停',
+  }
+  return table[phase] ?? phase.replaceAll('_', ' ')
+}
+
+function runKindLabel(kind: RunActivitySummaryRun['kind']): string {
+  return kind === 'employee_run' ? '员工式任务' : '普通对话'
 }
 
 function Toggle({

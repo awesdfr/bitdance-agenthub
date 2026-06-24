@@ -1,8 +1,41 @@
-import { chromium, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
+import { chromium, type Locator, type Page } from '@playwright/test'
+import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 
 const uiText = {
+  workbenchNav: '\u5de5\u4f5c\u53f0',
+  workbenchTitle: '\u7535\u8111\u7aef\u5de5\u4f5c\u53f0',
+  workbenchStart: '\u5f00\u59cb\u5de5\u4f5c',
+  workbenchRunSite: '\u8fd0\u884c\u73b0\u573a',
+  workbenchActivity: '\u5458\u5de5\u73b0\u573a',
+  workbenchQueued: '\u6392\u961f',
+  workbenchToolActions: '\u5de5\u5177\u52a8\u4f5c',
+  workbenchNoRealRun: '\u8fd8\u6ca1\u6709\u771f\u5b9e\u8fd0\u884c\u8bb0\u5f55',
+  workbenchRunDetail: '\u8fd0\u884c\u8be6\u60c5',
+  workbenchPlanSteps: '\u8ba1\u5212\u6b65\u9aa4',
+  workbenchRunEvents: '\u8fd0\u884c\u4e8b\u4ef6',
+  workbenchRuntimeEnvironment: '\u8fd0\u884c\u5de5\u4f4d',
+  workbenchWorkspacePath: '\u5de5\u4f5c\u76ee\u5f55',
+  workbenchBrowserProfile: '\u6d4f\u89c8\u5668\u73af\u5883',
+  workbenchCapabilities: '\u7535\u8111\u80fd\u529b',
+  workbenchTeamMode: '\u56e2\u961f\u5458\u5de5\u6267\u884c',
+  workbenchModelMode: '\u5355\u6a21\u578b\u5bf9\u8bdd',
+  workbenchAssignment: '\u5c06\u4f7f\u7528\uff1a',
+  workbenchReadiness: '\u5f00\u5de5\u524d\u68c0\u67e5',
+  workbenchModelReady: '\u6a21\u578b\u53ef\u7528',
+  workbenchAgentReady: '\u5458\u5de5\u53ef\u8fd0\u884c',
+  workbenchSkillReady: '\u6280\u80fd\u5df2\u88c5\u597d',
+  workbenchToolReady: '\u5de5\u5177\u5df2\u63a5\u5165',
+  workbenchDesktopSafe: '\u684c\u9762\u5b89\u5168',
+  workbenchReadyRatio: '\u5c31\u7eea',
+  workbenchAutoPackage: '\u7cfb\u7edf\u4f1a\u81ea\u52a8\u51c6\u5907',
+  workbenchPackageBadge: '\u5de5\u4f5c\u5305',
+  workbenchCodePackage: '\u4ee3\u7801 / \u6587\u4ef6',
+  workbenchCurrentTask: '\u5f53\u524d\u4efb\u52a1',
+  workbenchAssignee: '\u8d1f\u8d23\u4eba',
+  workbenchDeliverables: '\u4ea4\u4ed8\u7ed9\u5ba2\u6237\u770b\u5230',
+  workbenchStablePrefix: '\u7a33\u5b9a\u524d\u7f00',
+  workbenchSmokeGoal: 'Smoke workbench direct task',
   productionNav: '\u4ea4\u4ed8\u68c0\u67e5',
   settingsButton: 'API \u8bbe\u7f6e',
   settingsTitle: '\u8bbe\u7f6e',
@@ -44,6 +77,24 @@ const uiText = {
   agentIdentitySection: '\u8eab\u4efd\u4e0e\u4ea7\u7269',
   agentMemoryContextSection: '\u8bb0\u5fc6\u3001\u4e0a\u4e0b\u6587\u4e0e\u534f\u4f5c',
   agentSecuritySection: '\u5b89\u5168\u6743\u9650\u4e0e\u81ea\u4e3b\u6027',
+  agentEmployeeControl: '\u5458\u5de5\u80fd\u529b\u63a7\u5236\u53f0',
+  agentUnifiedSettings: '\u7edf\u4e00\u5728\u667a\u80fd\u4f53\u8bbe\u7f6e\u91cc\u7ba1\u7406',
+  agentToolbox: '\u5458\u5de5\u5de5\u5177\u5305',
+  agentToolboxCopy: '\u6a21\u578b\u3001\u6280\u80fd\u3001CLI\u3001MCP\u3001\u8f6f\u4ef6\u548c\u6743\u9650',
+  agentAssignAbility: '\u5206\u914d\u80fd\u529b',
+  agentCustomerDelivery: '\u4ea4\u4ed8\u7ed9\u5ba2\u6237\u770b\u5230',
+  agentPermissionSafety: '\u6743\u9650\u4e0e\u5b89\u5168',
+  agentCollaborationMode: '\u534f\u4f5c\u65b9\u5f0f',
+  agentDeliveryOutput: '\u8f93\u51fa\u4ea4\u4ed8',
+  agentUnifiedCapabilities: '\u6280\u80fd / MCP / CLI / \u8f6f\u4ef6',
+  agentCurrentSummary: '\u8fd9\u4e2a\u667a\u80fd\u4f53\u73b0\u5728\u7684\u914d\u7f6e',
+  agentEmployeeName: '\u5458\u5de5\u540d\u79f0',
+  agentRequiredDelivery: '\u5fc5\u987b\u4ea4\u4ed8',
+  agentUseModel: '\u4f7f\u7528\u6a21\u578b',
+  agentWorkstation: '\u5de5\u4f5c\u4f4d\u7f6e',
+  agentCommandAbility: '\u547d\u4ee4\u884c\u80fd\u529b',
+  agentToolConnection: '\u5de5\u5177\u8fde\u63a5',
+  agentSoftwareAbility: '\u8f6f\u4ef6\u80fd\u529b',
   saveCurrentAgent: '\u4fdd\u5b58\u5f53\u524d\u8bbe\u7f6e',
   newAgentProfile: '\u65b0\u5efa\u914d\u7f6e',
   detailedConfig: '\u8be6\u7ec6\u914d\u7f6e',
@@ -60,14 +111,43 @@ const uiText = {
   toolsSoftwareCard: 'Codex CLI',
   toolsModeStat: 'CLI / MCP \u6a21\u5f0f',
   toolsIntro: '\u8f6f\u4ef6\u4ecb\u7ecd',
+  toolsSoftwareDetail: '\u8f6f\u4ef6\u8be6\u60c5',
+  toolsCliMode: 'CLI \u6a21\u5f0f',
+  toolsMcpMode: 'MCP \u6a21\u5f0f',
+  toolsPackagedCommands: '\u5c01\u88c5\u547d\u4ee4',
+  toolsAssignableToAgent: '\u53ef\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
+  toolsAgentUse: '\u7ed9\u667a\u80fd\u4f53\u4f7f\u7528',
+  toolsAssignToAgent: '\u6253\u5f00\u667a\u80fd\u4f53\u8bbe\u7f6e\u5e76\u5206\u914d',
+  toolsUsePath: '\u8f6f\u4ef6\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
+  toolsStepChoose: '\u9009\u62e9\u8f6f\u4ef6',
+  toolsStepCheck: '\u68c0\u6d4b\u63a5\u5165',
+  toolsStepAssign: '\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
+  toolsAssignmentPlan: '\u5206\u914d\u5efa\u8bae',
+  toolsFitAgent: '\u9002\u5408\u667a\u80fd\u4f53',
+  toolsAccessRoute: '\u63a5\u5165\u8def\u7ebf',
   toolsCliAccess: 'CLI \u63a5\u5165',
   toolsMcpAccess: 'MCP \u63a5\u5165',
+  toolsAvailableCommands: '\u53ef\u7528\u547d\u4ee4',
 
   skillsNav: '\u6280\u80fd\u4e2d\u5fc3',
   skillsMarket: 'SkillsMP \u6280\u80fd\u5e02\u573a',
   skillsCli: 'SkillsMP CLI',
   skillsSearchPlaceholder: '\u641c\u7d22\u6280\u80fd\uff0c\u6bd4\u5982\uff1a\u5199\u4ee3\u7801\u3001\u8fd0\u8425\u3001\u6d4f\u89c8\u5668\u3001\u89c6\u9891',
+  skillsFeatured: '\u63a8\u8350\u6280\u80fd',
+  skillsUsePath: '\u6280\u80fd\u600e\u4e48\u53d8\u6210\u667a\u80fd\u4f53\u80fd\u529b',
+  skillsStepSearch: '\u641c\u7d22\u6280\u80fd',
+  skillsStepInstall: '\u5b89\u88c5\u5230\u672c\u5730',
+  skillsStepAssign: '\u5206\u914d\u7ed9\u667a\u80fd\u4f53',
+  skillsInstalledHint: '\u5df2\u5b89\u88c5\u6280\u80fd\u4f1a\u51fa\u73b0\u5728\u667a\u80fd\u4f53\u8bbe\u7f6e\u91cc',
+  skillsAssignmentPlan: '\u5206\u914d\u5efa\u8bae',
   skillsSmokeResult: 'smoke-research-plus',
+  skillsAgentFit: '\u667a\u80fd\u4f53\u9002\u914d',
+  skillsSuitableRole: '\u9002\u5408\u5c97\u4f4d',
+  skillsCapabilityBoost: '\u80fd\u529b\u589e\u76ca',
+  skillsConfigLocation: '\u914d\u7f6e\u4f4d\u7f6e',
+  skillsDetailAgentUse: '\u7ed9\u667a\u80fd\u4f53\u4f7f\u7528',
+  skillsAssignToAgent: '\u6253\u5f00\u667a\u80fd\u4f53\u8bbe\u7f6e\u5e76\u5206\u914d',
+  skillsInstallLocal: '\u5b89\u88c5\u5230\u672c\u5730',
 
   canvasNav: '\u7f16\u6392\u753b\u5e03',
   canvasTitle: '\u667a\u80fd\u4f53\u7f16\u6392\u753b\u5e03',
@@ -77,16 +157,86 @@ const uiText = {
   customerDeliverables: '\u5ba2\u6237\u4ea4\u4ed8\u7269',
   customerVisible: '\u5ba2\u6237\u53ef\u89c1',
   videoArtifact: '\u89c6\u9891',
+  canvasNodeProgress: '\u8282\u70b9\u8fdb\u5ea6',
+  canvasNodeDelivery: '\u4ea4\u4ed8 \u89c6\u9891',
+  canvasNodeComplete: '\u5df2\u5b8c\u6210',
+  canvasNodeCompleteStep: '\u5df2\u751f\u6210\u5ba2\u6237\u53ef\u89c1\u89c6\u9891\u4ea7\u7269',
+  canvasDeliveryChecklist: '\u4ea4\u4ed8\u6e05\u5355',
+  canvasCurrentArtifact: '\u5f53\u524d\u4ea7\u7269',
+  canvasAcceptanceState: '\u9a8c\u6536\u72b6\u6001',
+  canvasProduced: '\u5df2\u4ea7\u51fa',
+  canvasPendingArtifact: '\u5f85\u4ea7\u51fa',
+  canvasRunStatus: '\u8fd0\u884c\u72b6\u6001',
+  canvasNextStep: '\u4e0b\u4e00\u6b65',
+  startCanvasConnection: '\u4ece\u8fd9\u4e2a\u8282\u70b9\u5f00\u59cb\u8fde\u7ebf',
+  connectingPaletteHint: '\u4f1a\u81ea\u52a8\u63a5\u5230\u5f53\u524d\u8fde\u7ebf\u6e90',
+  canvasZoomIn: '\u653e\u5927\u753b\u5e03',
+  canvasFitView: '\u9002\u914d\u89c6\u56fe',
+  saveWorkflow: '\u4fdd\u5b58',
+  runWorkflow: '\u8fd0\u884c',
   advancedSettings: '\u9ad8\u7ea7\u8bbe\u7f6e',
   runMonitor: '\u8fd0\u884c\u4e0e\u76d1\u63a7',
-  analyticsNav: '\u6570\u636e\u5206\u6790',
-  analyticsTitle: '\u7528\u91cf\u5206\u6790',
+  analyticsNav: '\u8d39\u7528\u5206\u6790',
+  analyticsTitle: '\u8d39\u7528\u5206\u6790',
+  costCommandCenter: '\u6210\u672c\u9a7e\u9a76\u8231',
+  modelSpendRanking: '\u6a21\u578b\u82b1\u8d39\u6392\u884c',
+  agentSpendRanking: 'Agent \u6d88\u8017\u6392\u884c',
+  inputCostReducedTo: '\u8f93\u5165\u6210\u672c\u964d\u81f3',
+  topSpendingModel: '\u6700\u70e7\u94b1\u6a21\u578b',
   modelActualUsage: '\u6a21\u578b\u5b9e\u9645\u6d88\u8017',
+  modelBillRanking: '\u6a21\u578b\u8d39\u7528\u6392\u884c',
+  modelCostDiagnosis: '\u6a21\u578b\u8d39\u7528\u8bca\u65ad',
+  actualBill: '\u5b9e\u9645\u8d26\u5355',
+  actualSpend: '\u5b9e\u9645\u82b1\u8d39',
+  cacheSaved: '\u7f13\u5b58\u8282\u7701',
+  cacheSavingRate: '\u7f13\u5b58\u7701\u94b1\u7387',
+  noCacheEstimate: '\u65e0\u7f13\u5b58\u4f30\u7b97',
+  avgCostPerRequest: '\u8bf7\u6c42\u5747\u4ef7',
+  optimizableModel: '\u53ef\u4f18\u5316\u6a21\u578b',
+  modelBillDetail: '\u6a21\u578b\u8d26\u5355\u660e\u7ec6',
+  costShare: '\u6210\u672c\u5360\u6bd4',
+  savedVsNoCache: '\u5b9e\u9645\u6bd4\u65e0\u7f13\u5b58\u5c11',
   contextWindow: '\u4e0a\u4e0b\u6587\u7a97\u53e3',
   runtimeMetrics: '\u8fd0\u884c\u6307\u6807',
   costTitle: '\u6210\u672c',
   sessionStatus: '\u4f1a\u8bdd\u72b6\u6001',
+  promptCacheTitle: '\u957f\u4f1a\u8bdd\u7f13\u5b58',
+  appendOnlyContext: '\u8ffd\u52a0\u5f0f\u4e0a\u4e0b\u6587',
+  targetCacheHit: '\u76ee\u6807\u547d\u4e2d',
   projectContext: '\u5de5\u7a0b\u6587\u4ef6\u4e0a\u4e0b\u6587',
+  schedulerNav: '\u81ea\u52a8\u4efb\u52a1',
+  schedulerTitle: '\u81ea\u52a8\u4efb\u52a1',
+  schedulerQueue: '\u4efb\u52a1\u961f\u5217',
+  schedulerRules: '\u5b9a\u65f6\u89c4\u5219',
+  schedulerQuickActions: '\u5feb\u901f\u64cd\u4f5c',
+  schedulerRunDue: '\u7acb\u5373\u8fd0\u884c\u5230\u671f\u4efb\u52a1',
+  artifactsNav: '\u4ea4\u4ed8\u7269',
+  artifactsTitle: '\u4ea4\u4ed8\u7269\u4e2d\u5fc3',
+  artifactsSearch: '\u641c\u7d22\u4ea4\u4ed8\u7269',
+  artifactsVersions: '\u5168\u90e8\u7248\u672c',
+  artifactsSource: '\u6765\u6e90\u4f1a\u8bdd',
+  artifactsCustomerOverview: '\u5ba2\u6237\u53ef\u89c1\u4ea4\u4ed8\u603b\u89c8',
+  artifactsAgentOutput: 'Agent \u6700\u7ec8\u4ea7\u7269',
+  artifactsGenerateOutput: '\u751f\u6210\u4ea7\u7269',
+  artifactsPreviewAcceptance: '\u9884\u89c8\u9a8c\u6536',
+  artifactsPackageDelivery: '\u6253\u5305\u4ea4\u4ed8',
+  artifactsPendingReview: '\u5f85\u4eba\u5de5\u786e\u8ba4',
+  artifactsLoading: '\u6b63\u5728\u52a0\u8f7d\u4ea4\u4ed8\u7269',
+  artifactsPackage: '\u5ba2\u6237\u4ea4\u4ed8\u5305',
+  artifactsCustomerReadable: '\u5ba2\u6237\u53ef\u8bfb',
+  artifactsPreviewable: '\u53ef\u9884\u89c8',
+  artifactsTraceable: '\u53ef\u8ffd\u6eaf',
+  artifactsDeliveryCheck: '\u4ea4\u4ed8\u68c0\u67e5',
+  monitorNav: '\u8fd0\u884c\u73b0\u573a',
+  monitorTitle: '\u8fd0\u884c\u73b0\u573a',
+  monitorSceneOverview: '\u73b0\u573a\u603b\u89c8',
+  monitorCurrentRuns: '\u4efb\u52a1\u961f\u5217\u4e0e\u5f53\u524d\u6b65\u9aa4',
+  monitorRecentEvents: '\u6700\u8fd1\u4e8b\u4ef6',
+  monitorNeedHandle: '\u662f\u5426\u9700\u8981\u5904\u7406',
+  monitorDeliveryState: '\u4ea4\u4ed8\u7269\u72b6\u6001',
+  monitorNextStep: '\u4e0b\u4e00\u6b65',
+  monitorAdvanced: '\u9ad8\u7ea7\u76d1\u63a7',
+  monitorArtifacts: '\u4ea7\u7269',
   moreFeatures: '\u66f4\u591a\u529f\u80fd',
   hiddenAdvancedNav: [
     '\u8bb0\u5fc6\u5b66\u4e60',
@@ -103,7 +253,10 @@ async function main() {
   const outDir = path.resolve('output/playwright')
   mkdirSync(outDir, { recursive: true })
 
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: resolveLocalBrowserExecutable(),
+  })
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   const consoleErrors: string[] = []
   page.on('console', (msg) => {
@@ -112,10 +265,119 @@ async function main() {
 
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 90_000 })
   await page.getByText('AgentHub').first().waitFor({ timeout: 90_000 })
+  const sidebar = page.locator('aside').first()
+  await page.getByTestId('desktop-workbench').waitFor({ timeout: 90_000 })
   await page.waitForTimeout(2_000)
   await cleanupSmokeModels(page, baseUrl)
 
-  await page.locator(`aside button[title="${uiText.settingsButton}"]`).click()
+  const workbenchText = await page.locator('main').innerText()
+  const initialSidebarText = await sidebar.innerText()
+  const workbenchScreenshot = path.join(outDir, 'desktop-workbench-home.png')
+  await page.screenshot({ path: workbenchScreenshot, fullPage: true })
+  const workbenchChecks = {
+    defaultWorkbench: workbenchText.includes(uiText.workbenchTitle),
+    startAction: workbenchText.includes(uiText.workbenchStart),
+    runSite: workbenchText.includes(uiText.workbenchRunSite),
+    liveActivity: workbenchText.includes(uiText.workbenchActivity),
+    activityQueue: workbenchText.includes(uiText.workbenchQueued),
+    activityToolActions: workbenchText.includes(uiText.workbenchToolActions),
+    activityEmptyOrRows: workbenchText.includes(uiText.workbenchNoRealRun) ||
+      workbenchText.includes('\u6700\u8fd1\u8fd0\u884c'),
+    capabilities: workbenchText.includes(uiText.workbenchCapabilities),
+    teamMode: workbenchText.includes(uiText.workbenchTeamMode),
+    modelMode: workbenchText.includes(uiText.workbenchModelMode),
+    assignmentPreview: workbenchText.includes(uiText.workbenchAssignment),
+    readiness: workbenchText.includes(uiText.workbenchReadiness),
+    readinessNode: await page.getByTestId('workbench-readiness-checklist').isVisible(),
+    modelReady: workbenchText.includes(uiText.workbenchModelReady),
+    agentReady: workbenchText.includes(uiText.workbenchAgentReady),
+    skillReady: workbenchText.includes(uiText.workbenchSkillReady),
+    toolReady: workbenchText.includes(uiText.workbenchToolReady),
+    desktopSafe: workbenchText.includes(uiText.workbenchDesktopSafe),
+    readyRatio: workbenchText.includes(uiText.workbenchReadyRatio),
+    autoPackage: workbenchText.includes(uiText.workbenchAutoPackage),
+    packageBadge: workbenchText.includes(uiText.workbenchPackageBadge),
+    codePackage: workbenchText.includes(uiText.workbenchCodePackage),
+    currentTaskPreview: workbenchText.includes(uiText.workbenchCurrentTask),
+    assigneePreview: workbenchText.includes(uiText.workbenchAssignee),
+    deliverablePreview: workbenchText.includes(uiText.workbenchDeliverables),
+    stablePrefixPolicy: workbenchText.includes(uiText.workbenchStablePrefix),
+    noGarbledRunTitle: !/\?{6,}/.test(workbenchText),
+    productionHiddenFromPrimaryNav: !initialSidebarText.includes(uiText.productionNav),
+  }
+  for (const [key, value] of Object.entries(workbenchChecks)) {
+    if (!value) throw new Error(`Desktop workbench check failed: ${key}.`)
+  }
+  await page.locator('main button', { hasText: uiText.workbenchModelMode }).click()
+  if (!(await page.locator('main').innerText()).includes('\u666e\u901a\u5bf9\u8bdd')) {
+    throw new Error('Workbench model mode should update the assignment preview.')
+  }
+  await page.locator('main button', { hasText: uiText.workbenchTeamMode }).click()
+
+  let workbenchEmployeeRunStarted = 0
+  await page.route('**/api/agent-profiles/*/run', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    workbenchEmployeeRunStarted += 1
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        employeeRun: {
+          id: `run_smoke_workbench_${workbenchEmployeeRunStarted}`,
+          agentProfileId: 'agent_profile_smoke',
+          workflowRunId: null,
+          goal: uiText.workbenchSmokeGoal,
+          input: { source: 'desktop_workbench' },
+          plan: ['Smoke employee run'],
+          status: 'complete',
+          currentPhase: 'complete',
+          currentStep: 'Runtime lifecycle complete',
+          output: { status: 'ready_for_executor' },
+          error: null,
+          budgetLimitCents: null,
+          estimatedCostCents: 1,
+          actualCostCents: 1,
+          createdAt: Date.now(),
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+          finishedAt: Date.now(),
+        },
+      }),
+    })
+  })
+  await page.locator('main textarea').fill(uiText.workbenchSmokeGoal)
+  await page.locator('main button', { hasText: uiText.workbenchStart }).click()
+  await page.locator(`textarea[placeholder*="${uiText.chatInput}"]`).waitFor({ timeout: 90_000 })
+  const directWorkbenchTaskVisible = (await page.locator('body').innerText()).includes(uiText.workbenchSmokeGoal)
+  if (workbenchEmployeeRunStarted === 0 || !directWorkbenchTaskVisible) {
+    throw new Error('Workbench start should create a conversation and start real employee runs for the typed goal.')
+  }
+  await page.unroute('**/api/agent-profiles/*/run')
+  await clickSidebarButton(sidebar, uiText.workbenchNav)
+  await page.getByTestId('desktop-workbench').waitFor({ timeout: 90_000 })
+  const firstEmployeeRunRow = page.locator('[data-testid="run-activity-row"][data-kind="employee_run"]').first()
+  await firstEmployeeRunRow.click({ timeout: 90_000 })
+  const runSnapshotPanel = page.getByTestId('run-snapshot-panel')
+  await runSnapshotPanel.waitFor({ timeout: 90_000 })
+  await runSnapshotPanel.getByText(uiText.workbenchPlanSteps, { exact: true }).waitFor({ timeout: 90_000 })
+  await runSnapshotPanel.getByText(uiText.workbenchRunEvents, { exact: true }).waitFor({ timeout: 90_000 })
+  await runSnapshotPanel.scrollIntoViewIfNeeded()
+  const runSnapshotPanelText = await runSnapshotPanel.innerText()
+  const workbenchRunDetailScreenshot = path.join(outDir, 'workbench-run-detail.png')
+  await page.screenshot({ path: workbenchRunDetailScreenshot, fullPage: true })
+  const runDetailChecks = {
+    title: runSnapshotPanelText.includes(uiText.workbenchRunDetail),
+    planSteps: runSnapshotPanelText.includes(uiText.workbenchPlanSteps),
+    runEvents: runSnapshotPanelText.includes(uiText.workbenchRunEvents),
+    runtimeEnvironment: runSnapshotPanelText.includes(uiText.workbenchRuntimeEnvironment),
+    workspacePath: runSnapshotPanelText.includes(uiText.workbenchWorkspacePath),
+    browserProfile: runSnapshotPanelText.includes(uiText.workbenchBrowserProfile),
+  }
+  for (const [key, value] of Object.entries(runDetailChecks)) {
+    if (!value) throw new Error(`Workbench run detail check failed: ${key}.`)
+  }
+
+  await sidebar.locator(`button[title="${uiText.settingsButton}"]`).click()
   const settingsDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.settingsTitle }).first()
   await settingsDialog.getByText(uiText.settingsKeysTab, { exact: true }).waitFor({ timeout: 30_000 })
   const settingsDialogText = await settingsDialog.innerText()
@@ -129,6 +391,7 @@ async function main() {
   await settingsDialog.getByRole('button', { name: '\u53d6\u6d88' }).click()
   await settingsDialog.waitFor({ state: 'hidden', timeout: 10_000 })
 
+  await clickSidebarButton(sidebar, uiText.conversationNav)
   await page.getByRole('button', { name: uiText.newConversation }).click()
   await page.locator(`textarea[placeholder*="${uiText.chatInput}"]`).waitFor({ timeout: 90_000 })
   const modelPickerDialogCount = await page
@@ -148,9 +411,10 @@ async function main() {
     if (!value) throw new Error(`Direct new conversation check failed: ${key}.`)
   }
 
-  const smokeModelName = `UI \u4e34\u65f6\u6a21\u578b ${Date.now()}`
-  await page.locator('aside button', { hasText: uiText.modelsNav }).click({ force: true })
+  const smokeModelName = `UI temp model ${Date.now()}`
+  await clickSidebarButton(sidebar, uiText.modelsNav)
   await page.locator('main').getByText(uiText.modelsTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByTestId('model-profile-card').first().waitFor({ timeout: 90_000 })
   await page.locator('main button', { hasText: uiText.addModel }).first().click()
   const modelDialog = page.locator('[role="dialog"]').filter({ hasText: uiText.addModel }).first()
   await modelDialog.getByText(uiText.addModel, { exact: true }).waitFor({ timeout: 90_000 })
@@ -175,7 +439,7 @@ async function main() {
     if (!value) throw new Error(`Model management UI check failed: ${key}.`)
   }
 
-  await page.locator('aside button', { hasText: uiText.conversationNav }).click({ force: true })
+  await clickSidebarButton(sidebar, uiText.conversationNav)
   await page.getByRole('button', { name: uiText.workArea }).click()
   const dialog = page.locator('[role="dialog"]')
   await dialog.getByText(uiText.workAreaCopy).waitFor({ timeout: 90_000 })
@@ -183,7 +447,7 @@ async function main() {
   await dialog.getByRole('button', { name: '\u53d6\u6d88' }).click()
   await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
 
-  await page.locator(`aside button[title="${uiText.agentsNav}"]`).click({ force: true })
+  await clickSidebarButton(sidebar, uiText.agentsNav)
   await page.getByText(uiText.createAgent, { exact: true }).waitFor({ timeout: 90_000 })
   const oldFactoryNavCount = await page.locator(`aside button[title="${uiText.oldFactoryNav}"]`).count()
   const settingsButtons = page.locator(`main button[title="${uiText.agentSettingsButtonTitle}"]`)
@@ -192,11 +456,12 @@ async function main() {
   await firstSettingsButton.click()
   await page.getByText(uiText.agentAbilityTab, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.agentIdentitySection, { exact: true }).waitFor({ timeout: 120_000 })
+  await page.getByText(uiText.agentEmployeeControl, { exact: true }).waitFor({ timeout: 120_000 })
   await page.getByText(uiText.agentMemoryContextSection, { exact: true }).waitFor({ timeout: 120_000 })
   await page.getByText(uiText.agentSecuritySection, { exact: true }).waitFor({ timeout: 120_000 })
-  const moreButton = page.locator('aside button', { hasText: uiText.moreFeatures })
+  const moreButton = sidebar.locator('button', { hasText: uiText.moreFeatures })
   if ((await moreButton.count()) > 0) await moreButton.first().click({ force: true })
-  const sidebarText = await page.locator('aside').innerText()
+  const sidebarText = await sidebar.innerText()
   const agentScreenshot = path.join(outDir, 'agents-unified-settings.png')
   await page.screenshot({ path: agentScreenshot, fullPage: true })
   const agentBodyText = await page.locator('body').innerText()
@@ -204,9 +469,29 @@ async function main() {
     singleAgentEntry: agentBodyText.includes(uiText.createAgent),
     oldFactoryNavHidden: oldFactoryNavCount === 0,
     settingsGear: (await settingsButtons.count()) > 0,
+    agentCardToolbox: (await page.getByTestId('agent-card-toolbox').count()) > 0,
     settingsPanel: agentBodyText.includes(uiText.agentAbilityTab),
+    currentSummary: agentBodyText.includes(uiText.agentCurrentSummary),
+    employeeNameLabel: agentBodyText.includes(uiText.agentEmployeeName),
+    requiredDeliveryLabel: agentBodyText.includes(uiText.agentRequiredDelivery),
+    useModelLabel: agentBodyText.includes(uiText.agentUseModel),
+    workstationLabel: agentBodyText.includes(uiText.agentWorkstation),
+    commandAbility: agentBodyText.includes(uiText.agentCommandAbility),
+    toolConnection: agentBodyText.includes(uiText.agentToolConnection),
+    softwareAbility: agentBodyText.includes(uiText.agentSoftwareAbility),
     saveOrCreateProfile:
       agentBodyText.includes(uiText.saveCurrentAgent) || agentBodyText.includes(uiText.newAgentProfile),
+    employeeControlPanel: agentBodyText.includes(uiText.agentEmployeeControl),
+    unifiedSettingsCopy: agentBodyText.includes(uiText.agentUnifiedSettings),
+    toolboxSummary: agentBodyText.includes(uiText.agentToolbox),
+    toolboxCopy: agentBodyText.includes(uiText.agentToolboxCopy),
+    toolboxAssignAction: agentBodyText.includes(uiText.agentAssignAbility),
+    toolboxNode: await page.getByTestId('agent-toolbox-summary').isVisible(),
+    customerDelivery: agentBodyText.includes(uiText.agentCustomerDelivery),
+    permissionSafetySummary: agentBodyText.includes(uiText.agentPermissionSafety),
+    collaborationSummary: agentBodyText.includes(uiText.agentCollaborationMode),
+    deliverySummary: agentBodyText.includes(uiText.agentDeliveryOutput),
+    unifiedCapabilitySummary: agentBodyText.includes(uiText.agentUnifiedCapabilities),
     memoryContextInAgentSettings: agentBodyText.includes(uiText.agentMemoryContextSection),
     securityInAgentSettings: agentBodyText.includes(uiText.agentSecuritySection),
     advancedNavHidden: uiText.hiddenAdvancedNav.every((label) => !sidebarText.includes(label)),
@@ -237,33 +522,23 @@ async function main() {
   await page.locator('[role="dialog"]').getByRole('button', { name: '\u53d6\u6d88' }).click()
   await page.locator('[role="dialog"]').waitFor({ state: 'hidden', timeout: 10_000 })
 
-  await page.locator(`aside button[title="${uiText.productionNav}"]`).click({ force: true })
-  await page.locator('main').getByText(uiText.productionTitle, { exact: true }).waitFor({ timeout: 120_000 })
-  const productionScreenshot = path.join(outDir, 'production-simple-workbench.png')
-  await page.screenshot({ path: productionScreenshot, fullPage: true })
-  const productionBodyText = await page.locator('body').innerText()
-  const productionChecks = {
-    title: productionBodyText.includes(uiText.productionTitle),
-    score: productionBodyText.includes(uiText.productionScore),
-    actions: productionBodyText.includes(uiText.productionActions),
-    generateGoLive: productionBodyText.includes(uiText.generateGoLive),
-    generateLivePilot: productionBodyText.includes(uiText.generateLivePilot),
-    startLivePilot: productionBodyText.includes(uiText.startLivePilot),
-    exportActivation: productionBodyText.includes(uiText.exportActivation),
-    exportCustomer: productionBodyText.includes(uiText.exportCustomer),
-    deliveryStep: productionBodyText.includes(uiText.deliveryStep),
-    mobileHiddenForNow: !productionBodyText.includes(uiText.mobileCheck),
-  }
-  for (const [key, value] of Object.entries(productionChecks)) {
-    if (!value) throw new Error(`Production UI check failed: ${key}.`)
+  const productionNavCount = await sidebar.locator(`button[title="${uiText.productionNav}"]`).count()
+  if (productionNavCount > 0) {
+    throw new Error('Production/delivery check should stay hidden from the simplified desktop navigation.')
   }
 
-  await page.locator('aside button', { hasText: uiText.toolsNav }).click({ force: true })
+  await clickSidebarButton(sidebar, uiText.toolsNav)
   await page.getByText(uiText.toolsTitle).waitFor({ timeout: 90_000 })
-  await page.getByTestId('software-store-card-codex-cli').click()
+  await page.getByTestId('software-store-card-codex').click()
   await page.getByTestId('software-store-detail').getByText(uiText.toolsIntro, { exact: true }).waitFor({
     timeout: 90_000,
   })
+  await page.getByTestId('software-store-card-codex-cli').click()
+  await page
+    .getByTestId('software-store-detail')
+    .getByText(uiText.toolsCliAccess, { exact: true })
+    .waitFor({ timeout: 90_000 })
+  await page.getByTestId('software-store-card-codex').click()
   const toolsScreenshot = path.join(outDir, 'tools-simple-workbench.png')
   await page.screenshot({ path: toolsScreenshot, fullPage: true })
   const toolsBodyText = await page.locator('body').innerText()
@@ -274,12 +549,49 @@ async function main() {
     category: toolsBodyText.includes(uiText.toolsCategory),
     softwareCard: toolsBodyText.includes(uiText.toolsSoftwareCard),
     modeStat: toolsBodyText.includes(uiText.toolsModeStat),
+    usePathNode: await page.getByTestId('software-store-use-path').isVisible(),
+    usePathText: toolsBodyText.includes(uiText.toolsUsePath),
+    usePathChoose: toolsBodyText.includes(uiText.toolsStepChoose),
+    usePathCheck: toolsBodyText.includes(uiText.toolsStepCheck),
+    usePathAssign: toolsBodyText.includes(uiText.toolsStepAssign),
     intro: toolsBodyText.includes(uiText.toolsIntro),
+    softwareDetail: toolsBodyText.includes(uiText.toolsSoftwareDetail),
+    useGuideNode: await page.getByTestId('software-store-use-guide').isVisible(),
+    assignmentPlanNode: await page.getByTestId('software-store-assignment-plan').isVisible(),
+    assignmentPlanText: toolsBodyText.includes(uiText.toolsAssignmentPlan),
+    fitAgentText: toolsBodyText.includes(uiText.toolsFitAgent),
+    accessRouteText: toolsBodyText.includes(uiText.toolsAccessRoute),
+    cliMode: toolsBodyText.includes(uiText.toolsCliMode),
+    mcpMode: toolsBodyText.includes(uiText.toolsMcpMode),
+    packagedCommands: toolsBodyText.includes(uiText.toolsPackagedCommands),
+    assignableToAgent: toolsBodyText.includes(uiText.toolsAssignableToAgent),
+    agentUse: toolsBodyText.includes(uiText.toolsAgentUse),
+    assignToAgent: toolsBodyText.includes(uiText.toolsAssignToAgent),
     cliAccess: toolsBodyText.includes(uiText.toolsCliAccess),
     mcpAccess: toolsBodyText.includes(uiText.toolsMcpAccess),
+    availableCommands: toolsBodyText.includes(uiText.toolsAvailableCommands),
   }
   for (const [key, value] of Object.entries(toolsChecks)) {
     if (!value) throw new Error(`Tools UI check failed: ${key}.`)
+  }
+  await page.getByTestId('assign-software-to-agent').click()
+  await page.getByText(uiText.agentCurrentSummary, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByTestId('agent-capabilities-section').waitFor({ timeout: 90_000 })
+  const toolsToAgentScreenshot = path.join(outDir, 'tools-to-agent-settings.png')
+  await page.screenshot({ path: toolsToAgentScreenshot, fullPage: true })
+  const toolsToAgentText = await page.locator('body').innerText()
+  const toolsToAgentChecks = {
+    openedAgentSettings: toolsToAgentText.includes(uiText.agentCurrentSummary),
+    toolboxSummary: toolsToAgentText.includes(uiText.agentToolbox),
+    toolboxCopy: toolsToAgentText.includes(uiText.agentToolboxCopy),
+    assignAbility: toolsToAgentText.includes(uiText.agentAssignAbility),
+    toolboxNode: await page.getByTestId('agent-toolbox-summary').isVisible(),
+    commandAbility: toolsToAgentText.includes(uiText.agentCommandAbility),
+    toolConnection: toolsToAgentText.includes(uiText.agentToolConnection),
+    softwareAbility: toolsToAgentText.includes(uiText.agentSoftwareAbility),
+  }
+  for (const [key, value] of Object.entries(toolsToAgentChecks)) {
+    if (!value) throw new Error(`Tools to Agent assignment check failed: ${key}.`)
   }
 
   await page.route('**/api/skills/skillsmp-cli', async (route) => {
@@ -327,11 +639,21 @@ async function main() {
       }),
     })
   })
-  await page.locator('aside button', { hasText: uiText.skillsNav }).click({ force: true })
+  await clickSidebarButton(sidebar, uiText.skillsNav)
   await page.getByText(uiText.skillsMarket, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByPlaceholder(uiText.skillsSearchPlaceholder).waitFor({ timeout: 90_000 })
+  await page.getByTestId('skillsmp-featured-market').getByText(uiText.skillsFeatured, { exact: true }).waitFor({
+    timeout: 90_000,
+  })
   await page.locator('main button', { hasText: '\u641c\u7d22' }).click()
-  await page.getByText(uiText.skillsSmokeResult, { exact: true }).waitFor({ timeout: 90_000 })
+  const smokeSkillCard = page.getByTestId('skillsmp-result-card').filter({ hasText: uiText.skillsSmokeResult }).first()
+  await smokeSkillCard.waitFor({ timeout: 90_000 })
+  await smokeSkillCard.click()
+  await page
+    .getByTestId('skillsmp-detail-panel')
+    .filter({ hasText: uiText.skillsSmokeResult })
+    .first()
+    .waitFor({ timeout: 90_000 })
   const skillsScreenshot = path.join(outDir, 'skillsmp-cli-market.png')
   await page.screenshot({ path: skillsScreenshot, fullPage: true })
   const skillsBodyText = await page.locator('body').innerText()
@@ -339,13 +661,50 @@ async function main() {
     title: skillsBodyText.includes(uiText.skillsMarket),
     cliBadge: skillsBodyText.includes(uiText.skillsCli),
     searchInput: await page.getByPlaceholder(uiText.skillsSearchPlaceholder).isVisible(),
+    usePathNode: await page.getByTestId('skills-use-path').isVisible(),
+    usePathText: skillsBodyText.includes(uiText.skillsUsePath),
+    usePathSearch: skillsBodyText.includes(uiText.skillsStepSearch),
+    usePathInstall: skillsBodyText.includes(uiText.skillsStepInstall),
+    usePathAssign: skillsBodyText.includes(uiText.skillsStepAssign),
+    installedAgentHint: skillsBodyText.includes(uiText.skillsInstalledHint),
+    installedAgentHintNode: await page.getByTestId('installed-skills-agent-hint').isVisible(),
     resultCard: skillsBodyText.includes(uiText.skillsSmokeResult),
+    selectedCard: await page
+      .getByTestId('skillsmp-result-card')
+      .filter({ hasText: uiText.skillsSmokeResult })
+      .first()
+      .evaluate((node) => node.getAttribute('data-selected') === 'true'),
+    detailPanel: await page.getByTestId('skillsmp-detail-panel').isVisible(),
+    assignmentPlanNode: await page.getByTestId('skills-agent-assignment-plan').isVisible(),
+    assignmentPlanText: skillsBodyText.includes(uiText.skillsAssignmentPlan),
+    agentFitGuide: await page.getByTestId('skillsmp-agent-fit-guide').isVisible(),
+    agentFit: skillsBodyText.includes(uiText.skillsAgentFit),
+    suitableRole: skillsBodyText.includes(uiText.skillsSuitableRole),
+    capabilityBoost: skillsBodyText.includes(uiText.skillsCapabilityBoost),
+    configLocation: skillsBodyText.includes(uiText.skillsConfigLocation),
+    agentUseCopy: skillsBodyText.includes(uiText.skillsDetailAgentUse),
+    assignToAgent: skillsBodyText.includes(uiText.skillsAssignToAgent),
+    installLocal: skillsBodyText.includes(uiText.skillsInstallLocal),
   }
   for (const [key, value] of Object.entries(skillsChecks)) {
     if (!value) throw new Error(`SkillsMP UI check failed: ${key}.`)
   }
+  await page.getByTestId('assign-skill-to-agent').click()
+  await page.getByText(uiText.agentCurrentSummary, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByTestId('agent-capabilities-section').waitFor({ timeout: 90_000 })
+  const skillsToAgentText = await page.locator('body').innerText()
+  const skillsToAgentChecks = {
+    openedAgentSettings: skillsToAgentText.includes(uiText.agentCurrentSummary),
+    toolboxSummary: skillsToAgentText.includes(uiText.agentToolbox),
+    toolboxCopy: skillsToAgentText.includes(uiText.agentToolboxCopy),
+    assignAbility: skillsToAgentText.includes(uiText.agentAssignAbility),
+    toolboxNode: await page.getByTestId('agent-toolbox-summary').isVisible(),
+  }
+  for (const [key, value] of Object.entries(skillsToAgentChecks)) {
+    if (!value) throw new Error(`Skills to Agent assignment check failed: ${key}.`)
+  }
 
-  await page.locator('aside button', { hasText: uiText.canvasNav }).click({ force: true })
+  await clickSidebarButton(sidebar, uiText.canvasNav)
   await page.getByText(uiText.canvasTitle, { exact: true }).waitFor({ timeout: 90_000 })
   const inlineEditorAlreadyVisible = await page
     .getByText(uiText.inlineEditor, { exact: true })
@@ -364,23 +723,154 @@ async function main() {
   await page.getByTestId('canvas-customer-delivery-dock').getByText(uiText.videoArtifact).first().waitFor({
     timeout: 30_000,
   })
-
-  const firstNode = page.locator('main [role="button"]', { hasText: '\u667a\u80fd\u4f53\u8282\u70b9' }).first()
-  const beforePan = await firstNode.boundingBox()
+  await page
+    .getByTestId('canvas-quick-editor-collapse')
+    .evaluate((element) => (element as HTMLButtonElement).click())
+  const quickEditorCollapsed = page.getByTestId('canvas-quick-editor-collapsed')
+  await quickEditorCollapsed.waitFor({ timeout: 30_000 })
+  const quickEditorCollapsedVisible = await quickEditorCollapsed.isVisible()
+  await quickEditorCollapsed.evaluate((element) => (element as HTMLButtonElement).click())
+  await quickEditor.waitFor({ timeout: 30_000 })
+  const quickEditorExpandedAgain = await quickEditor.isVisible()
   const canvasSurface = page.getByTestId('workflow-canvas-surface')
+  const findBlankCanvasPoint = async () => {
+    return canvasSurface.evaluate((surface) => {
+      const rect = surface.getBoundingClientRect()
+      return {
+        x: rect.left + rect.width * 0.42,
+        y: rect.top + rect.height * 0.62,
+      }
+    })
+  }
+  const openCanvasPaletteAt = async (point: { x: number; y: number }) => {
+    await canvasSurface.evaluate((surface, currentPoint) => {
+      surface.dispatchEvent(
+        new MouseEvent('dblclick', {
+          bubbles: true,
+          cancelable: true,
+          clientX: currentPoint.x,
+          clientY: currentPoint.y,
+        }),
+      )
+    }, point)
+  }
+  const paletteOpenPoint = await findBlankCanvasPoint()
+  const nodesBeforePalette = await page.getByTestId('workflow-canvas-node').count()
+  const edgesBeforePalette = await page.getByTestId('workflow-canvas-edge').count()
+  await openCanvasPaletteAt(paletteOpenPoint)
+  const nodePalette = page.getByTestId('canvas-node-palette')
+  await nodePalette.waitFor({ timeout: 30_000 })
+  await nodePalette.getByRole('button', { name: /条件/ }).click()
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-node"]').length > Number(previous)
+  }, nodesBeforePalette)
+  const paletteCreatedNode = (await page.getByTestId('workflow-canvas-node').count()) > nodesBeforePalette
+
+  const firstCanvasNodeForConnect = page.getByTestId('workflow-canvas-node').first()
+  await firstCanvasNodeForConnect.getByTitle(uiText.startCanvasConnection).last().click()
+  const connectedPaletteOpenPoint = await findBlankCanvasPoint()
+  await openCanvasPaletteAt(connectedPaletteOpenPoint)
+  await nodePalette.waitFor({ timeout: 30_000 })
+  const connectedPaletteHint = await nodePalette.getByText(uiText.connectingPaletteHint).isVisible()
+  await nodePalette.getByRole('button', { name: /产物/ }).click()
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
+  }, edgesBeforePalette)
+  const paletteConnectedEdge =
+    (await page.getByTestId('workflow-canvas-edge').count()) > edgesBeforePalette
+
+  const edgesBeforeDragConnect = await page.getByTestId('workflow-canvas-edge').count()
+  const newestCanvasNodeForDrag = page.getByTestId('workflow-canvas-node').last()
+  const dragSourcePort = newestCanvasNodeForDrag.getByTestId('canvas-node-output-port')
+  const dragTargetPort = firstCanvasNodeForConnect.getByTestId('canvas-node-input-port')
+  const dragSourceBox = await dragSourcePort.boundingBox()
+  const dragTargetBox = await dragTargetPort.boundingBox()
+  if (!dragSourceBox || !dragTargetBox) throw new Error('Canvas UI check failed: dragPorts.')
+  await page.mouse.move(
+    dragSourceBox.x + dragSourceBox.width / 2,
+    dragSourceBox.y + dragSourceBox.height / 2,
+  )
+  await page.mouse.down()
+  await page.mouse.move(
+    dragSourceBox.x + dragSourceBox.width / 2 + 90,
+    dragSourceBox.y + dragSourceBox.height / 2,
+    { steps: 5 },
+  )
+  const dragPreview = page.getByTestId('workflow-canvas-connection-preview')
+  await dragPreview.waitFor({ timeout: 30_000 })
+  const dragPreviewVisible = await dragPreview.isVisible()
+  await page.mouse.move(
+    dragTargetBox.x + dragTargetBox.width / 2,
+    dragTargetBox.y + dragTargetBox.height / 2,
+    { steps: 10 },
+  )
+  await page.mouse.up()
+  await page.waitForFunction((previous) => {
+    return document.querySelectorAll('[data-testid="workflow-canvas-edge"]').length > Number(previous)
+  }, edgesBeforeDragConnect)
+  const dragConnectedEdge =
+    (await page.getByTestId('workflow-canvas-edge').count()) > edgesBeforeDragConnect
+
+  const firstNode = page.getByTestId('workflow-canvas-node').first()
+  const beforePan = await firstNode.boundingBox()
   const canvasBox = await canvasSurface.boundingBox()
   if (!beforePan || !canvasBox) throw new Error('Canvas UI check failed: panSetup.')
-  await page.mouse.move(canvasBox.x + canvasBox.width * 0.52, canvasBox.y + canvasBox.height * 0.72)
+  const beforePanBackground = await canvasSurface.evaluate((surface) => getComputedStyle(surface).backgroundPosition)
+  const panStart = await canvasSurface.evaluate((surface) => {
+    const rect = surface.getBoundingClientRect()
+    for (const yRatio of [0.22, 0.34, 0.46, 0.58, 0.7, 0.82]) {
+      for (const xRatio of [0.16, 0.28, 0.4, 0.52, 0.64, 0.76, 0.88]) {
+        const x = rect.left + rect.width * xRatio
+        const y = rect.top + rect.height * yRatio
+        if (document.elementFromPoint(x, y) === surface) return { x, y }
+      }
+    }
+    return null
+  })
+  if (!panStart) throw new Error('Canvas UI check failed: noBlankPanPoint.')
+  await page.mouse.move(panStart.x, panStart.y)
   await page.mouse.down()
-  await page.mouse.move(canvasBox.x + canvasBox.width * 0.52 + 120, canvasBox.y + canvasBox.height * 0.72 + 60, {
+  await page.mouse.move(panStart.x + 120, panStart.y + 60, {
     steps: 8,
   })
   await page.mouse.up()
+  await page.waitForTimeout(100)
   const afterPan = await firstNode.boundingBox()
+  const afterPanBackground = await canvasSurface.evaluate((surface) => getComputedStyle(surface).backgroundPosition)
   const canvasPan =
     !!afterPan &&
-    Math.abs(afterPan.x - beforePan.x) >= 80 &&
-    Math.abs(afterPan.y - beforePan.y) >= 35
+    ((
+      Math.abs(afterPan.x - beforePan.x) >= 35 &&
+      Math.abs(afterPan.y - beforePan.y) >= 18
+    ) ||
+      afterPanBackground !== beforePanBackground)
+
+  const viewportControls = page.getByTestId('canvas-viewport-controls')
+  await viewportControls.waitFor({ timeout: 30_000 })
+  const zoomLevel = page.getByTestId('canvas-zoom-level')
+  const beforeZoomText = await zoomLevel.innerText()
+  await viewportControls.getByTitle(uiText.canvasZoomIn).click()
+  await page.waitForFunction((previous) => {
+    return document.querySelector('[data-testid="canvas-zoom-level"]')?.textContent !== previous
+  }, beforeZoomText)
+  const zoomedText = await zoomLevel.innerText()
+  await zoomLevel.click()
+  await page.waitForFunction(() => {
+    return document.querySelector('[data-testid="canvas-zoom-level"]')?.textContent?.trim() === '100%'
+  })
+  const resetZoomText = await zoomLevel.innerText()
+  await viewportControls.getByTitle(uiText.canvasFitView).click()
+  await page.waitForTimeout(100)
+  const fitButtonVisible = await viewportControls.getByTitle(uiText.canvasFitView).isVisible()
+  const minimap = page.getByTestId('canvas-minimap')
+  const minimapMap = page.getByTestId('canvas-minimap-map')
+  await minimap.waitFor({ timeout: 30_000 })
+  const beforeMinimapBackground = await canvasSurface.evaluate((surface) => getComputedStyle(surface).backgroundPosition)
+  const minimapBox = await minimapMap.boundingBox()
+  if (!minimapBox) throw new Error('Canvas UI check failed: minimapBox.')
+  await page.mouse.click(minimapBox.x + 12, minimapBox.y + 12)
+  await page.waitForTimeout(100)
+  const afterMinimapBackground = await canvasSurface.evaluate((surface) => getComputedStyle(surface).backgroundPosition)
 
   let runPanelVisible = await page.getByText(uiText.runMonitor).isVisible().catch(() => false)
   if (!runPanelVisible) {
@@ -388,44 +878,279 @@ async function main() {
     runPanelVisible = await page.getByText(uiText.runMonitor).isVisible().catch(() => false)
   }
 
+  const firstCanvasNode = page.getByTestId('workflow-canvas-node').first()
+  const canvasNodeId = await firstCanvasNode.getAttribute('data-node-id')
+  if (!canvasNodeId) throw new Error('Canvas UI check failed: missingNodeId.')
+  await page.locator('main button', { hasText: uiText.saveWorkflow }).first().click()
+  await page.waitForFunction((label) => {
+    return [...document.querySelectorAll('main button')].some((button) => {
+      const htmlButton = button as HTMLButtonElement
+      return htmlButton.textContent?.includes(String(label)) && !htmlButton.disabled
+    })
+  }, uiText.runWorkflow)
+  const smokeWorkflowRunId = `smoke_canvas_run_${Date.now()}`
+  let smokeWorkflowId = 'smoke_canvas_workflow'
+  const now = Date.now()
+  await page.route('**/api/workflows/*/run', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const matched = route.request().url().match(/\/api\/workflows\/([^/]+)\/run/)
+    smokeWorkflowId = matched?.[1] ? decodeURIComponent(matched[1]) : smokeWorkflowId
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        workflowRun: {
+          id: smokeWorkflowRunId,
+          workflowId: smokeWorkflowId,
+          status: 'complete',
+          input: { goal: 'smoke canvas state' },
+          output: { status: 'complete' },
+          error: null,
+          startedAt: now,
+          finishedAt: now,
+        },
+      }),
+    })
+  })
+  await page.route(`**/api/workflow-runs/${smokeWorkflowRunId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        workflowRun: {
+          id: smokeWorkflowRunId,
+          workflowId: smokeWorkflowId,
+          status: 'complete',
+          input: { goal: 'smoke canvas state' },
+          output: { status: 'complete' },
+          error: null,
+          startedAt: now,
+          finishedAt: now,
+        },
+        nodeRuns: [{
+          id: 'wnr_smoke_canvas',
+          workflowRunId: smokeWorkflowRunId,
+          nodeId: canvasNodeId,
+          status: 'complete',
+          progressStatus: 'complete',
+          currentStep: uiText.canvasNodeCompleteStep,
+          output: { artifactType: 'video', customerVisible: true },
+          error: null,
+          startedAt: now,
+          finishedAt: now,
+        }],
+        employeeRuns: [],
+        softwareCommandRuns: [],
+        computerSessions: [],
+        computerActionEvents: [],
+        artifactValidations: [],
+        approvalRequests: [],
+        resourceLocks: [],
+      }),
+    })
+  })
+  await page.locator('main button', { hasText: uiText.runWorkflow }).first().click()
+  await page.waitForFunction((nodeId) => {
+    return [...document.querySelectorAll('[data-testid="workflow-canvas-node"]')].some((node) => (
+      node.getAttribute('data-node-id') === nodeId && node.getAttribute('data-run-state') === 'complete'
+    ))
+  }, canvasNodeId)
+
   const canvasScreenshot = path.join(outDir, 'canvas-inline-editor.png')
   await page.screenshot({ path: canvasScreenshot, fullPage: true })
+  const canvasBodyText = await page.locator('main').innerText()
   const canvasChecks = {
     canvasTitle: await page.getByText(uiText.canvasTitle, { exact: true }).isVisible(),
     inlineEditor: await page.getByText(uiText.inlineEditor, { exact: true }).isVisible(),
     nodeNameInput: await page.getByPlaceholder(uiText.nodeName).isVisible(),
+    quickEditorCollapsed: quickEditorCollapsedVisible,
+    quickEditorExpandedAgain,
+    nodePaletteCreatedNode: paletteCreatedNode,
+    nodePaletteConnectedEdge: paletteConnectedEdge,
+    connectingPaletteHint: connectedPaletteHint,
+    connectionDragPreview: dragPreviewVisible,
+    connectionDragEdge: dragConnectedEdge,
     customerDeliverableDock: await page.getByTestId('canvas-customer-delivery-dock').isVisible(),
     customerDeliverablesPanel: await page.getByTestId('canvas-customer-deliverables-panel').isVisible(),
-    customerVisible: (await page.locator('main').innerText()).includes(uiText.customerVisible),
-    videoArtifact: (await page.locator('main').innerText()).includes(uiText.videoArtifact),
+    nodeProgress: await page.getByTestId('canvas-node-progress').first().isVisible(),
+    nodeDeliveryCard: await page.getByTestId('canvas-node-delivery-card').first().isVisible(),
+    nodeStatusStrip: await page.getByTestId('canvas-node-status-strip').first().isVisible(),
+    nodeStateComplete: await page
+      .locator(`[data-testid="workflow-canvas-node"][data-run-state="complete"]`)
+      .first()
+      .isVisible(),
+    customerVisible: canvasBodyText.includes(uiText.customerVisible),
+    videoArtifact: canvasBodyText.includes(uiText.videoArtifact),
+    nodeProgressText: canvasBodyText.includes(uiText.canvasNodeProgress),
+    nodeDeliveryText: canvasBodyText.includes(uiText.canvasNodeDelivery),
+    nodeCompleteText: canvasBodyText.includes(uiText.canvasNodeComplete),
+    nodeCompleteStep: canvasBodyText.includes(uiText.canvasNodeCompleteStep),
+    nodeCompletePercent: canvasBodyText.includes('100%'),
+    runStatusText: canvasBodyText.includes(uiText.canvasRunStatus),
+    nextStepText: canvasBodyText.includes(uiText.canvasNextStep),
+    nodePhaseComplete: await page.locator('[data-testid="canvas-node-status-strip"][data-node-phase="complete"]').first().isVisible(),
+    deliveryChecklist: canvasBodyText.includes(uiText.canvasDeliveryChecklist),
+    currentArtifact: canvasBodyText.includes(uiText.canvasCurrentArtifact),
+    acceptanceState: canvasBodyText.includes(uiText.canvasAcceptanceState),
+    producedState: canvasBodyText.includes(uiText.canvasProduced),
+    pendingState: canvasBodyText.includes(uiText.canvasPendingArtifact),
     backgroundPan: canvasPan,
+    viewportControls: await viewportControls.isVisible(),
+    zoomChanged: beforeZoomText !== zoomedText,
+    zoomReset: resetZoomText.trim() === '100%',
+    fitView: fitButtonVisible,
+    minimap: await minimap.isVisible(),
+    minimapFocus: beforeMinimapBackground !== afterMinimapBackground,
     runPanel: runPanelVisible,
   }
   for (const [key, value] of Object.entries(canvasChecks)) {
     if (!value) throw new Error(`Canvas UI check failed: ${key}.`)
   }
 
-  const analyticsNav = page.locator('aside button', { hasText: uiText.analyticsNav })
+  let schedulerNav = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
+  if ((await schedulerNav.count()) === 0) {
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
+    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
+    schedulerNav = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
+  }
+  await schedulerNav.click({ force: true })
+  await page.locator('main').getByText(uiText.schedulerTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  const schedulerScreenshot = path.join(outDir, 'scheduler-auto-tasks.png')
+  await page.screenshot({ path: schedulerScreenshot, fullPage: true })
+  const schedulerBodyText = await page.locator('main').innerText()
+  const schedulerChecks = {
+    title: schedulerBodyText.includes(uiText.schedulerTitle),
+    queue: schedulerBodyText.includes(uiText.schedulerQueue),
+    rules: schedulerBodyText.includes(uiText.schedulerRules),
+    quickActions: schedulerBodyText.includes(uiText.schedulerQuickActions),
+    runDue: schedulerBodyText.includes(uiText.schedulerRunDue),
+    noEnglishTitle: !schedulerBodyText.includes('Task Scheduler'),
+  }
+  for (const [key, value] of Object.entries(schedulerChecks)) {
+    if (!value) throw new Error(`Scheduler UI check failed: ${key}.`)
+  }
+
+  let artifactsNav = sidebar.locator(`button[title="${uiText.artifactsNav}"]`)
+  if ((await artifactsNav.count()) === 0) {
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
+    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
+    artifactsNav = sidebar.locator(`button[title="${uiText.artifactsNav}"]`)
+  }
+  await artifactsNav.click({ force: true })
+  await page.locator('main').getByText(uiText.artifactsTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.artifactsLoading, { exact: true }).waitFor({
+    state: 'hidden',
+    timeout: 90_000,
+  }).catch(() => undefined)
+  const artifactsScreenshot = path.join(outDir, 'artifact-delivery-center.png')
+  await page.screenshot({ path: artifactsScreenshot, fullPage: true })
+  const artifactsBodyText = await page.locator('main').innerText()
+  const schedulerNavDuringArtifacts = sidebar.locator(`button[title="${uiText.schedulerNav}"]`)
+  const artifactsChecks = {
+    title: artifactsBodyText.includes(uiText.artifactsTitle),
+    navActive: await artifactsNav.evaluate((element) => element.className.includes('bg-primary')),
+    schedulerInactive:
+      (await schedulerNavDuringArtifacts.count()) === 0 ||
+      !(await schedulerNavDuringArtifacts.first().evaluate((element) => element.className.includes('bg-primary'))),
+    search: await page.locator(`input[placeholder*="${uiText.artifactsSearch}"]`).isVisible(),
+    versions: artifactsBodyText.includes(uiText.artifactsVersions),
+    source: artifactsBodyText.includes(uiText.artifactsSource),
+    customerOverview: artifactsBodyText.includes(uiText.artifactsCustomerOverview),
+    customerOverviewNode: await page.getByTestId('artifact-customer-delivery-overview').isVisible(),
+    agentOutput: artifactsBodyText.includes(uiText.artifactsAgentOutput),
+    generateOutput: artifactsBodyText.includes(uiText.artifactsGenerateOutput),
+    previewAcceptance: artifactsBodyText.includes(uiText.artifactsPreviewAcceptance),
+    packageDelivery: artifactsBodyText.includes(uiText.artifactsPackageDelivery),
+    pendingReview: artifactsBodyText.includes(uiText.artifactsPendingReview),
+    package: artifactsBodyText.includes(uiText.artifactsPackage),
+    customerReadable: artifactsBodyText.includes(uiText.artifactsCustomerReadable),
+    previewable: artifactsBodyText.includes(uiText.artifactsPreviewable),
+    traceable: artifactsBodyText.includes(uiText.artifactsTraceable),
+    deliveryCheck: artifactsBodyText.includes(uiText.artifactsDeliveryCheck),
+    noBrokenEncoding: !artifactsBodyText.includes('\uFFFD') && !artifactsBodyText.includes('ArtifactLibrary'),
+  }
+  for (const [key, value] of Object.entries(artifactsChecks)) {
+    if (!value) throw new Error(`Artifacts UI check failed: ${key}.`)
+  }
+
+  let monitorNav = sidebar.locator(`button[title="${uiText.monitorNav}"]`)
+  if ((await monitorNav.count()) === 0) {
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
+    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
+    monitorNav = sidebar.locator(`button[title="${uiText.monitorNav}"]`)
+  }
+  await monitorNav.click({ force: true })
+  await page.locator('main').getByText(uiText.monitorTitle, { exact: true }).waitFor({ timeout: 90_000 })
+  const monitorScreenshot = path.join(outDir, 'run-scene-monitor.png')
+  await page.screenshot({ path: monitorScreenshot, fullPage: true })
+  const monitorBodyText = await page.locator('main').innerText()
+  const monitorChecks = {
+    title: monitorBodyText.includes(uiText.monitorTitle),
+    navActive: await monitorNav.evaluate((element) => element.className.includes('bg-primary')),
+    sceneOverview: monitorBodyText.includes(uiText.monitorSceneOverview),
+    sceneOverviewNode: await page.getByTestId('run-scene-overview').isVisible(),
+    currentRuns: monitorBodyText.includes(uiText.monitorCurrentRuns),
+    recentEvents: monitorBodyText.includes(uiText.monitorRecentEvents),
+    needHandle: monitorBodyText.includes(uiText.monitorNeedHandle),
+    deliveryState: monitorBodyText.includes(uiText.monitorDeliveryState),
+    nextStep: monitorBodyText.includes(uiText.monitorNextStep),
+    advanced: monitorBodyText.includes(uiText.monitorAdvanced),
+    artifacts: monitorBodyText.includes(uiText.monitorArtifacts),
+    noEnglishTitle: !monitorBodyText.includes('Observability Center'),
+  }
+  for (const [key, value] of Object.entries(monitorChecks)) {
+    if (!value) throw new Error(`Monitor UI check failed: ${key}.`)
+  }
+
+  const analyticsNav = sidebar.locator(`button[title="${uiText.analyticsNav}"]`)
   if ((await analyticsNav.count()) === 0) {
-    const collapsedMore = page.locator('aside button', { hasText: uiText.moreFeatures })
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
     if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
   }
-  await page.locator('aside button', { hasText: uiText.analyticsNav }).click({ force: true })
+  await sidebar.locator(`button[title="${uiText.analyticsNav}"]`).click({ force: true })
   await page.getByText(uiText.analyticsTitle, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.modelActualUsage, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.modelBillRanking, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.modelCostDiagnosis, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.modelBillDetail, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.contextWindow, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.runtimeMetrics, { exact: true }).waitFor({ timeout: 90_000 })
+  await page.getByText(uiText.promptCacheTitle, { exact: true }).waitFor({ timeout: 90_000 })
   await page.getByText(uiText.projectContext, { exact: true }).waitFor({ timeout: 90_000 })
   const analyticsScreenshot = path.join(outDir, 'usage-context-dashboard.png')
   await page.screenshot({ path: analyticsScreenshot, fullPage: true })
   const analyticsBodyText = await page.locator('body').innerText()
   const analyticsChecks = {
     title: analyticsBodyText.includes(uiText.analyticsTitle),
+    costCommandCenter: analyticsBodyText.includes(uiText.costCommandCenter),
+    modelSpendRanking: analyticsBodyText.includes(uiText.modelSpendRanking),
+    agentSpendRanking: analyticsBodyText.includes(uiText.agentSpendRanking),
+    inputCostReducedTo: analyticsBodyText.includes(uiText.inputCostReducedTo),
+    topSpendingModel: analyticsBodyText.includes(uiText.topSpendingModel),
+    costCommandCenterNode: await page.getByTestId('cost-command-center').isVisible(),
     modelActualUsage: analyticsBodyText.includes(uiText.modelActualUsage),
+    modelBillRanking: analyticsBodyText.includes(uiText.modelBillRanking),
+    modelCostDiagnosis: analyticsBodyText.includes(uiText.modelCostDiagnosis),
+    modelCostDiagnosisNode: await page.getByTestId('model-cost-diagnosis').isVisible(),
+    modelDiagnosisRows: (await page.getByTestId('model-diagnosis-row').count()) > 0,
+    actualBill: analyticsBodyText.includes(uiText.actualBill),
+    actualSpend: analyticsBodyText.includes(uiText.actualSpend),
+    cacheSaved: analyticsBodyText.includes(uiText.cacheSaved),
+    cacheSavingRate: analyticsBodyText.includes(uiText.cacheSavingRate),
+    noCacheEstimate: analyticsBodyText.includes(uiText.noCacheEstimate),
+    avgCostPerRequest: analyticsBodyText.includes(uiText.avgCostPerRequest),
+    optimizableModel: analyticsBodyText.includes(uiText.optimizableModel),
+    modelBillDetail: analyticsBodyText.includes(uiText.modelBillDetail),
+    billTable: await page.getByTestId('model-bill-table').isVisible(),
+    costShare: analyticsBodyText.includes(uiText.costShare),
+    savedVsNoCache: analyticsBodyText.includes(uiText.savedVsNoCache),
     contextWindow: analyticsBodyText.includes(uiText.contextWindow),
     runtimeMetrics: analyticsBodyText.includes(uiText.runtimeMetrics),
     cost: analyticsBodyText.includes(uiText.costTitle),
     sessionStatus: analyticsBodyText.includes(uiText.sessionStatus),
+    promptCache: analyticsBodyText.includes(uiText.promptCacheTitle),
+    appendOnlyContext: analyticsBodyText.includes(uiText.appendOnlyContext),
+    targetCacheHit: analyticsBodyText.includes(uiText.targetCacheHit),
     projectContext: analyticsBodyText.includes(uiText.projectContext),
     modelCache: analyticsBodyText.includes('\u7f13\u5b58\u547d\u4e2d'),
     modelCost: analyticsBodyText.includes('\u8d39\u7528'),
@@ -438,7 +1163,12 @@ async function main() {
   await browser.close()
   console.log(JSON.stringify({
     baseUrl,
-    productionChecks,
+    workbenchChecks,
+    workbenchStartChecks: {
+      employeeRunsStarted: workbenchEmployeeRunStarted,
+      directTaskVisible: directWorkbenchTaskVisible,
+    },
+    runDetailChecks,
     settingsChecks,
     directConversationChecks,
     modelManagementChecks,
@@ -446,15 +1176,23 @@ async function main() {
     toolsChecks,
     skillsChecks,
     canvasChecks,
+    schedulerChecks,
+    artifactsChecks,
+    monitorChecks,
+    analyticsChecks,
     screenshots: {
       agentScreenshot,
       directConversationScreenshot,
       modelManagementScreenshot,
       agentCreateCapabilitiesScreenshot,
-      productionScreenshot,
+      workbenchScreenshot,
+      workbenchRunDetailScreenshot,
       toolsScreenshot,
       skillsScreenshot,
       canvasScreenshot,
+      schedulerScreenshot,
+      artifactsScreenshot,
+      monitorScreenshot,
       analyticsScreenshot,
     },
     consoleErrors: consoleErrors.slice(0, 10),
@@ -466,13 +1204,43 @@ main().catch((err) => {
   process.exit(1)
 })
 
+function resolveLocalBrowserExecutable(): string | undefined {
+  const candidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  ].filter(Boolean) as string[]
+  return candidates.find((candidate) => existsSync(candidate))
+}
+
+async function clickSidebarButton(sidebar: Locator, label: string) {
+  let button = sidebar.locator(`button[title="${label}"]`)
+  if ((await button.count()) === 0) {
+    const collapsedMore = sidebar.locator('button', { hasText: uiText.moreFeatures })
+    if ((await collapsedMore.count()) > 0) await collapsedMore.first().click({ force: true })
+    button = sidebar.locator(`button[title="${label}"]`)
+  }
+  if ((await button.count()) === 0) {
+    button = sidebar.getByRole('button', { name: label })
+  }
+  if ((await button.count()) === 0) {
+    button = sidebar.locator('button', { hasText: label })
+  }
+  await button.first().click({ force: true })
+}
+
 async function cleanupSmokeModels(page: Page, baseUrl: string) {
   const response = await page.request.get(`${baseUrl}/api/model-profiles`)
   if (!response.ok()) return
   const payload = (await response.json()) as {
     modelProfiles?: Array<{ id: string; name: string }>
   }
-  const smokeModels = payload.modelProfiles?.filter((model) => model.name.startsWith('UI 临时模型 ')) ?? []
+  const smokeModels =
+    payload.modelProfiles?.filter((model) =>
+      model.name.startsWith('UI 临时模型 ') || model.name.startsWith('UI temp model '),
+    ) ?? []
   for (const model of smokeModels) {
     await page.request.delete(`${baseUrl}/api/model-profiles/${model.id}`)
   }

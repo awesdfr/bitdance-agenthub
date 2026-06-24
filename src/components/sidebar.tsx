@@ -6,12 +6,12 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  ClipboardCheck,
   Clock3,
   GitBranch,
   GitMerge,
   Layers,
   MessageSquare,
+  MonitorCog,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,6 +37,7 @@ import type { AgentRow, ConversationRow } from '@/db/schema'
 import { useAppStore, useConversationList, useUnreadCount } from '@/stores/app-store'
 
 export type SidebarMode =
+  | 'workbench'
   | 'conversations'
   | 'artifacts'
   | 'employee-factory'
@@ -62,25 +63,74 @@ interface SidebarProps {
 }
 
 const primaryNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
+  { mode: 'workbench', label: '工作台', icon: <MonitorCog className="size-4" /> },
   { mode: 'conversations', label: '对话', icon: <MessageSquare className="size-4" /> },
   { mode: 'agents', label: '智能体', icon: <Bot className="size-4" /> },
   { mode: 'agent-canvas', label: '编排画布', icon: <GitBranch className="size-4" /> },
   { mode: 'skills', label: '技能中心', icon: <Package className="size-4" /> },
   { mode: 'models', label: '模型管理', icon: <Zap className="size-4" /> },
   { mode: 'tools', label: '工具连接', icon: <Wrench className="size-4" /> },
-  { mode: 'production', label: '交付检查', icon: <ClipboardCheck className="size-4" /> },
 ]
 
 const advancedNav: Array<{ mode: SidebarMode; label: string; icon: ReactNode }> = [
-  { mode: 'artifacts', label: '产物库', icon: <Layers className="size-4" /> },
-  { mode: 'scheduler', label: '任务调度', icon: <Clock3 className="size-4" /> },
-  { mode: 'monitor', label: '运行监控', icon: <Activity className="size-4" /> },
-  { mode: 'analytics', label: '数据分析', icon: <BarChart3 className="size-4" /> },
+  { mode: 'artifacts', label: '交付物', icon: <Layers className="size-4" /> },
+  { mode: 'scheduler', label: '自动任务', icon: <Clock3 className="size-4" /> },
+  { mode: 'monitor', label: '运行现场', icon: <Activity className="size-4" /> },
+  { mode: 'analytics', label: '费用分析', icon: <BarChart3 className="size-4" /> },
 ]
 
 const hiddenNavLabels = new Map<SidebarMode, string>([
   ['configops', '配置管理'],
+  ['production', '交付检查'],
 ])
+
+const cleanNavLabels: Record<SidebarMode, string> = {
+  workbench: '工作台',
+  conversations: '对话',
+  artifacts: '交付物',
+  'employee-factory': '智能体工厂',
+  'agent-canvas': '编排画布',
+  skills: '技能中心',
+  scheduler: '自动任务',
+  memory: '记忆学习',
+  context: '上下文',
+  models: '模型管理',
+  tools: '工具连接',
+  capabilities: '能力图谱',
+  collaboration: '团队协作',
+  governance: '安全治理',
+  monitor: '运行现场',
+  configops: '配置管理',
+  production: '交付检查',
+  agents: '智能体',
+  analytics: '费用分析',
+}
+
+const navDisplayLabels: Record<SidebarMode, string> = {
+  workbench: '\u5de5\u4f5c\u53f0',
+  conversations: '\u5bf9\u8bdd',
+  artifacts: '\u4ea4\u4ed8\u7269',
+  'employee-factory': '\u667a\u80fd\u4f53\u5de5\u5382',
+  'agent-canvas': '\u7f16\u6392\u753b\u5e03',
+  skills: '\u6280\u80fd\u4e2d\u5fc3',
+  scheduler: '\u81ea\u52a8\u4efb\u52a1',
+  memory: '\u8bb0\u5fc6\u5b66\u4e60',
+  context: '\u4e0a\u4e0b\u6587',
+  models: '\u6a21\u578b\u7ba1\u7406',
+  tools: '\u5de5\u5177\u8fde\u63a5',
+  capabilities: '\u80fd\u529b\u56fe\u8c31',
+  collaboration: '\u56e2\u961f\u534f\u4f5c',
+  governance: '\u5b89\u5168\u6cbb\u7406',
+  monitor: '\u8fd0\u884c\u73b0\u573a',
+  configops: '\u914d\u7f6e\u7ba1\u7406',
+  production: '\u4ea4\u4ed8\u68c0\u67e5',
+  agents: '\u667a\u80fd\u4f53',
+  analytics: '\u8d39\u7528\u5206\u6790',
+}
+
+function navLabel(mode: SidebarMode): string {
+  return navDisplayLabels[mode] ?? cleanNavLabels[mode] ?? hiddenNavLabels.get(mode) ?? navDisplayLabels.workbench
+}
 
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const mobileOpen = useAppStore((s) => s.mobileSidebarOpen)
@@ -216,7 +266,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 active={mode === item.mode}
                 collapsed={collapsed}
                 icon={item.icon}
-                label={item.label}
+                label={navLabel(item.mode)}
                 onClick={() => selectMode(item.mode)}
               />
             ))}
@@ -238,7 +288,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                     active={mode === item.mode}
                     collapsed={collapsed}
                     icon={item.icon}
-                    label={item.label}
+                    label={navLabel(item.mode)}
                     onClick={() => selectMode(item.mode)}
                   />
                 ))}
@@ -453,6 +503,5 @@ function UnreadBadge({ value }: { value: number }) {
 }
 
 function currentLabel(mode: SidebarMode): string {
-  const item = [...primaryNav, ...advancedNav].find((nav) => nav.mode === mode)
-  return item?.label ?? hiddenNavLabels.get(mode) ?? '工作台'
+  return navLabel(mode)
 }

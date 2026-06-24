@@ -1,10 +1,14 @@
 'use client'
 
 import {
+  Activity,
+  AlertCircle,
   Bot,
   Camera,
+  CheckCircle2,
   Code2,
   ClipboardCheck,
+  Clock3,
   Eye,
   FileImage,
   FileJson,
@@ -14,6 +18,8 @@ import {
   GitBranch,
   Grip,
   Loader2,
+  Maximize2,
+  Minus,
   MonitorCheck,
   Package,
   Play,
@@ -36,6 +42,7 @@ import {
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
+  type WheelEvent,
 } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -86,10 +93,13 @@ import {
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-const NODE_WIDTH = 172
-const NODE_HEIGHT = 108
+const NODE_WIDTH = 212
+const NODE_HEIGHT = 216
 const CANVAS_MIN_COORD = -2400
 const CANVAS_MAX_COORD = 4800
+const CANVAS_MIN_SCALE = 0.4
+const CANVAS_MAX_SCALE = 1.8
+const CANVAS_ZOOM_STEP = 0.12
 
 type DraftNodeType =
   | 'agent_employee'
@@ -185,6 +195,19 @@ interface CanvasPanState {
   originY: number
 }
 
+interface ConnectionDragState {
+  pointerId: number
+  sourceNodeId: string
+  x: number
+  y: number
+}
+
+interface CanvasNodePaletteState {
+  x: number
+  y: number
+  canvasPosition: { x: number; y: number }
+}
+
 export function AgentWorkflowCanvas() {
   const [agents, setAgents] = useState<AgentProfileRow[]>([])
   const [softwareCommands, setSoftwareCommands] = useState<SoftwareCommandRow[]>([])
@@ -222,8 +245,10 @@ export function AgentWorkflowCanvas() {
   )
   const [nlRevision, setNlRevision] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
-  const [viewport, setViewport] = useState({ x: 0, y: 0 })
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [pan, setPan] = useState<CanvasPanState | null>(null)
+  const [connectionDrag, setConnectionDrag] = useState<ConnectionDragState | null>(null)
+  const [nodePalette, setNodePalette] = useState<CanvasNodePaletteState | null>(null)
   const [showAdvancedPanel, setShowAdvancedPanel] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
@@ -354,6 +379,8 @@ export function AgentWorkflowCanvas() {
             mapping: edge.mapping,
           })),
         )
+        setConnectingFromNodeId('')
+        setConnectionDrag(null)
       } catch (err) {
         if (alive) setError(formatError(err))
       }
@@ -371,7 +398,10 @@ export function AgentWorkflowCanvas() {
     if (connectingFromNodeId && !nodes.some((node) => node.id === connectingFromNodeId)) {
       setConnectingFromNodeId('')
     }
-  }, [connectingFromNodeId, nodes, selectedNodeId])
+    if (connectionDrag && !nodes.some((node) => node.id === connectionDrag.sourceNodeId)) {
+      setConnectionDrag(null)
+    }
+  }, [connectingFromNodeId, connectionDrag, nodes, selectedNodeId])
 
   useEffect(() => {
     if (!selectedWorkflowId) {
@@ -461,6 +491,7 @@ export function AgentWorkflowCanvas() {
     setEdges([])
     setSelectedNodeId('')
     setConnectingFromNodeId('')
+    setConnectionDrag(null)
   }
 
   const applyNlDraftToCanvas = (draft: NaturalLanguageWorkflowDraftRow) => {
@@ -473,6 +504,7 @@ export function AgentWorkflowCanvas() {
     setEdges(canvasDraft.edges)
     setSelectedNodeId(canvasDraft.nodes[0]?.id ?? '')
     setConnectingFromNodeId('')
+    setConnectionDrag(null)
   }
 
   const generateNaturalWorkflow = () =>
@@ -545,7 +577,37 @@ export function AgentWorkflowCanvas() {
           mapping: edge.mapping,
         })),
       )
+      setConnectingFromNodeId('')
+      setConnectionDrag(null)
     })
+
+  const appendNodeToCanvas = (node: DraftNode) => {
+    const sourceNodeId =
+      connectingFromNodeId && nodes.some((item) => item.id === connectingFromNodeId)
+        ? connectingFromNodeId
+        : nodes[nodes.length - 1]?.id ?? ''
+    setNodes((current) => [...current, node])
+    setSelectedNodeId(node.id)
+    setNodePalette(null)
+    setConnectionDrag(null)
+    setConnectingFromNodeId('')
+    if (!sourceNodeId || sourceNodeId === node.id) return
+    setEdges((current) => {
+      const exists = current.some(
+        (edge) => edge.sourceNodeId === sourceNodeId && edge.targetNodeId === node.id,
+      )
+      if (exists) return current
+      return [
+        ...current,
+        {
+          id: newDraftId('edge'),
+          sourceNodeId,
+          targetNodeId: node.id,
+          mapping: {},
+        },
+      ]
+    })
+  }
 
   const addAgentNode = (position?: { x: number; y: number }) => {
     const agent = agents.find((item) => item.id === selectedAgentId) ?? agents[0] ?? null
@@ -564,20 +626,7 @@ export function AgentWorkflowCanvas() {
       retryPolicy: { maxAttempts: 1 },
       approvalPolicy: {},
     }
-    setNodes((current) => [...current, node])
-    setSelectedNodeId(id)
-    if (nodes.length > 0) {
-      const previous = nodes[nodes.length - 1]
-      setEdges((current) => [
-        ...current,
-        {
-          id: newDraftId('edge'),
-          sourceNodeId: previous.id,
-          targetNodeId: node.id,
-          mapping: {},
-        },
-      ])
-    }
+    appendNodeToCanvas(node)
   }
 
   const addApprovalNode = (position?: { x: number; y: number }) => {
@@ -595,15 +644,7 @@ export function AgentWorkflowCanvas() {
       retryPolicy: { maxAttempts: 1 },
       approvalPolicy: { required: true, riskLevel: 'medium' },
     }
-    setNodes((current) => [...current, node])
-    setSelectedNodeId(id)
-    if (nodes.length > 0) {
-      const previous = nodes[nodes.length - 1]
-      setEdges((current) => [
-        ...current,
-        { id: newDraftId('edge'), sourceNodeId: previous.id, targetNodeId: node.id, mapping: {} },
-      ])
-    }
+    appendNodeToCanvas(node)
   }
 
   const addSoftwareCommandNode = (position?: { x: number; y: number }) => {
@@ -628,15 +669,7 @@ export function AgentWorkflowCanvas() {
       retryPolicy: { maxAttempts: 1 },
       approvalPolicy: command?.requiresApproval ? { required: true, riskLevel: command.riskLevel } : {},
     }
-    setNodes((current) => [...current, node])
-    setSelectedNodeId(id)
-    if (nodes.length > 0) {
-      const previous = nodes[nodes.length - 1]
-      setEdges((current) => [
-        ...current,
-        { id: newDraftId('edge'), sourceNodeId: previous.id, targetNodeId: node.id, mapping: {} },
-      ])
-    }
+    appendNodeToCanvas(node)
   }
 
   const addConditionNode = (position?: { x: number; y: number }) => {
@@ -664,15 +697,7 @@ export function AgentWorkflowCanvas() {
       approvalPolicy:
         type === 'human_approval' ? { required: true, riskLevel: 'medium' } : {},
     }
-    setNodes((current) => [...current, node])
-    setSelectedNodeId(id)
-    if (nodes.length > 0) {
-      const previous = nodes[nodes.length - 1]
-      setEdges((current) => [
-        ...current,
-        { id: newDraftId('edge'), sourceNodeId: previous.id, targetNodeId: node.id, mapping: {} },
-      ])
-    }
+    appendNodeToCanvas(node)
   }
 
   const createEdgeBetween = (sourceId: string, targetId: string) => {
@@ -695,6 +720,7 @@ export function AgentWorkflowCanvas() {
     )
     if (selectedNodeId === nodeId) setSelectedNodeId('')
     if (connectingFromNodeId === nodeId) setConnectingFromNodeId('')
+    if (connectionDrag?.sourceNodeId === nodeId) setConnectionDrag(null)
   }
 
   const removeEdge = (edgeId: string) => {
@@ -893,19 +919,127 @@ export function AgentWorkflowCanvas() {
       await refreshSelectedRunSnapshot()
     })
 
+  const zoomCanvasAtPoint = useCallback(
+    (surface: HTMLDivElement, clientX: number, clientY: number, nextScale: number) => {
+      const rect = surface.getBoundingClientRect()
+      setViewport((current) => {
+        const scale = clamp(nextScale, CANVAS_MIN_SCALE, CANVAS_MAX_SCALE)
+        const worldX = (clientX - rect.left - current.x) / current.scale
+        const worldY = (clientY - rect.top - current.y) / current.scale
+        return {
+          x: clientX - rect.left - worldX * scale,
+          y: clientY - rect.top - worldY * scale,
+          scale,
+        }
+      })
+    },
+    [],
+  )
+
+  const zoomCanvasFromCenter = useCallback((direction: 1 | -1) => {
+    const surface = document.querySelector<HTMLDivElement>('[data-testid="workflow-canvas-surface"]')
+    if (!surface) return
+    const rect = surface.getBoundingClientRect()
+    zoomCanvasAtPoint(
+      surface,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+      viewport.scale + direction * CANVAS_ZOOM_STEP,
+    )
+  }, [viewport.scale, zoomCanvasAtPoint])
+
+  const resetCanvasView = useCallback(() => {
+    setViewport({ x: 0, y: 0, scale: 1 })
+  }, [])
+
+  const focusCanvasAt = useCallback((worldX: number, worldY: number) => {
+    const surface = document.querySelector<HTMLDivElement>('[data-testid="workflow-canvas-surface"]')
+    if (!surface) return
+    const rect = surface.getBoundingClientRect()
+    setViewport((current) => ({
+      x: rect.width / 2 - worldX * current.scale,
+      y: rect.height / 2 - worldY * current.scale,
+      scale: current.scale,
+    }))
+  }, [])
+
+  const fitCanvasView = useCallback(() => {
+    const surface = document.querySelector<HTMLDivElement>('[data-testid="workflow-canvas-surface"]')
+    if (!surface || nodes.length === 0) {
+      resetCanvasView()
+      return
+    }
+    const rect = surface.getBoundingClientRect()
+    const minX = Math.min(...nodes.map((node) => node.position.x))
+    const minY = Math.min(...nodes.map((node) => node.position.y))
+    const maxX = Math.max(...nodes.map((node) => node.position.x + NODE_WIDTH))
+    const maxY = Math.max(...nodes.map((node) => node.position.y + NODE_HEIGHT))
+    const padding = 120
+    const nextScale = clamp(
+      Math.min(
+        rect.width / Math.max(1, maxX - minX + padding * 2),
+        rect.height / Math.max(1, maxY - minY + padding * 2),
+      ),
+      CANVAS_MIN_SCALE,
+      CANVAS_MAX_SCALE,
+    )
+    setViewport({
+      x: rect.width / 2 - ((minX + maxX) / 2) * nextScale,
+      y: rect.height / 2 - ((minY + maxY) / 2) * nextScale,
+      scale: nextScale,
+    })
+  }, [nodes, resetCanvasView])
+
+  const clientPointToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      const surface = document.querySelector<HTMLDivElement>('[data-testid="workflow-canvas-surface"]')
+      if (!surface) return { x: 0, y: 0 }
+      const rect = surface.getBoundingClientRect()
+      return {
+        x: (clientX - rect.left - viewport.x) / viewport.scale,
+        y: (clientY - rect.top - viewport.y) / viewport.scale,
+      }
+    },
+    [viewport.scale, viewport.x, viewport.y],
+  )
+
+  const startConnectionDrag = (event: PointerEvent<HTMLButtonElement>, node: DraftNode) => {
+    event.stopPropagation()
+    const point = clientPointToCanvas(event.clientX, event.clientY)
+    setNodePalette(null)
+    setSelectedNodeId(node.id)
+    setConnectingFromNodeId(node.id)
+    setConnectionDrag({
+      pointerId: event.pointerId,
+      sourceNodeId: node.id,
+      x: point.x,
+      y: point.y,
+    })
+  }
+
+  const completeConnectionDrag = (event: PointerEvent<HTMLButtonElement>, targetNode: DraftNode) => {
+    if (!connectionDrag || connectionDrag.sourceNodeId === targetNode.id) return
+    event.stopPropagation()
+    createEdgeBetween(connectionDrag.sourceNodeId, targetNode.id)
+    setConnectionDrag(null)
+    setConnectingFromNodeId('')
+    setSelectedNodeId(targetNode.id)
+  }
+
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>, node: DraftNode) => {
     const rect = event.currentTarget.getBoundingClientRect()
     event.currentTarget.setPointerCapture(event.pointerId)
     setDrag({
       nodeId: node.id,
       pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
+      offsetX: (event.clientX - rect.left) / viewport.scale,
+      offsetY: (event.clientY - rect.top) / viewport.scale,
     })
   }
 
   const handleCanvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.target !== event.currentTarget) return
+    setNodePalette(null)
     event.currentTarget.setPointerCapture(event.pointerId)
     setPan({
       pointerId: event.pointerId,
@@ -917,22 +1051,32 @@ export function AgentWorkflowCanvas() {
   }
 
   const handleCanvasPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (connectionDrag?.pointerId === event.pointerId) {
+      const point = clientPointToCanvas(event.clientX, event.clientY)
+      setConnectionDrag((current) =>
+        current && current.pointerId === event.pointerId
+          ? { ...current, x: point.x, y: point.y }
+          : current,
+      )
+      return
+    }
     if (pan?.pointerId === event.pointerId) {
       setViewport({
         x: pan.originX + event.clientX - pan.startX,
         y: pan.originY + event.clientY - pan.startY,
+        scale: viewport.scale,
       })
       return
     }
     if (!drag) return
     const rect = event.currentTarget.getBoundingClientRect()
     const nextX = clamp(
-      event.clientX - rect.left - viewport.x - drag.offsetX,
+      (event.clientX - rect.left - viewport.x) / viewport.scale - drag.offsetX,
       CANVAS_MIN_COORD,
       CANVAS_MAX_COORD,
     )
     const nextY = clamp(
-      event.clientY - rect.top - viewport.y - drag.offsetY,
+      (event.clientY - rect.top - viewport.y) / viewport.scale - drag.offsetY,
       CANVAS_MIN_COORD,
       CANVAS_MAX_COORD,
     )
@@ -944,6 +1088,10 @@ export function AgentWorkflowCanvas() {
   }
 
   const handleCanvasPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (connectionDrag?.pointerId === event.pointerId) {
+      setConnectionDrag(null)
+      setConnectingFromNodeId('')
+    }
     if (pan?.pointerId === event.pointerId) {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId)
@@ -955,19 +1103,47 @@ export function AgentWorkflowCanvas() {
 
   const handleCanvasDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return
+    openNodePalette(event)
+  }
+
+  const handleCanvasContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return
+    event.preventDefault()
+    openNodePalette(event)
+  }
+
+  const openNodePalette = (event: MouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    addAgentNode({
+    const screenX = clamp(event.clientX - rect.left, 12, Math.max(12, rect.width - 236))
+    const screenY = clamp(event.clientY - rect.top, 12, Math.max(12, rect.height - 210))
+    setNodePalette({
+      x: screenX,
+      y: screenY,
+      canvasPosition: {
       x: clamp(
-        event.clientX - rect.left - viewport.x - NODE_WIDTH / 2,
+        (event.clientX - rect.left - viewport.x) / viewport.scale - NODE_WIDTH / 2,
         CANVAS_MIN_COORD,
         CANVAS_MAX_COORD,
       ),
       y: clamp(
-        event.clientY - rect.top - viewport.y - NODE_HEIGHT / 2,
+        (event.clientY - rect.top - viewport.y) / viewport.scale - NODE_HEIGHT / 2,
         CANVAS_MIN_COORD,
         CANVAS_MAX_COORD,
       ),
+      },
     })
+  }
+
+  const handleCanvasWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) return
+    event.preventDefault()
+    const direction = event.deltaY > 0 ? -1 : 1
+    zoomCanvasAtPoint(
+      event.currentTarget,
+      event.clientX,
+      event.clientY,
+      viewport.scale + direction * CANVAS_ZOOM_STEP,
+    )
   }
 
   return (
@@ -1147,15 +1323,40 @@ export function AgentWorkflowCanvas() {
             style={{
               backgroundImage:
                 'linear-gradient(to right, hsl(var(--border) / 0.45) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--border) / 0.45) 1px, transparent 1px)',
-              backgroundSize: '24px 24px',
+              backgroundSize: `${24 * viewport.scale}px ${24 * viewport.scale}px`,
               backgroundPosition: `${viewport.x}px ${viewport.y}px`,
             }}
             onPointerDown={handleCanvasPointerDown}
             onPointerMove={handleCanvasPointerMove}
             onPointerUp={handleCanvasPointerUp}
             onPointerCancel={handleCanvasPointerUp}
+            onWheel={handleCanvasWheel}
             onDoubleClick={handleCanvasDoubleClick}
+            onContextMenu={handleCanvasContextMenu}
           >
+            <CanvasNodePalette
+              palette={nodePalette}
+              connecting={Boolean(connectingFromNodeId)}
+              onClose={() => setNodePalette(null)}
+              onAddAgent={() => nodePalette && addAgentNode(nodePalette.canvasPosition)}
+              onAddSoftware={() => nodePalette && addSoftwareCommandNode(nodePalette.canvasPosition)}
+              onAddApproval={() => nodePalette && addApprovalNode(nodePalette.canvasPosition)}
+              onAddCondition={() => nodePalette && addConditionNode(nodePalette.canvasPosition)}
+              onAddArtifact={() => nodePalette && addArtifactNode(nodePalette.canvasPosition)}
+            />
+            <CanvasMiniMap
+              nodes={nodes}
+              selectedNodeId={selectedNodeId}
+              onFocus={focusCanvasAt}
+            />
+            <CanvasViewportControls
+              scale={viewport.scale}
+              onZoomIn={() => zoomCanvasFromCenter(1)}
+              onZoomOut={() => zoomCanvasFromCenter(-1)}
+              onReset={resetCanvasView}
+              onFit={fitCanvasView}
+            />
+
             {connectingFromNodeId && (
               <div className="absolute left-3 top-3 z-20 rounded-md border bg-card px-3 py-2 text-xs shadow-sm">
                 正在连线：请选择目标节点
@@ -1205,9 +1406,10 @@ export function AgentWorkflowCanvas() {
 
             <div
               className="pointer-events-none absolute inset-0 origin-top-left"
-              style={{ transform: `translate(${viewport.x}px, ${viewport.y}px)` }}
+              style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}
             >
               <CanvasEdges nodes={nodes} edges={edges} />
+              <CanvasConnectionPreview nodes={nodes} connectionDrag={connectionDrag} />
               {nodes.map((node) => {
                   const agent = node.agentProfileId ? agentById.get(node.agentProfileId) : null
                   const softwareCommand = node.softwareCommandId
@@ -1220,15 +1422,24 @@ export function AgentWorkflowCanvas() {
                   const artifactType = artifactTypeOf(node)
                   const selected = selectedNodeId === node.id
                   const connecting = connectingFromNodeId === node.id
+                  const canReceiveConnection =
+                    Boolean(connectingFromNodeId || connectionDrag) &&
+                    connectingFromNodeId !== node.id &&
+                    connectionDrag?.sourceNodeId !== node.id
+                  const runState = canvasNodeRunState(nodeRun ?? null)
                   return (
                     <div
                       key={node.id}
                       role="button"
                       tabIndex={0}
+                      data-testid="workflow-canvas-node"
+                      data-node-id={node.id}
+                      data-run-state={runState}
                       onClick={() => handleNodeClick(node)}
                       onPointerDown={(event) => handlePointerDown(event, node)}
                       className={cn(
                         'pointer-events-auto group absolute flex cursor-grab flex-col rounded-md border bg-card p-2 text-left shadow-sm transition hover:border-primary/50 focus:outline-none focus:ring-2 focus:ring-ring/40',
+                        canvasNodeContainerClassName(runState),
                         selected && 'z-10 border-primary shadow-md ring-2 ring-primary/20',
                         connecting && 'z-20 border-amber-500 shadow-md ring-2 ring-amber-500/20',
                         drag?.nodeId === node.id && 'z-30 cursor-grabbing border-primary shadow-md',
@@ -1241,9 +1452,11 @@ export function AgentWorkflowCanvas() {
                     >
                     <button
                       type="button"
+                      data-testid="canvas-node-input-port"
                       aria-label="连接到这个节点"
                       title="连接到这个节点"
                       onPointerDown={(event) => event.stopPropagation()}
+                      onPointerUp={(event) => completeConnectionDrag(event, node)}
                       onClick={(event) => {
                         event.stopPropagation()
                         if (connectingFromNodeId && connectingFromNodeId !== node.id) {
@@ -1253,27 +1466,33 @@ export function AgentWorkflowCanvas() {
                         setSelectedNodeId(node.id)
                       }}
                       className={cn(
-                        'absolute -left-2 top-1/2 size-4 -translate-y-1/2 rounded-full border bg-background shadow-sm transition hover:scale-110 hover:border-primary hover:bg-primary hover:text-primary-foreground',
-                        connectingFromNodeId && connectingFromNodeId !== node.id
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border text-muted-foreground opacity-0 group-hover:opacity-100',
+                        'absolute -left-2.5 top-1/2 z-20 size-5 -translate-y-1/2 rounded-full border bg-background shadow-sm transition hover:scale-110 hover:border-primary hover:bg-primary hover:text-primary-foreground',
+                        canReceiveConnection
+                          ? 'border-primary bg-primary text-primary-foreground opacity-100 ring-4 ring-primary/10'
+                          : 'border-border text-muted-foreground opacity-60 group-hover:opacity-100',
                       )}
                     />
                     <button
                       type="button"
-                      aria-label="从这个节点开始连线"
-                      title="从这个节点开始连线"
-                      onPointerDown={(event) => event.stopPropagation()}
+                      data-testid="canvas-node-output-port"
+                      aria-label="拖拽从这个节点开始连线"
+                      title="拖拽从这个节点开始连线"
+                      onPointerDown={(event) => startConnectionDrag(event, node)}
+                      onPointerUp={(event) => {
+                        event.stopPropagation()
+                        if (connectionDrag?.pointerId === event.pointerId) {
+                          setConnectionDrag(null)
+                        }
+                      }}
                       onClick={(event) => {
                         event.stopPropagation()
-                        setConnectingFromNodeId((current) => (current === node.id ? '' : node.id))
                         setSelectedNodeId(node.id)
                       }}
                       className={cn(
-                        'absolute -right-2 top-1/2 size-4 -translate-y-1/2 rounded-full border bg-background shadow-sm transition hover:scale-110 hover:border-primary hover:bg-primary hover:text-primary-foreground',
+                        'absolute -right-2.5 top-1/2 z-20 size-5 -translate-y-1/2 rounded-full border bg-background shadow-sm transition hover:scale-110 hover:border-primary hover:bg-primary hover:text-primary-foreground',
                         connecting
                           ? 'border-amber-500 bg-amber-500 text-white opacity-100'
-                          : 'border-border text-muted-foreground opacity-0 group-hover:opacity-100',
+                          : 'border-border text-muted-foreground opacity-60 group-hover:opacity-100',
                       )}
                     />
                     <div className="flex items-start justify-between gap-1">
@@ -1323,6 +1542,7 @@ export function AgentWorkflowCanvas() {
                     <div className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
                       {displayDescription}
                     </div>
+                    <CanvasNodeStatusStrip nodeRun={nodeRun ?? null} />
                     <div className="mt-1 flex min-w-0 items-center gap-1">
                       <ArtifactChip type={artifactType} compact />
                       {customerVisibleOf(node) && (
@@ -1331,6 +1551,12 @@ export function AgentWorkflowCanvas() {
                         </Badge>
                       )}
                     </div>
+                    <CanvasDeliveryPreview
+                      node={node}
+                      nodeRun={nodeRun ?? null}
+                      artifactType={artifactType}
+                    />
+                    <CanvasNodeProgress nodeRun={nodeRun ?? null} artifactType={artifactType} />
                     <div className="mt-auto flex items-center justify-between gap-1">
                       <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
                         {nodeTypeLabel(node.type)}
@@ -1565,6 +1791,216 @@ export function AgentWorkflowCanvas() {
   )
 }
 
+function CanvasViewportControls({
+  scale,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+  onFit,
+}: {
+  scale: number
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onReset: () => void
+  onFit: () => void
+}) {
+  return (
+    <div
+      data-testid="canvas-viewport-controls"
+      className="pointer-events-auto absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-md border bg-card/95 p-1 shadow-sm backdrop-blur"
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <Button size="icon" variant="ghost" className="size-7" onClick={onZoomOut} title="缩小画布">
+        <Minus className="size-3.5" />
+      </Button>
+      <button
+        type="button"
+        data-testid="canvas-zoom-level"
+        className="h-7 min-w-12 rounded px-2 text-center font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={onReset}
+        title="重置为 100%"
+      >
+        {Math.round(scale * 100)}%
+      </button>
+      <Button size="icon" variant="ghost" className="size-7" onClick={onZoomIn} title="放大画布">
+        <Plus className="size-3.5" />
+      </Button>
+      <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-[11px]" onClick={onFit} title="适配视图">
+        <Maximize2 className="size-3.5" />
+        适配
+      </Button>
+    </div>
+  )
+}
+
+function CanvasNodePalette({
+  palette,
+  connecting,
+  onClose,
+  onAddAgent,
+  onAddSoftware,
+  onAddApproval,
+  onAddCondition,
+  onAddArtifact,
+}: {
+  palette: CanvasNodePaletteState | null
+  connecting: boolean
+  onClose: () => void
+  onAddAgent: () => void
+  onAddSoftware: () => void
+  onAddApproval: () => void
+  onAddCondition: () => void
+  onAddArtifact: () => void
+}) {
+  if (!palette) return null
+
+  const actions = [
+    { label: '智能体', description: '员工节点', icon: <Bot className="size-3.5" />, onClick: onAddAgent },
+    { label: '软件', description: 'CLI / MCP / 命令', icon: <Wrench className="size-3.5" />, onClick: onAddSoftware },
+    { label: '审批', description: '人工确认', icon: <UserCheck className="size-3.5" />, onClick: onAddApproval },
+    { label: '条件', description: '分支判断', icon: <GitBranch className="size-3.5" />, onClick: onAddCondition },
+    { label: '产物', description: '处理交付物', icon: <ClipboardCheck className="size-3.5" />, onClick: onAddArtifact },
+  ]
+
+  return (
+    <div
+      data-testid="canvas-node-palette"
+      className="pointer-events-auto absolute z-50 w-56 rounded-md border bg-card/95 p-2 shadow-lg backdrop-blur"
+      style={{ left: palette.x, top: palette.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold">添加节点</div>
+          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+            {connecting ? '会自动接到当前连线源' : '放到当前位置'}
+          </div>
+        </div>
+        <Button size="icon" variant="ghost" className="size-6" onClick={onClose} title="关闭">
+          <X className="size-3" />
+        </Button>
+      </div>
+      <div className="grid gap-1">
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs transition hover:border-primary/60 hover:bg-primary/5"
+            onClick={action.onClick}
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center rounded bg-primary/10 text-primary">
+              {action.icon}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{action.label}</span>
+              <span className="block truncate text-[10px] text-muted-foreground">
+                {action.description}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CanvasMiniMap({
+  nodes,
+  selectedNodeId,
+  onFocus,
+}: {
+  nodes: DraftNode[]
+  selectedNodeId: string
+  onFocus: (worldX: number, worldY: number) => void
+}) {
+  const mapWidth = 172
+  const mapHeight = 108
+  const padding = 14
+  const bounds = useMemo(() => {
+    if (nodes.length === 0) {
+      return { minX: 0, minY: 0, maxX: 1, maxY: 1, scale: 1 }
+    }
+    const minX = Math.min(...nodes.map((node) => node.position.x))
+    const minY = Math.min(...nodes.map((node) => node.position.y))
+    const maxX = Math.max(...nodes.map((node) => node.position.x + NODE_WIDTH))
+    const maxY = Math.max(...nodes.map((node) => node.position.y + NODE_HEIGHT))
+    const width = Math.max(1, maxX - minX)
+    const height = Math.max(1, maxY - minY)
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      scale: Math.min((mapWidth - padding * 2) / width, (mapHeight - padding * 2) / height),
+    }
+  }, [nodes])
+
+  if (nodes.length === 0) return null
+
+  const mapNode = (node: DraftNode) => ({
+    x: padding + (node.position.x - bounds.minX) * bounds.scale,
+    y: padding + (node.position.y - bounds.minY) * bounds.scale,
+    width: Math.max(8, NODE_WIDTH * bounds.scale),
+    height: Math.max(7, NODE_HEIGHT * bounds.scale),
+  })
+
+  const focusFromPoint = (event: MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = clamp(event.clientX - rect.left, padding, mapWidth - padding)
+    const y = clamp(event.clientY - rect.top, padding, mapHeight - padding)
+    const worldX = bounds.minX + (x - padding) / bounds.scale
+    const worldY = bounds.minY + (y - padding) / bounds.scale
+    onFocus(worldX, worldY)
+  }
+
+  return (
+    <div
+      data-testid="canvas-minimap"
+      className="pointer-events-auto absolute bottom-14 right-3 z-30 rounded-md border bg-card/95 p-2 shadow-sm backdrop-blur"
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span>画布总览</span>
+        <span>{nodes.length} 节点</span>
+      </div>
+      <div
+        data-testid="canvas-minimap-map"
+        className="relative overflow-hidden rounded border bg-muted/30"
+        style={{ width: mapWidth, height: mapHeight }}
+        onClick={focusFromPoint}
+      >
+        {nodes.map((node) => {
+          const box = mapNode(node)
+          return (
+            <div
+              key={node.id}
+              className={cn(
+                'absolute rounded-[2px] border',
+                node.id === selectedNodeId
+                  ? 'border-primary bg-primary/70'
+                  : 'border-foreground/20 bg-foreground/20',
+              )}
+              style={{
+                left: box.x,
+                top: box.y,
+                width: box.width,
+                height: box.height,
+              }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function CanvasEdges({ nodes, edges }: { nodes: DraftNode[]; edges: DraftEdge[] }) {
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   return (
@@ -1593,6 +2029,7 @@ function CanvasEdges({ nodes, edges }: { nodes: DraftNode[]; edges: DraftEdge[] 
         return (
           <path
             key={edge.id}
+            data-testid="workflow-canvas-edge"
             d={`M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`}
             className="fill-none stroke-muted-foreground/70"
             strokeWidth="1.5"
@@ -1600,6 +2037,39 @@ function CanvasEdges({ nodes, edges }: { nodes: DraftNode[]; edges: DraftEdge[] 
           />
         )
       })}
+    </svg>
+  )
+}
+
+function CanvasConnectionPreview({
+  nodes,
+  connectionDrag,
+}: {
+  nodes: DraftNode[]
+  connectionDrag: ConnectionDragState | null
+}) {
+  const source = connectionDrag
+    ? nodes.find((node) => node.id === connectionDrag.sourceNodeId)
+    : null
+  if (!source || !connectionDrag) return null
+  const x1 = source.position.x + NODE_WIDTH
+  const y1 = source.position.y + NODE_HEIGHT / 2
+  const x2 = connectionDrag.x
+  const y2 = connectionDrag.y
+  const mid = Math.max(36, Math.abs(x2 - x1) / 2)
+  return (
+    <svg
+      data-testid="workflow-canvas-connection-preview"
+      className="pointer-events-none absolute inset-0 size-full overflow-visible"
+    >
+      <path
+        d={`M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`}
+        className="fill-none stroke-primary"
+        strokeDasharray="7 5"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+      <circle cx={x2} cy={y2} r="4" className="fill-primary" />
     </svg>
   )
 }
@@ -1655,6 +2125,10 @@ function CustomerDeliverablesPanel({
 }) {
   const deliverables = nodes.filter((node) => customerVisibleOf(node))
   const typeCounts = countDeliverablesByType(deliverables)
+  const completedDeliverables = deliverables.filter(
+    (node) => nodeRunByNodeId.get(node.id)?.status === 'complete',
+  ).length
+  const pendingDeliverables = Math.max(0, deliverables.length - completedDeliverables)
   return (
     <section data-testid="canvas-customer-deliverables-panel">
       <Section icon={<Share2 className="size-3.5" />} title="客户交付物">
@@ -1662,10 +2136,15 @@ function CustomerDeliverablesPanel({
         <EmptyLine text="还没有设置客户可见的交付物" />
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-4 gap-1">
             <MiniMetric label="交付物" value={deliverables.length} />
             <MiniMetric label="类型" value={typeCounts.length} />
+            <MiniMetric label="已产出" value={completedDeliverables} />
+            <MiniMetric label="待产出" value={pendingDeliverables} />
+          </div>
+          <div className="grid grid-cols-2 gap-1">
             <MiniMetric label="校验" value={artifactValidations.length} />
+            <MiniMetric label="客户可见" value={deliverables.length} />
           </div>
           <div className="flex flex-wrap gap-1">
             {typeCounts.map(({ type, count }) => (
@@ -1699,6 +2178,7 @@ function CustomerDeliverableMini({
   nodeRun: WorkflowNodeRunRow | null
 }) {
   const type = artifactTypeOf(node)
+  const state = deliveryStateLabel(nodeRun)
   return (
     <button
       type="button"
@@ -1715,6 +2195,10 @@ function CustomerDeliverableMini({
       <div className="mt-1 truncate text-[10px] text-muted-foreground">
         {artifactTypeLabel(type)} · {artifactFileHint(type)}
       </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[10px]">
+        <span className="truncate text-muted-foreground">当前产物</span>
+        <span className="shrink-0 font-medium">{state}</span>
+      </div>
     </button>
   )
 }
@@ -1727,6 +2211,7 @@ function CustomerDeliverableRow({
   nodeRun: WorkflowNodeRunRow | null
 }) {
   const type = artifactTypeOf(node)
+  const state = deliveryStateLabel(nodeRun)
   return (
     <div className="rounded-md border bg-background px-2 py-2 text-[11px]">
       <div className="flex items-start justify-between gap-2">
@@ -1752,6 +2237,48 @@ function CustomerDeliverableRow({
           客户可见
         </Badge>
       </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <DeliveryDatum label="当前产物" value={`${artifactTypeLabel(type)} · ${artifactFileHint(type)}`} />
+        <DeliveryDatum label="验收状态" value={state} />
+      </div>
+    </div>
+  )
+}
+
+function CanvasDeliveryPreview({
+  node,
+  nodeRun,
+  artifactType,
+}: {
+  node: DraftNode
+  nodeRun: WorkflowNodeRunRow | null
+  artifactType: string
+}) {
+  return (
+    <div
+      data-testid="canvas-node-delivery-card"
+      className="mt-1 rounded-md border bg-background/70 px-2 py-1.5"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-[9px] font-medium text-muted-foreground">交付清单</span>
+        <span className="shrink-0 text-[9px] font-medium">{deliveryStateLabel(nodeRun)}</span>
+      </div>
+      <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px]">
+        {artifactTypeIcon(artifactType, 'size-3 shrink-0 text-primary')}
+        <span className="truncate">{artifactTypeLabel(artifactType)} · {artifactFileHint(artifactType)}</span>
+      </div>
+      <div className="mt-1 truncate text-[9px] text-muted-foreground">
+        {customerVisibleOf(node) ? '客户可见' : '内部产物'} · {deliveryTitleOf(node)}
+      </div>
+    </div>
+  )
+}
+
+function DeliveryDatum({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border bg-muted/20 px-2 py-1">
+      <div className="text-[9px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-[10px] font-medium">{value}</div>
     </div>
   )
 }
@@ -1763,6 +2290,203 @@ function ArtifactChip({ type, compact = false }: { type: string; compact?: boole
       <span className="truncate">{artifactTypeLabel(type)}</span>
     </Badge>
   )
+}
+
+function CanvasNodeStatusStrip({ nodeRun }: { nodeRun: WorkflowNodeRunRow | null }) {
+  const state = canvasNodeRunState(nodeRun)
+  const progress = canvasNodeProgress(nodeRun)
+  const meta = canvasNodeStatusMeta(state)
+
+  return (
+    <div
+      data-testid="canvas-node-status-strip"
+      data-node-phase={state}
+      className={cn('mt-1 rounded-md border px-2 py-1.5 text-[9px]', meta.className)}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1 font-medium">
+          {meta.icon}
+          <span className="truncate">运行状态 · {progress.label}</span>
+        </span>
+        <span className="shrink-0 font-mono">{progress.percent}%</span>
+      </div>
+      <div className="mt-1 flex min-w-0 items-center justify-between gap-2 text-muted-foreground">
+        <span className="line-clamp-1">{progress.step}</span>
+        <span className="shrink-0 rounded-full bg-background/70 px-1.5 py-0.5">
+          下一步：{meta.nextAction}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function CanvasNodeProgress({
+  nodeRun,
+  artifactType,
+}: {
+  nodeRun: WorkflowNodeRunRow | null
+  artifactType: string
+}) {
+  const progress = canvasNodeProgress(nodeRun)
+  return (
+    <div data-testid="canvas-node-progress" className="mt-2 space-y-1">
+      <div className="flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
+        <span className="truncate">
+          节点进度 · {progress.label}
+        </span>
+        <span className="font-mono text-[9px]">{progress.percent}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn('h-full rounded-full transition-all', progress.barClassName)}
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-1 text-[9px] text-muted-foreground">
+        <span className="line-clamp-1">{progress.step}</span>
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5">
+          交付 {artifactTypeLabel(artifactType)}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+type CanvasNodeRunState = 'idle' | 'queued' | 'running' | 'paused' | 'complete' | 'failed'
+
+function canvasNodeRunState(nodeRun: WorkflowNodeRunRow | null): CanvasNodeRunState {
+  if (!nodeRun) return 'idle'
+  const phase = nodeRun.progressStatus || nodeRun.status
+  if (nodeRun.status === 'complete' || phase === 'complete') return 'complete'
+  if (nodeRun.status === 'failed' || nodeRun.status === 'aborted' || phase === 'approval_rejected') {
+    return 'failed'
+  }
+  if (nodeRun.status === 'paused' || phase === 'waiting_for_approval') return 'paused'
+  if (nodeRun.status === 'running' || phase === 'running' || phase === 'approval_approved') return 'running'
+  return 'queued'
+}
+
+function canvasNodeContainerClassName(state: CanvasNodeRunState): string {
+  const classes: Record<CanvasNodeRunState, string> = {
+    idle: 'border-border',
+    queued: 'border-sky-500/50 bg-sky-500/5',
+    running: 'border-primary/80 bg-primary/10 shadow-primary/10 ring-2 ring-primary/15',
+    paused: 'border-amber-500/80 bg-amber-500/10 shadow-amber-500/10 ring-2 ring-amber-500/15',
+    complete: 'border-emerald-500/80 bg-emerald-500/10 shadow-emerald-500/10 ring-2 ring-emerald-500/15',
+    failed: 'border-destructive/80 bg-destructive/10 shadow-destructive/10 ring-2 ring-destructive/15',
+  }
+  return classes[state]
+}
+
+function canvasNodeStatusMeta(state: CanvasNodeRunState): {
+  icon: ReactNode
+  className: string
+  nextAction: string
+} {
+  const meta: Record<CanvasNodeRunState, { icon: ReactNode; className: string; nextAction: string }> = {
+    idle: {
+      icon: <Clock3 className="size-3 shrink-0" />,
+      className: 'border-border bg-background/70',
+      nextAction: '等待运行',
+    },
+    queued: {
+      icon: <Clock3 className="size-3 shrink-0 text-sky-600" />,
+      className: 'border-sky-500/30 bg-sky-500/10',
+      nextAction: '等待上游',
+    },
+    running: {
+      icon: <Activity className="size-3 shrink-0 text-primary" />,
+      className: 'border-primary/30 bg-primary/10',
+      nextAction: '继续执行',
+    },
+    paused: {
+      icon: <UserCheck className="size-3 shrink-0 text-amber-600" />,
+      className: 'border-amber-500/30 bg-amber-500/10',
+      nextAction: '人工审批',
+    },
+    complete: {
+      icon: <CheckCircle2 className="size-3 shrink-0 text-emerald-600" />,
+      className: 'border-emerald-500/30 bg-emerald-500/10',
+      nextAction: '交付检查',
+    },
+    failed: {
+      icon: <AlertCircle className="size-3 shrink-0 text-destructive" />,
+      className: 'border-destructive/30 bg-destructive/10',
+      nextAction: '处理失败',
+    },
+  }
+  return meta[state]
+}
+
+function canvasNodeProgress(nodeRun: WorkflowNodeRunRow | null): {
+  label: string
+  step: string
+  percent: number
+  barClassName: string
+} {
+  if (!nodeRun) {
+    return {
+      label: '待运行',
+      step: '等待流程启动',
+      percent: 8,
+      barClassName: 'bg-muted-foreground/45',
+    }
+  }
+  const phase = nodeRun.progressStatus || nodeRun.status
+  if (nodeRun.status === 'complete' || phase === 'complete') {
+    return {
+      label: '已完成',
+      step: nodeRun.currentStep ?? '产物已生成',
+      percent: 100,
+      barClassName: 'bg-emerald-500',
+    }
+  }
+  if (nodeRun.status === 'failed' || nodeRun.status === 'aborted' || phase === 'approval_rejected') {
+    return {
+      label: nodeRun.status === 'aborted' ? '已取消' : '失败',
+      step: nodeRun.error ?? nodeRun.currentStep ?? '需要处理失败原因',
+      percent: 100,
+      barClassName: 'bg-destructive',
+    }
+  }
+  if (nodeRun.status === 'paused' || phase === 'waiting_for_approval') {
+    return {
+      label: '等待审批',
+      step: nodeRun.currentStep ?? '等待人工确认后继续',
+      percent: 66,
+      barClassName: 'bg-amber-500',
+    }
+  }
+  if (nodeRun.status === 'running' || phase === 'running') {
+    return {
+      label: '正在执行',
+      step: nodeRun.currentStep ?? '正在调用智能体或工具',
+      percent: 45,
+      barClassName: 'bg-primary',
+    }
+  }
+  if (phase === 'approval_approved') {
+    return {
+      label: '审批已通过',
+      step: nodeRun.currentStep ?? '准备继续执行',
+      percent: 78,
+      barClassName: 'bg-primary',
+    }
+  }
+  if (phase === 'queued_for_partial_rerun') {
+    return {
+      label: '等待重跑',
+      step: nodeRun.currentStep ?? '这个节点被加入局部重跑队列',
+      percent: 18,
+      barClassName: 'bg-sky-500',
+    }
+  }
+  return {
+    label: '排队中',
+    step: nodeRun.currentStep ?? '等待上游节点完成',
+    percent: 18,
+    barClassName: 'bg-muted-foreground/60',
+  }
 }
 
 function CanvasQuickEditor({
@@ -1780,6 +2504,12 @@ function CanvasQuickEditor({
   onRemoveNode: (nodeId: string) => void
   onStartConnect: (nodeId: string) => void
 }) {
+  const [collapsed, setCollapsed] = useState(false)
+
+  useEffect(() => {
+    setCollapsed(false)
+  }, [node?.id])
+
   if (!node) return null
 
   const changeNodeType = (value: string) => {
@@ -1846,6 +2576,30 @@ function CanvasQuickEditor({
     })
   }
 
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        data-testid="canvas-quick-editor-collapsed"
+        className="pointer-events-auto absolute right-3 top-3 z-40 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-md border bg-card/95 px-3 py-2 text-left text-xs shadow-sm backdrop-blur transition hover:border-primary/50"
+        onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation()
+          setCollapsed(false)
+        }}
+        title="展开画布内编辑"
+      >
+        <span className="min-w-0 flex-1 truncate">
+          画布内编辑 · {node.label || nodeTypeLabel(node.type)}
+        </span>
+        <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[9px]">
+          展开
+        </Badge>
+      </button>
+    )
+  }
+
   return (
     <div
       data-testid="canvas-quick-editor"
@@ -1859,9 +2613,21 @@ function CanvasQuickEditor({
           <div className="truncate text-sm font-semibold">画布内编辑</div>
           <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{nodeTypeLabel(node.type)}</div>
         </div>
-        <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-          {artifactTypeLabel(artifactTypeOf(node))}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
+            {artifactTypeLabel(artifactTypeOf(node))}
+          </Badge>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            data-testid="canvas-quick-editor-collapse"
+            onClick={() => setCollapsed(true)}
+          >
+            收起
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -2990,6 +3756,15 @@ function deliveryDescriptionOf(node: DraftNode): string {
     stringField(node.outputContract, 'description') ||
     nodeDescription(node)
   )
+}
+
+function deliveryStateLabel(nodeRun: WorkflowNodeRunRow | null): string {
+  if (!nodeRun) return '待产出'
+  if (nodeRun.status === 'complete') return '已产出'
+  if (nodeRun.status === 'failed' || nodeRun.status === 'aborted') return '需处理'
+  if (nodeRun.status === 'running') return '生成中'
+  if (nodeRun.status === 'paused') return '待审批'
+  return '排队中'
 }
 
 function countDeliverablesByType(nodes: DraftNode[]): Array<{ type: string; count: number }> {

@@ -40,6 +40,10 @@
     "node_modules",
     "electron",
     "dist-electron",
+    "tmp",
+    "output",
+    ".agenthub-data",
+    ".agenthub-data-e2e",
     "learn-claude-code",
     ".pnpm-store",
     ".understand-anything"

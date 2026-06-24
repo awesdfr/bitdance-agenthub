@@ -9,7 +9,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { db, schema } from '@/db/client'
 import type { ConversationWithMeta, MessageRow, ModelProfileRow } from '@/db/schema'
 import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
-import { estimateTokens, getModelLimits } from '@/shared/model-registry'
+import { estimateTokens } from '@/shared/model-registry'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
@@ -26,6 +26,10 @@ import {
 } from './ids'
 import { pendingDispatchPlans } from './pending-dispatch-plans'
 import { IS_WINDOWS } from './platform'
+import {
+  getModelProfileContextWindow,
+  planModelProfilePromptCache,
+} from './prompt-cache-strategy-service'
 import { resolveSecretValue } from './security-service'
 import { isPathSafe } from './workspace-utils'
 
@@ -36,8 +40,6 @@ const DATA_DIR =
 const WORKSPACES_ROOT = path.join(DATA_DIR, 'workspaces')
 const MODEL_ONLY_SYSTEM_PROMPT =
   '你是 AgentHub 中的普通模型聊天助手。只进行自然语言对话，不假装自己拥有智能体工具、电脑操作、文件读写或多 Agent 编排能力。默认使用中文回答，除非用户明确要求其他语言。'
-const APPEND_ONLY_MODEL_CHAT_LIMIT = 2000
-const DEFAULT_MODEL_CHAT_LIMIT = 30
 
 async function getAgentRunner() {
   return import('./agent-runner')
@@ -830,15 +832,14 @@ async function buildModelOnlyChatMessages(args: {
   triggerMessageId: string
   profile: ModelProfileRow
 }): Promise<ChatCompletionMessageParam[]> {
-  const appendOnly = shouldPreferModelOnlyAppendOnly(args.profile)
-  const limit = appendOnly ? APPEND_ONLY_MODEL_CHAT_LIMIT : DEFAULT_MODEL_CHAT_LIMIT
+  const promptCachePlan = planModelProfilePromptCache(args.profile)
   const recent = await db.query.messages.findMany({
     where: and(
       eq(schema.messages.conversationId, args.conversationId),
       eq(schema.messages.status, 'complete'),
     ),
     orderBy: [desc(schema.messages.createdAt)],
-    limit,
+    limit: promptCachePlan.historyLimit,
   })
   const messages: ChatCompletionMessageParam[] = [
     {
@@ -863,43 +864,16 @@ async function buildModelOnlyChatMessages(args: {
     const content = trigger ? renderModelOnlyParts(trigger.parts) : ''
     if (content) messages.push({ role: 'user', content })
   }
-  return appendOnly ? trimChatMessagesToModelWindow(messages, args.profile) : messages
-}
-
-function shouldPreferModelOnlyAppendOnly(profile: ModelProfileRow): boolean {
-  const normalizedProvider = profile.provider.toLowerCase()
-  const normalizedModel = profile.model.toLowerCase()
-  const normalizedBaseUrl = profile.baseUrl.toLowerCase()
-  const contextWindow = getModelProfileContextWindow(profile)
-  return (
-    normalizedProvider === 'deepseek' ||
-    normalizedModel.includes('deepseek') ||
-    (contextWindow >= 256_000 && normalizedBaseUrl.includes('deepseek'))
-  )
-}
-
-function getModelProfileContextWindow(profile: ModelProfileRow): number {
-  if (profile.contextWindow && profile.contextWindow > 0) return profile.contextWindow
-  const provider =
-    profile.provider === 'deepseek' ||
-    profile.provider === 'openai' ||
-    profile.provider === 'anthropic' ||
-    profile.provider === 'volcano-ark' ||
-    profile.provider === 'openai-compatible'
-      ? profile.provider
-      : profile.provider === 'custom' || profile.provider === 'openrouter' || profile.provider === 'ollama'
-        ? 'openai-compatible'
-        : undefined
-  return getModelLimits(provider, profile.model).contextWindow
+  return promptCachePlan.appendOnly ? trimChatMessagesToModelWindow(messages, args.profile) : messages
 }
 
 function trimChatMessagesToModelWindow(
   messages: ChatCompletionMessageParam[],
   profile: ModelProfileRow,
 ): ChatCompletionMessageParam[] {
+  const promptCachePlan = planModelProfilePromptCache(profile)
   const contextWindow = getModelProfileContextWindow(profile)
-  const reserve = Math.min(64_000, Math.max(4096, Math.floor(contextWindow * 0.08)))
-  const budget = Math.max(0, contextWindow - reserve)
+  const budget = Math.max(0, contextWindow - promptCachePlan.reserveTokens)
   let total = estimateChatMessages(messages)
   if (total <= budget) return messages
 

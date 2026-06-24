@@ -42,6 +42,21 @@ export interface RuntimeUsageSummary {
   contextSummaryCount: number
 }
 
+export interface PromptCacheStrategySummary {
+  mode: 'append_only_stable_prefix'
+  label: string
+  cacheablePrefixTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  cacheHitRate: number
+  targetHitRate: number
+  effectiveInputCostPercent: number
+  estimatedSavedUsd: number
+  targetInputCostPercent: number
+  stablePrefixSections: string[]
+  recommendations: string[]
+}
+
 export interface ProjectContextUsageSummary {
   mode: 'lazy_files'
   fileReadCharLimit: number
@@ -57,6 +72,7 @@ export interface UsageSummary {
   allTime: UsageBucket
   context: ContextUsageSummary
   runtime: RuntimeUsageSummary
+  promptCache: PromptCacheStrategySummary
   projectContext: ProjectContextUsageSummary
   topConversations: Array<{
     id: string
@@ -65,11 +81,21 @@ export interface UsageSummary {
     runs: number
     updatedAt: number
   }>
-  byAgent: Array<{ agentId: string; name: string; totalTokens: number; runs: number }>
+  byAgent: Array<{
+    agentId: string
+    name: string
+    totalTokens: number
+    runs: number
+    estimatedCostUsd: number
+    sharePercent: number
+    avgTokensPerRun: number
+  }>
   byModel: Array<
     UsageBucket & {
       model: string
       estimatedCostUsd: number
+      estimatedUncachedPromptCostUsd: number
+      estimatedSavedUsd: number
       sharePercent: number
       avgTokensPerRun: number
       cacheHitRate: number
@@ -138,13 +164,17 @@ function contextStatus(percent: number): RuntimeUsageSummary['contextStatus'] {
   return 'normal'
 }
 
-function estimateCostUsd(bucket: UsageBucket, topModel?: string): number {
+function pricingForModel(topModel?: string) {
   const model = topModel?.toLowerCase() ?? ''
-  const rates = model.includes('deepseek-v4-pro')
+  return model.includes('deepseek-v4-pro')
     ? { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheCreation: 0.435 }
     : model.includes('deepseek')
       ? { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheCreation: 0.14 }
       : { input: 2.5, output: 10, cacheRead: 0.25, cacheCreation: 1.25 }
+}
+
+function estimateCostUsd(bucket: UsageBucket, topModel?: string): number {
+  const rates = pricingForModel(topModel)
 
   return (
     (bucket.inputTokens / 1_000_000) * rates.input +
@@ -152,6 +182,61 @@ function estimateCostUsd(bucket: UsageBucket, topModel?: string): number {
     (bucket.cacheReadTokens / 1_000_000) * rates.cacheRead +
     (bucket.cacheCreationTokens / 1_000_000) * rates.cacheCreation
   )
+}
+
+function estimatePromptCacheSavingsUsd(bucket: UsageBucket, topModel?: string) {
+  const rates = pricingForModel(topModel)
+  const cacheablePrefixTokens = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
+  const uncachedPromptCost = (cacheablePrefixTokens / 1_000_000) * rates.input
+  const actualPromptCost =
+    (bucket.inputTokens / 1_000_000) * rates.input +
+    (bucket.cacheReadTokens / 1_000_000) * rates.cacheRead +
+    (bucket.cacheCreationTokens / 1_000_000) * rates.cacheCreation
+
+  return {
+    actualPromptCost,
+    uncachedPromptCost,
+    estimatedSavedUsd: Math.max(0, uncachedPromptCost - actualPromptCost),
+  }
+}
+
+function summarizePromptCache(bucket: UsageBucket, topModel?: string): PromptCacheStrategySummary {
+  const rates = pricingForModel(topModel)
+  const cacheablePrefixTokens = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
+  const uncachedPromptCost = (cacheablePrefixTokens / 1_000_000) * rates.input
+  const actualPromptCost =
+    (bucket.inputTokens / 1_000_000) * rates.input +
+    (bucket.cacheReadTokens / 1_000_000) * rates.cacheRead +
+    (bucket.cacheCreationTokens / 1_000_000) * rates.cacheCreation
+  const cacheHitRate = cacheablePrefixTokens > 0 ? bucket.cacheReadTokens / cacheablePrefixTokens : 0
+  const effectiveInputCostPercent =
+    uncachedPromptCost > 0 ? Math.round((actualPromptCost / uncachedPromptCost) * 1000) / 10 : 100
+  const estimatedSavedUsd = Math.max(0, uncachedPromptCost - actualPromptCost)
+
+  return {
+    mode: 'append_only_stable_prefix',
+    label: '追加式上下文缓存',
+    cacheablePrefixTokens,
+    cacheReadTokens: bucket.cacheReadTokens,
+    cacheCreationTokens: bucket.cacheCreationTokens,
+    cacheHitRate,
+    targetHitRate: 0.9,
+    effectiveInputCostPercent,
+    estimatedSavedUsd,
+    targetInputCostPercent: 20,
+    stablePrefixSections: [
+      '系统提示词与员工身份',
+      '工具、Skills、MCP 和 CLI 清单',
+      '项目索引与置顶记忆',
+      '上一轮完整对话前缀',
+    ],
+    recommendations: [
+      '同一会话继续追加消息，不要每轮重建 prompt。',
+      '系统提示词、工具清单和项目索引保持字节级稳定。',
+      '变化内容放在尾部，长会话接近上限时再摘要压缩。',
+      '模型支持 prefix cache 时优先复用同一模型与同一出口。',
+    ],
+  }
 }
 
 export async function GET() {
@@ -305,6 +390,7 @@ export async function GET() {
   const byModel = Array.from(byModelMap.entries())
     .map(([model, bucket]) => {
       const cacheBase = bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
+      const savings = estimatePromptCacheSavingsUsd(bucket, model)
       return {
         model,
         inputTokens: bucket.inputTokens,
@@ -314,6 +400,8 @@ export async function GET() {
         totalTokens: bucket.totalTokens,
         runs: bucket.runs,
         estimatedCostUsd: estimateCostUsd(bucket, model),
+        estimatedUncachedPromptCostUsd: savings.uncachedPromptCost,
+        estimatedSavedUsd: savings.estimatedSavedUsd,
         sharePercent: allTime.totalTokens > 0 ? bucket.totalTokens / allTime.totalTokens : 0,
         avgTokensPerRun: bucket.runs > 0 ? bucket.totalTokens / bucket.runs : 0,
         cacheHitRate: cacheBase > 0 ? bucket.cacheReadTokens / cacheBase : 0,
@@ -346,6 +434,7 @@ export async function GET() {
       compressionPercent,
       contextSummaryCount: contextSummaryRows.length,
     },
+    promptCache: summarizePromptCache(allTime, topModel),
     projectContext: {
       mode: 'lazy_files',
       fileReadCharLimit: FILE_READ_CHAR_LIMIT,
@@ -379,6 +468,9 @@ export async function GET() {
         name: agentNameById.get(agentId) ?? agentId,
         totalTokens: bucket.totalTokens,
         runs: bucket.runs,
+        estimatedCostUsd: estimateCostUsd(bucket, topModel),
+        sharePercent: allTime.totalTokens > 0 ? bucket.totalTokens / allTime.totalTokens : 0,
+        avgTokensPerRun: bucket.runs > 0 ? bucket.totalTokens / bucket.runs : 0,
       }))
       .sort((a, b) => b.totalTokens - a.totalTokens),
     byModel,

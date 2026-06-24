@@ -1,6 +1,6 @@
 'use client'
 
-export type UiCommand = 'open-settings' | 'open-agents'
+export type UiCommand = 'open-settings' | 'open-agents' | 'open-agent-settings'
 
 const UI_COMMAND_EVENT = 'agenthub:ui-command'
 

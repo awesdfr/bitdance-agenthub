@@ -15909,6 +15909,21 @@ export interface RuntimeUsageSummary {
   contextSummaryCount: number
 }
 
+export interface PromptCacheStrategySummary {
+  mode: 'append_only_stable_prefix'
+  label: string
+  cacheablePrefixTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  cacheHitRate: number
+  targetHitRate: number
+  effectiveInputCostPercent: number
+  estimatedSavedUsd: number
+  targetInputCostPercent: number
+  stablePrefixSections: string[]
+  recommendations: string[]
+}
+
 export interface ProjectContextUsageSummary {
   mode: 'lazy_files'
   fileReadCharLimit: number
@@ -15924,6 +15939,7 @@ export interface UsageSummary {
   allTime: UsageBucket
   context: ContextUsageSummary
   runtime: RuntimeUsageSummary
+  promptCache: PromptCacheStrategySummary
   projectContext: ProjectContextUsageSummary
   topConversations: Array<{
     id: string
@@ -15932,11 +15948,21 @@ export interface UsageSummary {
     runs: number
     updatedAt: number
   }>
-  byAgent: Array<{ agentId: string; name: string; totalTokens: number; runs: number }>
+  byAgent: Array<{
+    agentId: string
+    name: string
+    totalTokens: number
+    runs: number
+    estimatedCostUsd: number
+    sharePercent: number
+    avgTokensPerRun: number
+  }>
   byModel: Array<
     UsageBucket & {
       model: string
       estimatedCostUsd: number
+      estimatedUncachedPromptCostUsd: number
+      estimatedSavedUsd: number
       sharePercent: number
       avgTokensPerRun: number
       cacheHitRate: number
@@ -15946,6 +15972,49 @@ export interface UsageSummary {
 
 export async function fetchUsageSummary(): Promise<UsageSummary> {
   return json<UsageSummary>(fetch('/api/usage/summary'))
+}
+
+export type RunActivityKind = 'employee_run' | 'agent_run'
+
+export interface RunActivitySummaryRun {
+  id: string
+  kind: RunActivityKind
+  title: string
+  status: string
+  agentName: string | null
+  phase: string
+  currentStep: string
+  startedAt: number
+  updatedAt: number
+  artifactCount: number
+  toolActionCount: number
+}
+
+export interface RunActivitySummaryEvent {
+  id: string
+  runId: string
+  kind: 'employee_event' | 'agent_run'
+  phase: string
+  status: string
+  message: string
+  createdAt: number
+}
+
+export interface RunActivitySummary {
+  totals: {
+    running: number
+    queued: number
+    completedToday: number
+    failedToday: number
+    toolActions: number
+    artifacts: number
+  }
+  recentRuns: RunActivitySummaryRun[]
+  recentEvents: RunActivitySummaryEvent[]
+}
+
+export async function fetchRunActivitySummary(): Promise<RunActivitySummary> {
+  return json<RunActivitySummary>(fetch('/api/run-activity/summary'))
 }
 
 // ─── Mobile companion connection hints ─────────────

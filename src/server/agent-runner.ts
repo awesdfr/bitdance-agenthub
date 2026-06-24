@@ -58,6 +58,7 @@ import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
+import { planAgentPromptCache } from './prompt-cache-strategy-service'
 import { getAppSettings } from './settings-service'
 import {
   evaluateTaskResultReport,
@@ -2010,15 +2011,15 @@ async function buildAdapterInput(
     const promptEstimate =
       estimateTokens(systemPromptWithWorkspace) + estimateTokens(prompt) + 512 /* margin */
     const historyBudget = Math.max(0, limits.contextWindow - limits.outputReserve - promptEstimate)
-    const appendOnlyHistory = shouldPreferAppendOnlyPrefixCache(
-      agent.modelProvider,
-      agent.modelId,
-      limits.contextWindow,
-    )
+    const promptCachePlan = planAgentPromptCache({
+      provider: agent.modelProvider,
+      modelId: agent.modelId,
+      contextWindow: limits.contextWindow,
+    })
     history = await buildHistoryFor(agent.id, args.conversationId, {
       excludeMessageId: args.triggerMessageId,
       tokenBudget: historyBudget,
-      appendOnly: appendOnlyHistory,
+      appendOnly: promptCachePlan.appendOnly,
     }).catch((err) => {
       console.warn('[agent-runner] buildHistoryFor failed; continuing without history', err)
       return []
@@ -2054,16 +2055,6 @@ async function buildAdapterInput(
           }
         : undefined,
   }
-}
-
-/** 按 agent 的 adapter/provider 选对应字段。Claude Code 走 anthropic，Codex 走 openai，custom 按 modelProvider 走。 */
-function shouldPreferAppendOnlyPrefixCache(
-  provider: AgentRow['modelProvider'],
-  modelId: string | null,
-  contextWindow: number,
-): boolean {
-  const normalizedModel = (modelId ?? '').toLowerCase()
-  return provider === 'deepseek' || (normalizedModel.includes('deepseek') && contextWindow >= 256_000)
 }
 
 function pickSettingsKey(

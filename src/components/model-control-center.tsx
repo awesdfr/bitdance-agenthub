@@ -232,6 +232,14 @@ export function ModelControlCenter() {
     [networks, selectedNetworkId],
   )
 
+  const upsertModelLocally = useCallback((model: ModelProfileRow) => {
+    setModels((current) => [model, ...current.filter((item) => item.id !== model.id)])
+  }, [])
+
+  const removeModelLocally = useCallback((modelId: string) => {
+    setModels((current) => current.filter((model) => model.id !== modelId))
+  }, [])
+
   const modelsByNetwork = useMemo(() => {
     const counts = new Map<string, number>()
     for (const model of models) {
@@ -322,6 +330,7 @@ export function ModelControlCenter() {
         contextWindow: parseNullableInt(modelDraft.contextWindow),
         networkProfileId: modelDraft.networkProfileId || selectedNetworkId || null,
       })
+      upsertModelLocally(model)
       if (secret) {
         await Promise.all([
           createCredentialScope({
@@ -342,6 +351,7 @@ export function ModelControlCenter() {
       setSelectedModelId(model.id)
       setNotice(secret ? '模型配置已创建，密钥已自动绑定' : '模型配置已创建')
       await reload()
+      upsertModelLocally(model)
     } catch (err) {
       setError(formatError(err))
     } finally {
@@ -367,10 +377,12 @@ export function ModelControlCenter() {
         supportsJsonMode: modelDraft.supportsJsonMode,
         networkProfileId: modelDraft.networkProfileId || null,
       })
+      upsertModelLocally(model)
       setSelectedModelId(model.id)
       setAddModelOpen(false)
       setNotice('模型已添加，可以直接在 Agent 或普通对话里选择使用')
       await reload()
+      upsertModelLocally(model)
     } catch (err) {
       setError(formatError(err))
     } finally {
@@ -389,10 +401,12 @@ export function ModelControlCenter() {
     setSaving(`delete-model:${model.id}`)
     try {
       await deleteModelProfile(model.id)
+      removeModelLocally(model.id)
       setPendingDeleteModelId(null)
       setSelectedModelId((current) => (current === model.id ? '' : current))
       setNotice(`已删除模型：${model.name}`)
       await reload()
+      removeModelLocally(model.id)
     } catch (err) {
       setError(formatError(err))
     } finally {

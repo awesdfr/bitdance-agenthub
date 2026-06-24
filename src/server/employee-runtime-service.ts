@@ -4,6 +4,7 @@ import { asc, desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type {
+  AgentEnvironment,
   AgentProfileRow,
   AgentDiaryEntryRow,
   AuditLogRow,
@@ -33,6 +34,7 @@ import {
   retrieveRelevantMemories,
   type RetrievedMemory,
 } from '@/server/agent-memory-service'
+import { buildAgentEnvironment } from '@/server/agent-environment-service'
 import {
   listAgentDiaryEntries,
   listContinuationPlans,
@@ -233,6 +235,21 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     loopTrace: [],
     runtimeControlActionIds: [],
   }
+  const runtimeEnvironment = await buildAgentEnvironment({
+    agentProfileId: agent.id,
+    employeeRunId: runId,
+  })
+  const runtimeEnvironmentSummary = summarizeRuntimeEnvironmentForEvent(
+    runtimeEnvironment,
+    context.computerSession,
+  )
+  await recordEmployeeEvent(
+    runId,
+    'phase',
+    'runtime_environment',
+    'Agent runtime workstation environment was prepared.',
+    runtimeEnvironmentSummary,
+  )
   for (let index = 0; index < RUNTIME_PHASES.length; index++) {
     const phase = RUNTIME_PHASES[index]
     await runPhase(runId, agent, run, phase, index, context)
@@ -276,6 +293,7 @@ export async function executeEmployeeRun(runId: string): Promise<EmployeeRunRow>
     retrievedMemoryIds: context.retrievedMemories.map(({ item }) => item.id),
     contextSnapshotId: contextSnapshot.id,
     promptTemplateVersionId: contextSnapshot.promptTemplateVersionId,
+    runtimeEnvironment: runtimeEnvironmentSummary,
     cliRunIds: cliRuns.map((row) => row.id),
     runtimeControlActionIds: context.runtimeControlActionIds,
     loopTrace: context.loopTrace,
@@ -1011,6 +1029,32 @@ function getBooleanPath(obj: JsonObject, pathParts: string[]): boolean {
     current = (current as Record<string, unknown>)[key]
   }
   return current === true
+}
+
+function summarizeRuntimeEnvironmentForEvent(
+  environment: AgentEnvironment,
+  computerSession: ComputerSessionRow | null,
+): JsonObject {
+  return {
+    workspacePath: environment.fs.workspace,
+    homePath: environment.fs.home,
+    tempPath: environment.env.custom.AGENTHUB_TEMP ?? environment.env.visible.TEMP ?? null,
+    browserProfilePath: computerSession?.browserProfilePath ?? null,
+    workstationMode: computerSession?.mode ?? 'preview',
+    workstationStatus: computerSession?.status ?? 'preview',
+    networkMode: environment.network.proxy ? 'proxy' : 'direct',
+    proxyConfigured: Boolean(environment.network.proxy),
+    allowedDomainCount: environment.network.allowedDomains.length,
+    mountCount: environment.fs.mounts.length,
+    visibleEnvCount: Object.keys(environment.env.visible).length,
+    customEnvNames: Object.keys(environment.env.custom).sort(),
+    redactedSecretNames: environment.env.redactedSecretNames,
+    isolation: {
+      userHomeVisible: environment.isolation.userHomeVisible,
+      globalEnvVisible: environment.isolation.globalEnvVisible,
+      secretValuesExposed: environment.isolation.secretValuesExposed,
+    },
+  }
 }
 
 function hashJson(value: unknown): string {
